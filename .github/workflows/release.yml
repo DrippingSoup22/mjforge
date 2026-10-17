@@ -94,7 +94,7 @@ jobs:
             macOS) exe=./MJForge.app/Contents/MacOS/MJForge ;;
           esac
           version=$("$exe" --version)
-          echo "$version"
+          echo "::notice title=$PKG::$version"
           [[ "$version" == *"MuJoCo 3.16.0"* ]] || { echo "::error::MuJoCo runtime not found"; exit 1; }
           [[ "$version" =~ \(([1-9][0-9]*)\ plugin ]] || { echo "::error::MuJoCo plugins not loaded"; exit 1; }
           "$exe" --template quadruped --validate
@@ -103,15 +103,16 @@ jobs:
           case "$RUNNER_OS" in
             Linux)
               ldd ./mjforge
-              echo "Needs glibc $(objdump -T mjforge libmujoco.so.* | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 | cut -d_ -f2)"
+              echo "::notice title=$PKG::needs glibc $(objdump -T mjforge libmujoco.so.* | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 | cut -d_ -f2)"
               xvfb-run -a -s "-screen 0 1280x800x24" ./mjforge --template hexapod --screenshot "$RUNNER_TEMP/window.png" --frames 4
               test -s "$RUNNER_TEMP/window.png" ;;
             macOS)
               otool -L MJForge.app/Contents/MacOS/MJForge
-              lipo -archs MJForge.app/Contents/MacOS/MJForge
-              plutil -lint MJForge.app/Contents/Info.plist ;;
+              plutil -lint MJForge.app/Contents/Info.plist
+              minos=$(otool -l MJForge.app/Contents/MacOS/MJForge | awk '/minos/ {print $2; exit}')
+              echo "::notice title=$PKG::$(lipo -archs MJForge.app/Contents/MacOS/MJForge), macOS $minos or newer" ;;
             Windows)
-              ls *.dll
+              echo "::notice title=$PKG::$(ls *.dll | tr '\n' ' ')"
               test -f vcruntime140.dll && test -f msvcp140.dll ;;  # runs without the Visual C++ redistributable
           esac
 
@@ -123,7 +124,7 @@ jobs:
             macOS) asset="$PKG.zip"; ditto -c -k --sequesterRsrc --keepParent "$PKG" "$asset" ;;
             Windows) asset="$PKG.zip"; 7z a -tzip "$asset" "$PKG" > /dev/null ;;
           esac
-          ls -l "$asset"
+          echo "::notice title=$PKG::$asset is $(du -h "$asset" | cut -f1)"
           echo "ASSET=stage/$asset" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v7
