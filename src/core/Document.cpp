@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <functional>
 #include <iterator>
 
@@ -38,6 +39,23 @@ bool actuatorHasActivation(const Actuator& a) {
     case ActuatorType::General: return a.dyntype != DynType::None;
     default: return false;
   }
+}
+
+int actuatorActDim(const Actuator& a) {
+  if (a.type != ActuatorType::DcMotor) return actuatorHasActivation(a) ? 1 : 0;
+  // Slots: current (inductance), slew, integral, temperature, bristle (mjs_setToDCMotor).
+  return (a.inductance.x > 0 || a.inductance.y > 0) + (a.controller[3] > 0) + (a.controller[1] > 0) +
+         (a.thermal[0] > 0 || a.thermal[1] > 0 || a.thermal[2] > 0) + (a.lugre[0] > 0);
+}
+
+void dcMotorConstants(const Actuator& a, double* K, double* R) {
+  double Kt = a.motorconst.x, Ke = a.motorconst.y, r = a.resistance;
+  double vn = a.nominal.x, tau0 = a.nominal.y, w0 = a.nominal.z;
+  if (vn > 0 && Ke <= 0 && w0 > 0) Ke = vn / w0;
+  double k = (Kt > 0 && Ke > 0) ? std::sqrt(Kt * Ke) : Kt > 0 ? Kt : Ke;
+  if (r <= 0 && vn > 0 && tau0 > 0 && k > 0) r = k * vn / tau0;
+  *K = k > 0 ? k : 0;
+  *R = r > 0 ? r : 0;
 }
 
 double actuatorDefaultKp(ActuatorType t) {

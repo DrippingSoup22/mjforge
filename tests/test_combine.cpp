@@ -3,6 +3,7 @@
 
 #include <cmath>
 
+#include "analysis/Analysis.h"
 #include "core/Merge.h"
 #include "core/MjcfWriter.h"
 #include "core/Ops.h"
@@ -270,4 +271,44 @@ TEST_CASE("merge: replacing the environment, self merges, asset identity, lost c
   mergeDocument(self, self, {});
   CHECK(self.bodies.size() == 2 * bodies - 1);
   compile(self);
+}
+
+TEST_CASE("DC motors: import, export, analysis and a fresh one") {
+  const char* xml = R"(<mujoco>
+    <worldbody>
+      <body name="base" pos="0 0 1">
+        <body name="arm"><joint name="shoulder" axis="0 1 0"/><geom type="capsule" fromto="0 0 0 0.4 0 0" size="0.02" mass="1"/></body>
+        <body name="arm2" pos="0 0.3 0"><joint name="elbow" axis="0 1 0"/><geom type="capsule" fromto="0 0 0 0.4 0 0" size="0.02" mass="1"/></body>
+      </body>
+    </worldbody>
+    <actuator>
+      <dcmotor name="m1" joint="shoulder" nominal="24 8 12" ctrlrange="-24 24" saturation="6 0 0" inductance="0 0.001" thermal="2 0 30 0.004 25 25"/>
+      <dcmotor name="m2" joint="elbow" motorconst="0.05 0.05" resistance="0.5" input="pos" controller="40 0 2 0 0 24" ctrlrange="-1.5 1.5"/>
+    </actuator>
+  </mujoco>)";
+  ModelPtr src = compileXml(xml);
+  Document doc = importXml(xml);
+  REQUIRE(doc.actuators.size() == 2);
+  CHECK(doc.actuators[0].type == ActuatorType::DcMotor);
+  CHECK(doc.actuators[1].dcinput == DcInput::Pos);
+  ModelPtr out = compile(doc);
+  for (int k = 0; k < mjNGAIN; ++k) CHECK(out->actuator_gainprm[k] == doctest::Approx(src->actuator_gainprm[k]));
+  for (int k = 0; k < mjNDYN; ++k) CHECK(out->actuator_dynprm[k] == doctest::Approx(src->actuator_dynprm[k]));
+  CHECK(out->actuator_forcerange[1] == doctest::Approx(src->actuator_forcerange[1]));
+  CHECK(out->actuator_ctrlspec[1] == src->actuator_ctrlspec[1]);
+  CHECK(out->na == src->na);
+
+  // Strength: the stall torque (K V / R = 8 N*m), capped by the saturation torque of 6 N*m.
+  CHECK(actuatorMaxForce(doc, doc.actuators[0]) == doctest::Approx(6));
+  doc.actuators[0].saturation = {0, 0, 0};
+  CHECK(actuatorMaxForce(doc, doc.actuators[0]) == doctest::Approx(8));
+
+  // A new DC motor on a joint compiles as it is.
+  Document fresh;
+  Id b = addBody(fresh, kWorldId, {{0, 0, 1}, {}}, "b");
+  Id j = addJoint(fresh, b, JointType::Hinge, {}, {0, 1, 0}, "j");
+  addGeom(fresh, b, GeomType::Sphere, {0.05, 0, 0}, {{0.2, 0, 0}, {}});
+  Id a = addActuator(fresh, ActuatorType::Motor, j);
+  setActuatorType(fresh, *fresh.actuator(a), ActuatorType::DcMotor);
+  compile(fresh);
 }

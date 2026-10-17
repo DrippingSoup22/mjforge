@@ -92,6 +92,10 @@ const char* actuatorExplanation(ActuatorType t) {
     case ActuatorType::General:
       return "General actuator: force = gain(ctrl) + bias(length, velocity), with optional activation dynamics. "
              "All the shortcut types are special cases of this one.";
+    case ActuatorType::DcMotor:
+      return "DC motor from its datasheet: ctrl is the voltage (or a target for its on-board controller). The torque "
+             "drops with speed (back-EMF), like a real motor: the more realistic choice for sim-to-real. Enter the "
+             "nominal voltage, stall torque and no-load speed of the motor at the joint (after any gearbox).";
   }
   return "";
 }
@@ -661,6 +665,12 @@ void Editor::inspectLight(Light& l) {
       props::real("Exponent", &l.exponent, 10, O(D("light.exponent"), nullptr, 0.1, 0, 200));
     }
     props::vec3("Attenuation", &l.attenuation, {1, 0, 0}, O(D("light.attenuation"), nullptr, 0.01, 0, 100));
+    if (l.type == LightType::Spot) props::real("Range", &l.range, 10, O(D("light.range"), "m", 0.1, 0, 1e6));
+  }
+  if (props::section("Physically-based rendering", false)) {
+    props::real("Intensity", &l.intensity, 0, O(D("light.intensity"), "cd", 1, 0, 1e9));
+    props::real("Bulb radius", &l.bulbradius, 0.02, O(D("light.bulbradius"), "m", 0.001, 0, 100));
+    if (l.type == LightType::Spot) props::real("Edge softness", &l.softness, 0.2, O(D("light.softness"), nullptr, 0.01, 0, 1));
   }
   props::end();
 }
@@ -747,7 +757,7 @@ void Editor::inspectActuator(Actuator& a) {
         applyToSelected<Actuator>([&](Actuator& o) { o.inheritrange = a.inheritrange; });
     }
   }
-  if (props::section("Force limit")) {
+  if (a.type != ActuatorType::DcMotor && props::section("Force limit")) {  // a DC motor uses its saturation
     if (props::checkbox("Limit force", &a.forcelimited, false, D("general.forcelimited"))) {
       if (a.forcelimited && a.forcerange == Vec2{}) a.forcerange = {-10, 10};
       applyToSelected<Actuator>([&](Actuator& o) { o.forcelimited = a.forcelimited; o.forcerange = a.forcerange; });
@@ -831,6 +841,43 @@ void Editor::inspectActuator(Actuator& a) {
       break;
     case ActuatorType::Adhesion:
       if (props::section("Adhesion")) props::real("Gain", &a.adhesionGain, 1.0, O(D("adhesion.gain"), "N", 0.1, 0, 1e9));
+      break;
+    case ActuatorType::DcMotor:
+      if (props::section("DC motor")) {
+        const char* su = jt ? (angular ? "rad/s" : "m/s") : nullptr;
+        props::real("Nominal voltage", &a.nominal.x, 0, O(D("dcmotor.nominal"), "V", 0.1, 0, 1e5));
+        props::real("Stall torque", &a.nominal.y, 0, O(D("dcmotor.nominal"), fu, 0.01, 0, 1e9));
+        props::real("No-load speed", &a.nominal.z, 0, O(D("dcmotor.nominal"), su, 0.1, 0, 1e9));
+        props::real("Resistance", &a.resistance, 0, O(D("dcmotor.resistance"), "Ohm", 0.01, 0, 1e9));
+        props::vec2("Motor constants Kt Ke", &a.motorconst, {}, O(D("dcmotor.motorconst"), nullptr, 0.001, 0, 1e6));
+        double K, R;
+        dcMotorConstants(a, &K, &R);
+        if (K > 0 && R > 0) {
+          double v = a.ctrllimited ? std::max(std::fabs(a.ctrlrange.x), std::fabs(a.ctrlrange.y)) : a.nominal.x;
+          props::info("Motor", "K %.4g, R %.4g Ohm: stall %.3g %s, no load %.3g at %.3g V", K, R, K * v / R, fu, v / K, v);
+        } else {
+          props::info("", "Give the nominal point of a datasheet, or the resistance and motor constants.");
+        }
+        props::combo("Input", &a.dcinput, kDcInputs, DcInput::Voltage, D("dcmotor.input"));
+        if (a.dcinput != DcInput::Voltage) {
+          props::real("kp", &a.controller[0], 0, O(D("dcmotor.controller"), nullptr, 0.1, 0, 1e9));
+          props::real("ki", &a.controller[1], 0, O(D("dcmotor.controller"), nullptr, 0.1, 0, 1e9));
+          props::real("kd", &a.controller[2], 0, O(D("dcmotor.controller"), nullptr, 0.01, 0, 1e9));
+          props::real("Max target rate", &a.controller[3], 0, O(D("dcmotor.controller"), nullptr, 0.1, 0, 1e9));
+          props::real("Integral limit", &a.controller[4], 0, O(D("dcmotor.controller"), nullptr, 0.1, 0, 1e9));
+          props::real("Max drive voltage", &a.controller[5], 0, O(D("dcmotor.controller"), "V", 0.1, 0, 1e5));
+        }
+      }
+      if (props::section("Limits and losses", false)) {
+        props::real("Max torque", &a.saturation.x, 0, O(D("dcmotor.saturation"), fu, 0.01, 0, 1e9));
+        props::real("Max current", &a.saturation.y, 0, O(D("dcmotor.saturation"), "A", 0.1, 0, 1e9));
+        props::real("Max current rate", &a.saturation.z, 0, O(D("dcmotor.saturation"), "A/s", 1, 0, 1e12));
+        props::vec2("Inductance, time constant", &a.inductance, {}, O(D("dcmotor.inductance"), nullptr, 0.0001, 0, 100));
+        props::vec3("Cogging amp poles phase", &a.cogging, {}, O(D("dcmotor.cogging"), nullptr, 0.01));
+        props::vec5("LuGre friction", &a.lugre, Vec5{}, O(D("dcmotor.lugre"), nullptr, 0.01, 0, 1e9));
+        props::vec3("Thermal R C tau", reinterpret_cast<Vec3*>(&a.thermal.v[0]), {}, O(D("dcmotor.thermal"), nullptr, 0.01, 0, 1e9));
+        props::vec3("Thermal coef ref amb", reinterpret_cast<Vec3*>(&a.thermal.v[3]), {}, O(D("dcmotor.thermal"), nullptr, 0.001));
+      }
       break;
     case ActuatorType::General:
       if (props::section("General model")) {

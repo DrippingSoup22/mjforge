@@ -109,6 +109,11 @@ the ground often, primitives (capsules, spheres) are much cheaper in MuJoCo Warp
 - **Actuators.** *Motor*: the control is a torque (times the gear). *Position*: the control is the
   target angle, the actuator applies `kp * (target - angle)` with damping from `kv` or a damping
   ratio. *Velocity*: target speed. Control range limits the command, force range limits the output.
+  *DC motor*: a real motor from its datasheet (nominal voltage, stall torque, no-load speed at the
+  joint, or resistance and motor constants); the control is the voltage, so torque falls as the
+  joint speeds up. Its input can instead be a position or velocity target for an on-board PID
+  (gains in torque space) or a torque command; *Limits and losses* adds a torque or current limit,
+  inductance, heating, cogging and LuGre friction. MuJoCo Warp runs it.
   *Latency* delays the control like a real robot's communication and driver (training with it
   makes policies robust to delay); the history buffer it needs is sized automatically. Actuators can
   also add rotor inertia (armature) and damping to their joint, scaled by gear squared; MuJoCo Warp
@@ -126,12 +131,19 @@ Issues are grouped by area:
 - **Model**: structural problems MuJoCo would reject or silently misinterpret (missing targets,
   inverted ranges, massless moving bodies).
 - **Physics**: whether the actuators can do their job. MJForge estimates the load on every joint:
-  lifting the moved subtree against gravity, and supporting the body while walking (about half the
-  feet on the ground). It compares that with the actuator's capacity (force range, or control range
-  times gain and gear). Position servos also get a sag estimate: how far the joint gives way under
-  the body weight with the current `kp`.
+  holding the start pose against gravity, lifting what it moves (on a floating creature, the
+  lighter side: a leg, not the whole body), and carrying the body on fewer feet while walking. It
+  compares that with the actuator's capacity (force range, or control range times gain and gear,
+  through tendons too). Holding the pose and lifting limbs are firm needs (warnings and errors);
+  walking loads and tilting a torso all the way over are estimates (info). Feet are found where
+  the leg chains meet, wheels are not legs, and the ground may push along a splayed leg within
+  the friction cone. Position servos also get a sag estimate: how far the joint gives way under
+  the load with the current `kp`. Masses, inertias and moment arms come from MuJoCo's compiled
+  model, so shell inertia, mesh inertia modes, gravity compensation and total-mass settings count.
 - **Stability**: stiffness against the timestep. A servo with natural frequency ω and timestep dt is
-  accurate when ω·dt is below about 0.5 and explodes above 2. The fix adds armature.
+  accurate when ω·dt is below about 0.5 and explodes above 2; damping that the integrator treats
+  implicitly (implicitfast) raises that limit. On a floating creature the inertia a joint moves is
+  the one MuJoCo sees with the body free. The fix adds armature.
 - **Start pose**: the model floating above or starting inside the floor, the center of mass outside
   the feet, overlapping geoms. Evaluated at the start pose (the first keyframe if there is one).
 - **MuJoCo Warp**: features MJWarp rejects, with fixes.
@@ -182,17 +194,21 @@ robot adds broadphase work in every world.
 *File > Import into scene* (Ctrl+I) reads another project or an MJCF file and lets you choose:
 
 - **Models**: the creatures/robots, with their actuators, sensors and keyframes, placed next to
-  yours (adjust the offset).
-- **Environment**: floor, props, terrain, lights and sky. *Replace my current environment* removes
-  yours first; otherwise a second floor is skipped.
-- **Simulation settings**: take over the other file's timestep, gravity, solver...
+  yours (adjust the offset). Their start pose joins your keyframe 0, they keep the masses they had
+  in their own file, and constraints that tie them to the world move with them.
+- **Environment**: floor, props, terrain, walls, lights, cameras and sky. *Replace my current
+  environment* removes yours first; otherwise a second floor is skipped and whatever used it
+  (contact pairs, sensors) uses yours.
+- **Simulation settings**: take over the other file's timestep, gravity, solver... (your
+  compiler's mass settings stay, so the models already in the scene keep their masses).
 
 Clashing names are made unique. *File > Open* also opens MJCF files directly as a new project.
 
-MJCF is read with MuJoCo's own parser and compiler, so defaults classes, `<include>`, Euler angles,
-`fromto`, degree units and meshes are resolved exactly. Not yet supported: SDF geoms are replaced by
-boxes of the same extent (the bodies keep MuJoCo's exact mass and inertia); flex objects, skins and
-plugins are reported and skipped.
+MJCF is read with MuJoCo's own parser and compiler, so defaults classes, `<include>`, `<attach>`,
+scaled frames, Euler angles, `fromto`, degree units and meshes are resolved exactly, and every body
+keeps MuJoCo's mass. Not yet supported: SDF geoms are replaced by boxes of the same extent (the
+bodies keep MuJoCo's exact mass and inertia); flex objects, skins, plugins, PID and orientation
+actuators are reported and skipped.
 
 ## Exporting
 

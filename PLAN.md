@@ -198,6 +198,16 @@ headless settle).
       simulator, generators, merge), `tools/check_mjwarp.py`, example projects verified in MJWarp,
       GitHub Actions CI (build, tests, headless validation, MJWarp CPU check)
 
+### M6 — Adversarial review
+- [x] Round trip of 388 MuJoCo test models (import → export → compile → compare fields and
+      rollouts): no failures, crashes or unexplained differences
+- [x] Independent reviews of the writer, project files, importer, merge, operations, kinematics,
+      analysis, simulator and safety code; every confirmed finding fixed with a regression test
+- [x] Analysis grounded in MuJoCo's compiled masses and moment arms; leg, wheel and planar-walker
+      models; friction-aware stance loads; floating-base joint inertia equal to MuJoCo's; checked
+      against Menagerie robots and the MuJoCo humanoid
+- [x] Keyframe activations and mocap poses; DC motor actuators; physically-based light attributes
+
 ## 5. Testing strategy
 
 - **C++ unit tests:** math, document operations, mass properties vs MuJoCo's compiled

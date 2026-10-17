@@ -171,6 +171,11 @@ struct Light {
   Vec3 attenuation{1, 0, 0};
   double cutoff = 45.0;   // degrees
   double exponent = 10.0;
+  // For physically-based renderers (MuJoCo's classic renderer uses only range).
+  double intensity = 0;     // candela
+  double range = 10;        // spotlights light nothing farther than this (m)
+  double bulbradius = 0.02; // soft shadows
+  double softness = 0.2;    // spotlight edge, fraction of the cutoff
   CameraMode mode = CameraMode::Fixed;
   Id target = kNoId;
   bool hidden = false;
@@ -230,10 +235,28 @@ struct Actuator {
   Vec10 gainprm{{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   Vec10 biasprm{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   bool actearly = false;
+  // dcmotor (MuJoCo's DC motor model): give the resistance and motor constants, or the nominal point
+  // of a datasheet; the rest is optional. Its torque limit is saturation.x (no force range).
+  double resistance = 0;      // Ohm
+  Vec2 motorconst{0, 0};      // torque constant Kt (N*m/A), back-EMF constant Ke (V*s/rad)
+  Vec3 nominal{0, 0, 0};      // voltage (V), stall torque (N*m), no-load speed (rad/s)
+  Vec3 saturation{0, 0, 0};   // max torque (N*m), max current (A), max current rate (A/s)
+  Vec2 inductance{0, 0};      // inductance (H), or electrical time constant (s)
+  Vec3 cogging{0, 0, 0};      // amplitude (N*m), poles, phase (rad)
+  Vec6 controller{{0, 0, 0, 0, 0, 0}};  // kp ki kd (torque space), slewmax, Imax, Vmax
+  Vec6 thermal{{0, 0, 0, 0, 0, 0}};     // resistance (K/W), capacitance (J/K), timeconst (s),
+                                        // tempcoef (1/K), reftemp, ambient (deg C)
+  Vec5 lugre{{0, 0, 0, 0, 0}};          // stiffness, damping, coulomb, static, stribeck
+  DcInput dcinput = DcInput::Voltage;
 };
 // Whether MuJoCo gives the actuator an activation state (a control filter or integrator, a muscle):
 // keyframes then hold its activation too.
 bool actuatorHasActivation(const Actuator& a);
+// Number of activation variables MuJoCo gives the actuator (a DC motor can have several).
+int actuatorActDim(const Actuator& a);
+// A DC motor's effective motor constant K and resistance R, from its constants or nominal point (as
+// MuJoCo derives them, without its viscous-damping refinement). Zero when not determined.
+void dcMotorConstants(const Actuator& a, double* K, double* R);
 // MuJoCo's default kp/kv for each actuator shortcut.
 double actuatorDefaultKp(ActuatorType t);
 double actuatorDefaultKv(ActuatorType t);

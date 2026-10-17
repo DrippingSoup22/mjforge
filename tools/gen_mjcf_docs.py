@@ -50,6 +50,7 @@ PREFIXES = {
     "actuator-cylinder-": "cylinder.",
     "actuator-muscle-": "muscle.",
     "actuator-adhesion-": "adhesion.",
+    "actuator-dcmotor-": "dcmotor.",
     "sensor-jointpos-": "sensor.",
     "sensor-contact-": "contactsensor.",
     "sensor-insidesite-": "insidesite.",

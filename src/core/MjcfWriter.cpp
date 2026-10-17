@@ -804,6 +804,10 @@ class Writer {
     if (!nearly(l.attenuation, d.attenuation)) n.set("attenuation", vec(l.attenuation));
     if (!nearly(l.cutoff, d.cutoff)) n.set("cutoff", num(l.cutoff));
     if (!nearly(l.exponent, d.exponent)) n.set("exponent", num(l.exponent));
+    if (!nearly(l.intensity, d.intensity)) n.set("intensity", num(l.intensity));
+    if (!nearly(l.range, d.range)) n.set("range", num(l.range));
+    if (!nearly(l.bulbradius, d.bulbradius)) n.set("bulbradius", num(l.bulbradius));
+    if (!nearly(l.softness, d.softness)) n.set("softness", num(l.softness));
   }
 
   void writeContact(XmlNode& root) {
@@ -936,6 +940,7 @@ class Writer {
         return a.trn == TrnType::Body && nearly(a.gear[0], 1.0) && nearly(a.lengthrange, Vec2{}) && nearly(a.damping, 0.0) &&
                nearly(a.armature, 0.0);
       case ActuatorType::Muscle: return a.trn != TrnType::Body && a.trn != TrnType::Site;
+      case ActuatorType::DcMotor: return true;  // no general equivalent (MuJoCo computes its parameters)
       default: return a.trn != TrnType::Body;
     }
   }
@@ -996,6 +1001,7 @@ class Writer {
         g.gainprm[0] = a.adhesionGain;
         g.ctrllimited = true;
         break;
+      case ActuatorType::DcMotor: return a;
     }
     return g;
   }
@@ -1044,7 +1050,8 @@ class Writer {
       } else if (!doc_.compiler.autolimits) {
         e.set("ctrllimited", "true");  // the inherited range is a limit; without autolimits MuJoCo wants it said
       }
-      if (a.type != ActuatorType::Adhesion || !nearly(a.forcerange, Vec2{}))
+      bool dc = a.type == ActuatorType::DcMotor;  // its torque limit is the saturation attribute
+      if (!dc && (a.type != ActuatorType::Adhesion || !nearly(a.forcerange, Vec2{})))
         writeLimited(e, "forcelimited", "forcerange", a.forcelimited, a.forcerange);
       if ((a.type == ActuatorType::IntVelocity || a.type == ActuatorType::General) && !(inherits && integrator))
         writeLimited(e, "actlimited", "actrange", a.actlimited, a.actrange);
@@ -1100,6 +1107,18 @@ class Writer {
           break;
         case ActuatorType::Adhesion:
           if (!nearly(a.adhesionGain, d.adhesionGain)) e.set("gain", num(a.adhesionGain));
+          break;
+        case ActuatorType::DcMotor:
+          if (a.resistance > 0) e.set("resistance", num(a.resistance));
+          if (!nearly(a.motorconst, d.motorconst)) e.set("motorconst", vec(a.motorconst));
+          if (!nearly(a.nominal, d.nominal)) e.set("nominal", vec(a.nominal));
+          if (!nearly(a.saturation, d.saturation)) e.set("saturation", vec(a.saturation));
+          if (!nearly(a.inductance, d.inductance)) e.set("inductance", vec(a.inductance));
+          if (!nearly(a.cogging, d.cogging)) e.set("cogging", vec(a.cogging));
+          if (!nearly(a.controller, d.controller)) e.set("controller", vec(a.controller, 6));
+          if (!nearly(a.thermal, d.thermal)) e.set("thermal", vec(a.thermal, 6));
+          if (!nearly(a.lugre, d.lugre)) e.set("lugre", vec(a.lugre, 5));
+          if (a.dcinput != DcInput::Voltage) e.set("input", toXml(a.dcinput));
           break;
         case ActuatorType::General:
           if (a.dyntype != DynType::None) e.set("dyntype", toXml(a.dyntype));
@@ -1168,13 +1187,17 @@ class Writer {
         for (const auto& e : k.ctrl) if (e.first == a) v = e.second;
         anyCtrl |= v != 0;
         add(ctrl, v);
-        // Activations of filtered and integrating actuators, in the same order.
+        // Activations of filtered and integrating actuators, in the same order (a DC motor's
+        // internal states start at zero).
         const Actuator* x = doc_.actuator(a);
-        if (!x || !actuatorHasActivation(*x)) continue;
-        double s = 0;
-        for (const auto& e : k.act) if (e.first == a) s = e.second;
-        anyAct |= s != 0;
-        add(act, s);
+        int dim = x ? actuatorActDim(*x) : 0;
+        for (int slot = 0; slot < dim; ++slot) {
+          double s = 0;
+          if (slot == 0 && x->type != ActuatorType::DcMotor)
+            for (const auto& e : k.act) if (e.first == a) s = e.second;
+          anyAct |= s != 0;
+          add(act, s);
+        }
       }
       // Mocap bodies: world poses, by default where the body is.
       for (const Body* b : mocap) {

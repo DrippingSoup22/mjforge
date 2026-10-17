@@ -19,8 +19,10 @@ ready-to-run MuJoCo Warp loader.
   Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's documentation
   in the tooltips.
 - All actuator types: motor (torque), position servo (target angle), velocity, integrated velocity,
-  damper, cylinder, muscle, adhesion and general, with control latency, plus friction, armature,
-  damping, mass and inertia per element.
+  damper, cylinder, muscle, adhesion, general, and **DC motor** (MuJoCo 3.16's electrical model:
+  enter the voltage, stall torque and no-load speed of a datasheet; torque falls with speed, with
+  optional current limit, inductance, heating, cogging and friction, and an on-board PID), with
+  control latency, plus friction, armature, damping, mass and inertia per element.
 - **Tendons** (fixed joint combinations and spatial cables with wrapping and pulleys, with actuators
   and sensors on them), **equality constraints** (connect for closed loops, weld, joint and tendon
   couplings) and explicit **contact pairs**, all supported by MuJoCo Warp.
@@ -39,7 +41,12 @@ ready-to-run MuJoCo Warp loader.
 - A physics analysis explains problems in plain language, with numbers and one-click fixes.
   Examples: actuator strength vs. the load it carries ("a 10 kg creature whose knees can give
   2 µN·m"), servo sag, stiffness vs. timestep stability, mass ratios, start pose inside or above
-  the floor, balance at rest, foot creep, servo ranges written in degrees.
+  the floor, balance at rest, foot creep, servo ranges written in degrees, control delays longer
+  than their history buffer. It works from MuJoCo's own compiled masses and actuator moment arms,
+  so every compiler option, tendon-driven joint and gravity compensation counts; legs, wheels and
+  planar walkers are told apart, and joint inertia on a floating body matches MuJoCo's mass matrix.
+  On MuJoCo Menagerie robots every warning it raises holds up in MuJoCo (start poses that sink into
+  the floor, an MJWarp margin rule).
 - MuJoCo Warp rules: unsupported features (PGS, noslip, PID actuators, ...), features it silently
   ignores (actuator armature, with a fix that keeps the dynamics), the box/mesh contact margin trap,
   which contact pairs need MJWarp's slower convex collider, self-collision pair counts.
@@ -61,7 +68,8 @@ ready-to-run MuJoCo Warp loader.
 **Combine, import and export**
 - Models and environments can be built together or separately. *File > Import into scene*
   brings the models and/or the environment of another project or MJCF file into the current one
-  (replace the environment, place models side by side, names kept unique).
+  (replace the environment, place models side by side, names kept unique). Imported creatures
+  keep their start pose, their masses and their ties to the world.
 - MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes, orientations
   and meshes behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (Unitree Go2 and H1,
   ANYmal C, Franka Panda, Agility Cassie, Robotiq 2F-85, Shadow and Allegro hands, ALOHA): the
@@ -69,7 +77,8 @@ ready-to-run MuJoCo Warp loader.
   agree to about 1e-7 (models whose meshes touch each other drift apart after contact, because
   de-duplicated mesh vertices shift the contact points slightly).
 - Keyframes: the first one is the start pose of simulations and exported models; pose it in the
-  viewport or capture one from the simulation.
+  viewport or capture one from the simulation. Keyframes keep joint positions and velocities,
+  controls, actuator activations (filtered and integrating servos) and mocap body poses.
 - Unsaved changes are never dropped silently: quitting or opening another project asks first, and
   modified projects are autosaved in the background and recovered after a crash.
 - Export one file, or a model file plus a scene file that includes it (the Menagerie layout), and
@@ -178,9 +187,11 @@ The design and milestones are in [PLAN.md](PLAN.md).
 ## Limitations
 
 - SDF geoms from imported files are approximated by boxes (bodies keep exact masses and inertias).
-- Flex objects, skins, plugins and MuJoCo 3.16's DC motor, PID and orientation actuators in
+- Flex objects, skins, plugins, PID and orientation actuators, and DC motors with several inputs in
   imported files are reported and skipped; nonlinear (polynomial) stiffness and damping keep only
-  their linear terms, and geom adhesion is not imported (each is listed in the import notes).
+  their linear terms (each is listed in the import notes). Imported `settotalmass` (deprecated in
+  MuJoCo 3.16) is baked into the masses, and bodies whose mass comes from settings the editor does
+  not keep (scaled frames, `inertiagrouprange`) get MuJoCo's compiled inertia.
 
 ## Third-party software
 

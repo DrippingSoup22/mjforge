@@ -158,6 +158,14 @@ void setActuatorType(Document& doc, Actuator& a, ActuatorType type) {
       a.ctrllimited = true;
       a.ctrlrange = {0, 1};
       break;
+    case ActuatorType::DcMotor:
+      // A small 24 V joint motor (after its gearbox) until datasheet values are entered.
+      if (a.nominal == Vec3{} && a.resistance <= 0 && a.motorconst == Vec2{}) a.nominal = {24, 5, 10};
+      a.ctrllimited = true;
+      a.ctrlrange = {-a.nominal.x, a.nominal.x};
+      if (!(a.nominal.x > 0)) a.ctrlrange = {-24, 24};
+      a.forcelimited = false;
+      break;
     default:
       a.ctrllimited = true;
       a.ctrlrange = {-1, 1};

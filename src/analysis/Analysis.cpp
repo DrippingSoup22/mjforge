@@ -276,6 +276,15 @@ void strengthenJoint(Document& d, const std::vector<std::pair<Id, double>>& arms
       a->gear[0] = std::copysign(niceCeil(g), a->gear[0] == 0 ? 1.0 : a->gear[0]);
       continue;
     }
+    if (a->type == ActuatorType::DcMotor) {
+      // A stronger motor of the same speed: the stall torque grows as the resistance falls.
+      double s = f / std::max(fmax, 1e-12);
+      if (a->resistance > 0) a->resistance /= s;
+      else a->nominal.y *= s;
+      if (a->saturation.x > 0) a->saturation.x = std::max(a->saturation.x, f);
+      if (a->saturation.y > 0) a->saturation.y *= s;
+      continue;
+    }
     Actuator open = *a;
     open.forcelimited = false;
     double free = actuatorMaxForce(d, open);
@@ -469,14 +478,61 @@ class Analyzer {
       }
       bool trnOk = a.type == ActuatorType::Adhesion ? a.trn == TrnType::Body
                    : a.type == ActuatorType::Muscle ? a.trn != TrnType::Body && a.trn != TrnType::Site
-                                                    : true;
+                   : a.type == ActuatorType::DcMotor ? a.trn != TrnType::Body
+                                                     : true;
       if (!trnOk) {
         add(Severity::Error, IssueArea::Model, "actuator-transmission",
             fmt(a.type == ActuatorType::Adhesion ? "Adhesion actuator %s needs a body transmission"
-                                                 : "Muscle %s needs a joint or tendon transmission", quote(a.name).c_str()),
+                : a.type == ActuatorType::Muscle ? "Muscle %s needs a joint or tendon transmission"
+                                                 : "DC motor %s needs a joint, tendon or site transmission", quote(a.name).c_str()),
             a.type == ActuatorType::Adhesion ? "Adhesion pulls on the contacts of a body. Pick the body in the inspector."
-                                             : "A muscle's force depends on its length, which only joints and tendons have.",
+            : a.type == ActuatorType::Muscle ? "A muscle's force depends on its length, which only joints and tendons have."
+                                             : "A motor turns something: pick a joint (or a tendon or site) in the inspector.",
             {a.id});
+      }
+      if (a.type == ActuatorType::DcMotor) {
+        double K, R;
+        dcMotorConstants(a, &K, &R);
+        bool controller = a.dcinput != DcInput::Voltage;
+        if (K <= 0 || R <= 0) {
+          Issue& i = add(Severity::Error, IssueArea::Model, "dcmotor-constants",
+                         fmt("DC motor %s needs its electrical data", quote(a.name).c_str()),
+                         "MuJoCo needs a positive motor constant and resistance: enter the nominal voltage, stall torque and "
+                         "no-load speed of a datasheet, or the resistance and motor constants.", {a.id});
+          Id id = a.id;
+          i.fixLabel = "Use 24 V, 5 N*m, 10 rad/s";
+          i.fix = [id](Document& d) {
+            if (Actuator* x = d.actuator(id)) {
+              x->nominal = {24, 5, 10};
+              x->resistance = 0;
+              x->motorconst = {0, 0};
+            }
+          };
+        } else if (!controller && (a.controller[0] != 0 || a.controller[1] != 0 || a.controller[2] != 0)) {
+          Issue& i = add(Severity::Error, IssueArea::Model, "dcmotor-controller",
+                         fmt("DC motor %s has controller gains but takes a voltage", quote(a.name).c_str()),
+                         "The on-board controller works on position, velocity or torque inputs. Pick one as the input, or "
+                         "clear the gains.", {a.id});
+          Id id = a.id;
+          i.fixLabel = "Take a position target";
+          i.fix = [id](Document& d) { if (Actuator* x = d.actuator(id)) x->dcinput = DcInput::Pos; };
+        } else if (a.controller[1] > 0 && a.dcinput != DcInput::Pos) {
+          add(Severity::Error, IssueArea::Model, "dcmotor-integral", fmt("DC motor %s: the integral gain needs a position target", quote(a.name).c_str()),
+              "The integrator accumulates position error, so ki works only with the position input.", {a.id});
+        } else if (!controller && a.controller[3] > 0) {
+          add(Severity::Error, IssueArea::Model, "dcmotor-slew", fmt("DC motor %s: a target rate limit needs the controller", quote(a.name).c_str()),
+              "The rate limit applies to the controller's target: take a position, velocity or torque input.", {a.id});
+        }
+        // MuJoCo derives the missing one of thermal resistance, capacitance and time constant.
+        const Vec6& th = a.thermal;
+        if (th[0] > 0 || th[1] > 0 || th[2] > 0) {
+          bool ok = (th[0] > 0 && th[1] > 0) || (th[2] > 0 && (th[0] > 0 || th[1] > 0));
+          if (!ok)
+            add(Severity::Error, IssueArea::Model, "dcmotor-thermal", fmt("DC motor %s: incomplete thermal model", quote(a.name).c_str()),
+                "Give the thermal resistance and capacitance, or the time constant with one of them.", {a.id});
+        }
+        if (a.inductance.x < 0 || a.inductance.y < 0)
+          add(Severity::Error, IssueArea::Model, "dcmotor-inductance", fmt("DC motor %s: negative inductance", quote(a.name).c_str()), "", {a.id});
       }
       // The delayed control is read from the last nsample controls (one per step), so the buffer must
       // reach back delay / timestep steps or the delay is cut short.
@@ -1056,6 +1112,18 @@ class Analyzer {
   // include damping ratios turned into kv), else the document's.
   void servoGains(const Actuator& act, double jointInertia, double arm2, double* k, double* c) const {
     *k = *c = 0;
+    if (act.type == ActuatorType::DcMotor) {
+      // A voltage-driven motor brakes with K^2 / R (back-EMF); its controller compensates that and
+      // acts with its own gains.
+      double K, R;
+      dcMotorConstants(act, &K, &R);
+      if (act.dcinput == DcInput::Voltage) *c = R > 0 ? K * K / R : 0;
+      else {
+        *k = act.dcinput == DcInput::Pos ? act.controller[0] : 0;
+        *c = act.controller[2];
+      }
+      return;
+    }
     auto it = compiledActuator_.find(act.id);
     if (it != compiledActuator_.end()) {
       const mjModel* m = cr_->model.get();
@@ -1998,6 +2066,16 @@ double actuatorMaxForce(const Document& doc, const Actuator& a) {
       double g = std::fabs(a.gainprm[0]);
       f = (positionLikeGeneral(a) ? g * servoSpan(doc, a) : g * umax) + std::fabs(a.biasprm[0]);
       break;
+    }
+    case ActuatorType::DcMotor: {
+      // Stall torque at the largest voltage: the control for a voltage-driven motor, the drive limit
+      // of the on-board controller otherwise (none: it delivers whatever it is asked).
+      double K, R;
+      dcMotorConstants(a, &K, &R);
+      double v = a.dcinput == DcInput::Voltage ? umax : a.controller[5] > 0 ? a.controller[5] : kInf;
+      f = K > 0 && R > 0 ? K * v / R : 0.0;
+      double cap = a.saturation.x > 0 ? a.saturation.x : a.saturation.y > 0 ? K * a.saturation.y : kInf;
+      return std::min(f, cap);
     }
   }
   if (a.forcelimited) f = std::min(f, absmax(a.forcerange));

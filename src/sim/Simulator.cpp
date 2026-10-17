@@ -16,6 +16,7 @@ int niceSize(double n) {
 }
 
 bool positionLike(const mjModel* m, int i) {
+  if (m->actuator_gaintype[i] == mjGAIN_DCMOTOR) return m->actuator_ctrlspec[i] == mjINPUT_POS;  // its PID's target
   return m->actuator_biastype[i] == mjBIAS_AFFINE && m->actuator_biasprm[i * mjNBIAS + 1] < 0 &&
          m->actuator_dyntype[i] != mjDYN_INTEGRATOR;
 }

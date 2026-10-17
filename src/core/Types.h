@@ -28,7 +28,7 @@ inline constexpr EnumEntry<JointType> kJointTypes[] = {
     {JointType::Slide, "slide", "Slide (linear)"}, {JointType::Hinge, "hinge", "Hinge (rotary)"}};
 
 // MJCF actuator shortcut elements.
-enum class ActuatorType : uint8_t { Motor, Position, Velocity, IntVelocity, Damper, Cylinder, Muscle, Adhesion, General };
+enum class ActuatorType : uint8_t { Motor, Position, Velocity, IntVelocity, Damper, Cylinder, Muscle, Adhesion, General, DcMotor };
 inline constexpr EnumEntry<ActuatorType> kActuatorTypes[] = {
     {ActuatorType::Motor, "motor", "Motor (torque/force control)"},
     {ActuatorType::Position, "position", "Position servo (target angle)"},
@@ -38,7 +38,16 @@ inline constexpr EnumEntry<ActuatorType> kActuatorTypes[] = {
     {ActuatorType::Cylinder, "cylinder", "Cylinder (pneumatic/hydraulic)"},
     {ActuatorType::Muscle, "muscle", "Muscle"},
     {ActuatorType::Adhesion, "adhesion", "Adhesion (suction/gecko)"},
-    {ActuatorType::General, "general", "General (custom gain/bias/dynamics)"}};
+    {ActuatorType::General, "general", "General (custom gain/bias/dynamics)"},
+    {ActuatorType::DcMotor, "dcmotor", "DC motor (electrical model)"}};
+
+// What a DC motor's control is (MJCF dcmotor input; one control each).
+enum class DcInput : uint8_t { Voltage, Pos, Vel, Ff };
+inline constexpr EnumEntry<DcInput> kDcInputs[] = {
+    {DcInput::Voltage, "voltage", "Voltage (raw motor)"},
+    {DcInput::Pos, "pos", "Position target (on-board PID)"},
+    {DcInput::Vel, "vel", "Velocity target (on-board PID)"},
+    {DcInput::Ff, "ff", "Torque command"}};
 
 // Values match mjtTrn.
 enum class TrnType : uint8_t { Joint = 0, JointInParent = 1, SliderCrank = 2, Tendon = 3, Site = 4, Body = 5 };
@@ -272,5 +281,6 @@ inline const char* toXml(InertiaFromGeom v) { return enumXml(kInertiaFromGeom, v
 inline const char* toXml(AngleUnit v) { return enumXml(kAngleUnits, v); }
 inline const char* toXml(SleepPolicy v) { return enumXml(kSleepPolicies, v); }
 inline const char* toXml(MeshInertia v) { return enumXml(kMeshInertias, v); }
+inline const char* toXml(DcInput v) { return enumXml(kDcInputs, v); }
 
 }  // namespace mjf

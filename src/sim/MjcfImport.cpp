@@ -623,6 +623,10 @@ class Builder {
       x.attenuation = v3f(m_->light_attenuation + 3 * l);
       x.cutoff = m_->light_cutoff[l];
       x.exponent = m_->light_exponent[l];
+      x.intensity = fromFloat(m_->light_intensity[l]);
+      x.range = fromFloat(m_->light_range[l]);
+      x.bulbradius = fromFloat(m_->light_bulbradius[l]);
+      x.softness = fromFloat(m_->light_softness[l]);
       x.mode = CameraMode(std::min<int>(m_->light_mode[l], int(CameraMode::TargetBodyCom)));
       if (m_->light_targetbodyid[l] >= 0) x.target = bodyIds_[m_->light_targetbodyid[l]];
       doc_.lights.push_back(x);
@@ -753,6 +757,29 @@ class Builder {
           x.type = ActuatorType::Adhesion;
           x.adhesionGain = g[0];
           break;
+        case mjACTUATOR_DCMOTOR: {
+          // The spec holds MuJoCo's resolved parameters (mjs_setToDCMotor): resistance R, motor
+          // constant K and the optional parts in fixed slots.
+          int spec = s->ctrlspec ? s->ctrlspec : mjINPUT_VOLTAGE;
+          if (spec != mjINPUT_VOLTAGE && spec != mjINPUT_POS && spec != mjINPUT_VEL && spec != mjINPUT_FF) {
+            ++skipped;  // several controls, or none
+            continue;
+          }
+          x.type = ActuatorType::DcMotor;
+          x.dcinput = spec == mjINPUT_POS ? DcInput::Pos : spec == mjINPUT_VEL ? DcInput::Vel : spec == mjINPUT_FF ? DcInput::Ff
+                                                                                                          : DcInput::Voltage;
+          x.resistance = g[0];
+          x.motorconst = {g[1], g[1]};
+          x.controller = Vec6{{g[4], g[5], g[6], d[7], d[8], g[7]}};
+          double tauMax = x.forcelimited ? std::max(std::fabs(x.forcerange.x), std::fabs(x.forcerange.y)) : 0.0;
+          x.saturation = {tauMax, 0, d[1]};
+          x.forcelimited = false;
+          x.inductance = {0, d[0]};
+          x.cogging = {b[0], b[1], b[2]};
+          x.thermal = Vec6{{d[2], d[3], 0, g[2], g[3], d[4]}};
+          x.lugre = Vec5{{d[5], d[6], b[3], b[4], b[5]}};
+          break;
+        }
         default:
           if (!generalFrom(x, s)) {
             ++skipped;
@@ -761,7 +788,7 @@ class Builder {
           break;
       }
       // A scaled frame around the target scales the gains at compile time: take MuJoCo's.
-      if (s->type != mjACTUATOR_MUSCLE && scaledOnCompile(g, m_->actuator_gainprm + mjNGAIN * i, 1)) {
+      if (s->type != mjACTUATOR_MUSCLE && s->type != mjACTUATOR_DCMOTOR && scaledOnCompile(g, m_->actuator_gainprm + mjNGAIN * i, 1)) {
         compiledGains(x, i);
         ++scaled;
       }
@@ -770,7 +797,8 @@ class Builder {
     }
     if (scaled) note(std::to_string(scaled) + " actuator(s) take MuJoCo's gains, scaled by a frame around their target");
     if (skipped)
-      note(std::to_string(skipped) + " actuator(s) of types the editor does not support (DC motor, PID, orientation) were not imported");
+      note(std::to_string(skipped) + " actuator(s) of types the editor does not support (PID, orientation, several "
+           "inputs) were not imported");
     if (nonlinear) note(std::to_string(nonlinear) + " nonlinear actuator damping term(s) were dropped (linear terms kept)");
     if (plugins) note(std::to_string(plugins) + " plugin actuator(s) (such as the PID plugin) were not imported");
   }
