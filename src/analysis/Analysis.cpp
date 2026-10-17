@@ -455,8 +455,25 @@ class Analyzer {
     dupes(doc_.geoms, Kind::Geom);
     dupes(doc_.joints, Kind::Joint);
     dupes(doc_.sites, Kind::Site);
+    dupes(doc_.cameras, Kind::Camera);
+    dupes(doc_.lights, Kind::Light);
     dupes(doc_.actuators, Kind::Actuator);
     dupes(doc_.sensors, Kind::Sensor);
+    dupes(doc_.tendons, Kind::Tendon);
+    dupes(doc_.equalities, Kind::Equality);
+    dupes(doc_.pairs, Kind::Pair);
+    dupes(doc_.excludes, Kind::Exclude);
+    dupes(doc_.materials, Kind::Material);
+    dupes(doc_.textures, Kind::Texture);
+    dupes(doc_.meshes, Kind::Mesh);
+    dupes(doc_.hfields, Kind::Hfield);
+    {
+      std::unordered_map<std::string, int> keys;
+      for (const Keyframe& k : doc_.keyframes)
+        if (!k.name.empty() && ++keys[k.name] == 2)
+          add(Severity::Error, IssueArea::Model, "duplicate-name", fmt("Duplicate keyframe name '%s'", k.name.c_str()),
+              "MuJoCo requires unique keyframe names. Rename one of them in the Scene panel.", {});
+    }
 
     for (const Texture& t : doc_.textures) {
       std::error_code ec;
@@ -1033,14 +1050,37 @@ class Analyzer {
           };
         }
       }
+    for (const Site& x : doc_.sites) {
+      int n = x.type == GeomType::Sphere ? 1 : (x.type == GeomType::Capsule || x.type == GeomType::Cylinder) ? 2 : 3;
+      bool bad = false;
+      for (int i = 0; i < n; ++i) bad |= !(x.size[i] >= 1e-15);  // the export writes smaller values as 0
+      if (bad) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "site-size", fmt("Site %s has a zero or negative size", quote(x.name).c_str()),
+                       "", {x.id});
+        Id id = x.id;
+        i.fixLabel = "Use 5 mm";
+        i.fix = [id](Document& d) {
+          if (Site* s = d.site(id))
+            for (int k = 0; k < 3; ++k)
+              if (!(s->size[k] >= 1e-15)) s->size[k] = 0.005;
+        };
+      }
+    }
     for (const Geom& g : doc_.geoms) {
       int n = g.type == GeomType::Sphere ? 1 : (g.type == GeomType::Capsule || g.type == GeomType::Cylinder) ? 2 : 3;
       if (g.type == GeomType::Plane || g.type == GeomType::Hfield || g.type == GeomType::Mesh) n = 0;
       bool bad = false;
-      for (int i = 0; i < n; ++i) bad |= !(g.size[i] > 0);
+      for (int i = 0; i < n; ++i) bad |= !(g.size[i] >= 1e-15);  // the export writes smaller values as 0
       if (bad) add(Severity::Error, IssueArea::Model, "geom-size", fmt("Geom %s has a zero or negative size", quote(g.name).c_str()), "", {g.id});
       if (g.mass < 0 && g.density < 0)
         add(Severity::Error, IssueArea::Model, "geom-density", fmt("Geom %s has a negative density", quote(g.name).c_str()), "", {g.id});
+      if (g.condim != 1 && g.condim != 3 && g.condim != 4 && g.condim != 6) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "geom-condim", fmt("Geom %s: contact dimension must be 1, 3, 4 or 6", quote(g.name).c_str()),
+                       "", {g.id});
+        Id id = g.id;
+        i.fixLabel = "Use 3 (sliding friction)";
+        i.fix = [id](Document& d) { if (Geom* x = d.geom(id)) x->condim = 3; };
+      }
       if (g.type == GeomType::Plane && g.body != kWorldId && weld_.weld[doc_.bodyIndex(g.body)] != 0) {
         add(Severity::Error, IssueArea::Model, "plane-moving", fmt("Plane %s is on a moving body", quote(g.name).c_str()),
             "Planes are infinite and static. Use a thin box for moving parts.", {g.id});
@@ -1157,7 +1197,7 @@ class Analyzer {
           }
         };
       }
-      if (t.type == TendonType::Spatial && !(t.width > 0)) {
+      if (t.type == TendonType::Spatial && !(t.width >= 1e-15)) {
         Issue& i = add(Severity::Error, IssueArea::Model, "tendon-width", fmt("Spatial tendon %s needs a positive width", n.c_str()),
                        "MuJoCo refuses a spatial tendon of zero width (it only affects drawing).", {t.id});
         i.fixLabel = "Use 3 mm";

@@ -50,7 +50,13 @@ inline double length(const Vec3& v) { return std::sqrt(dot(v, v)); }
 inline double length2(const Vec3& v) { return dot(v, v); }
 inline Vec3 normalize(const Vec3& v, const Vec3& fallback = {0, 0, 1}) {
   double l = length(v);
-  return l > 1e-12 ? v / l : fallback;
+  if (l > 1e-12 && std::isfinite(l)) return v / l;
+  // Components so large that the length overflows: scale them down first. A non-finite or
+  // vanishing vector has no direction.
+  double m = std::max({std::fabs(v.x), std::fabs(v.y), std::fabs(v.z)});
+  if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z) || !(m > 1e-12)) return fallback;
+  Vec3 s = v / m;
+  return s / length(s);
 }
 inline Vec3 cwiseMul(const Vec3& a, const Vec3& b) { return {a.x * b.x, a.y * b.y, a.z * b.z}; }
 inline Vec3 vmin(const Vec3& a, const Vec3& b) { return {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)}; }
@@ -144,9 +150,14 @@ inline Quat operator*(const Quat& a, const Quat& b) {
 inline Quat conj(const Quat& q) { return {q.w, -q.x, -q.y, -q.z}; }
 inline Quat normalize(const Quat& q) {
   double n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
-  if (n < 1e-12) return {};
-  Quat r{q.w / n, q.x / n, q.y / n, q.z / n};
-  return r;
+  if (n >= 1e-12 && std::isfinite(n)) return {q.w / n, q.x / n, q.y / n, q.z / n};
+  // As for vectors: huge components are scaled down first; non-finite or vanishing ones give the
+  // identity.
+  double m = std::max({std::fabs(q.w), std::fabs(q.x), std::fabs(q.y), std::fabs(q.z)});
+  if (!std::isfinite(q.w) || !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !(m >= 1e-12)) return {};
+  Quat s{q.w / m, q.x / m, q.y / m, q.z / m};
+  double ns = std::sqrt(s.w * s.w + s.x * s.x + s.y * s.y + s.z * s.z);
+  return {s.w / ns, s.x / ns, s.y / ns, s.z / ns};
 }
 // Canonical form: w >= 0 (q and -q represent the same rotation).
 inline Quat canonical(const Quat& q) {

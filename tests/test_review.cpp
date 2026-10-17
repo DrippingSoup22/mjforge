@@ -599,3 +599,52 @@ TEST_CASE("review: hostile project files are refused before they exhaust memory 
   CHECK(d.textures[0].width == 8192);
   CHECK(d.textures[0].height == 1);
 }
+
+TEST_CASE("review: values only a damaged file can hold are repaired or reported") {
+  Document base;
+  makeTemplate("arm", base);
+  startKeyframe(base);
+  nlohmann::json j = nlohmann::json::parse(projectToJson(base));
+  // A joint whose body is gone (it cannot live in the world): dropped; its actuator then reports
+  // a missing target instead of breaking the export.
+  Id lostBody = j["joints"][0]["body"].get<Id>();
+  for (auto& b : j["bodies"])
+    if (b["id"].get<Id>() == lostBody) b["id"] = 99999;
+  for (auto& b : j["bodies"])
+    if (b.contains("parent") && b["parent"].get<Id>() == lostBody) b["parent"] = 99999;
+  // Out-of-range numbers MuJoCo would refuse.
+  j["geoms"][0]["rgba"] = {1e308, 0, 0, 1};
+  j["actuators"][0]["timeconst"] = -1;
+  j["option"]["memory"] = "lots";
+  Document d;
+  std::string err;
+  REQUIRE(projectFromJson(d, j.dump(), &err));
+  for (const Joint& x : d.joints) CHECK(x.body != kWorldId);
+  CHECK(std::isfinite(d.geoms[0].rgba.r));
+  CHECK(d.actuators[0].timeconst == 0);
+  CHECK(d.option.memory.empty());
+  CompileResult cr = compileMjcf(writeMjcf(d));
+  INFO(cr.error);
+  CHECK(cr.ok);
+
+  // Reported: names MuJoCo needs unique, a site without size, an impossible contact dimension.
+  Document e = base;
+  e.keyframes.push_back(e.keyframes[0]);
+  Id c1 = addCamera(e, kWorldId, {}, "eye");
+  Id c2 = addCamera(e, kWorldId, {}, "eye2");
+  e.camera(c2)->name = e.camera(c1)->name;
+  e.sites[0].size = {0, 0, 0};
+  e.geoms[0].condim = 2;
+  CHECK_FALSE(compileMjcf(writeMjcf(e)).ok);
+  AnalysisReport rep = analyzeModel(e, nullptr, false);
+  int dupes = 0;
+  bool site = false, condim = false;
+  for (const Issue& i : rep.issues) {
+    dupes += i.code == "duplicate-name";
+    site |= i.code == "site-size";
+    condim |= i.code == "geom-condim";
+  }
+  CHECK(dupes == 2);
+  CHECK(site);
+  CHECK(condim);
+}

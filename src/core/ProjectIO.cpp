@@ -383,7 +383,11 @@ int repairReferences(Document& doc) {
       if (!isBody(e.body)) e.body = kWorldId;
   };
   onBody(doc.geoms);
-  onBody(doc.joints);
+  // A joint cannot be in the world: one whose body is missing is dropped (what referred to it then
+  // reports a missing target).
+  doc.joints.erase(std::remove_if(doc.joints.begin(), doc.joints.end(),
+                                  [&](const Joint& j) { return !isBody(j.body) || j.body == kWorldId; }),
+                   doc.joints.end());
   onBody(doc.sites);
   onBody(doc.cameras);
   onBody(doc.lights);
@@ -416,6 +420,49 @@ int repairReferences(Document& doc) {
     t.width = std::clamp(t.width, 1, 8192);
     t.height = std::clamp(t.height, 1, 8192);
   }
+  // Values the editor never produces and MuJoCo refuses: colors, material and light properties are
+  // single precision in MuJoCo; time constants, damping and gains are never negative.
+  auto finiteOr = [](float& v, float def) { if (!std::isfinite(v)) v = def; };
+  auto color = [&](Color& c) {
+    finiteOr(c.r, 0.5f);
+    finiteOr(c.g, 0.5f);
+    finiteOr(c.b, 0.5f);
+    finiteOr(c.a, 1.0f);
+  };
+  auto single = [](double& v, double def) { if (!std::isfinite(v) || std::fabs(v) > 1e30) v = def; };
+  auto nonNegative = [](double& v) { v = std::isfinite(v) ? std::clamp(v, 0.0, 1e30) : 0.0; };
+  for (Geom& g : doc.geoms) color(g.rgba);
+  for (Site& x : doc.sites) color(x.rgba);
+  for (Tendon& t : doc.tendons) {
+    color(t.rgba);
+    nonNegative(t.armature);
+  }
+  for (Material& m : doc.materials) {
+    color(m.rgba);
+    single(m.specular, 0.5);
+    single(m.shininess, 0.5);
+    single(m.reflectance, 0);
+    single(m.emission, 0);
+  }
+  color(doc.visual.haze);
+  for (Light& l : doc.lights)
+    for (Vec3* v : {&l.diffuse, &l.ambient, &l.specular})
+      for (int i = 0; i < 3; ++i) single((*v)[i], 0.5);
+  for (Actuator& a : doc.actuators) {
+    nonNegative(a.kv);
+    nonNegative(a.dampratio);
+    nonNegative(a.timeconst);
+    nonNegative(a.adhesionGain);
+    nonNegative(a.tausmooth);
+    nonNegative(a.controller[3]);  // DC motor slew rate limit
+  }
+  // <size memory>: digits with an optional K M G T P E suffix.
+  std::string& mem = doc.option.memory;
+  size_t digits = 0;
+  while (digits < mem.size() && mem[digits] >= '0' && mem[digits] <= '9') ++digits;
+  bool memOk = digits > 0 && digits <= 12 &&
+               (digits == mem.size() || (digits + 1 == mem.size() && std::string("KMGTPE").find(mem[digits]) != std::string::npos));
+  if (!memOk) mem.clear();
   return maxDepth;
 }
 
