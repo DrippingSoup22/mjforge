@@ -121,8 +121,11 @@ class Writer {
     for (int i = 0; i < count; ++i) s += (i ? " " : "") + num(v[i]);
     return s;
   }
+  // Colors are floats: 7 significant digits reproduce them exactly without float noise
+  // ("0.85", not "0.850000024").
   std::string color(const Color& c) const {
-    return num(c.r) + " " + num(c.g) + " " + num(c.b) + " " + num(c.a);
+    auto f = [](float v) { return formatNumber(v, 7); };
+    return f(c.r) + " " + f(c.g) + " " + f(c.b) + " " + f(c.a);
   }
   std::string quat(const Quat& q_) const {
     Quat q = canonical(q_);

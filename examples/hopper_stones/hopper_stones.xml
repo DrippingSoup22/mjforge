@@ -18,31 +18,31 @@
       <joint name="hopper_rootx" type="slide" axis="1 0 0"/>
       <joint name="hopper_rootz" type="slide"/>
       <joint name="hopper_rooty" axis="0 -1 0"/>
-      <geom name="hopper_torso_geom" type="capsule" size="0.05 0.2" quat="0 0 1 0" rgba="0.920000017 0.550000012 0.200000003 1"/>
+      <geom name="hopper_torso_geom" type="capsule" size="0.05 0.2" quat="0 0 1 0" rgba="0.92 0.55 0.2 1"/>
       <body name="hopper_thigh" pos="0 0 -0.2">
         <joint name="hopper_thigh_joint" axis="0 -1 0" range="-2.61799388 0" damping="1" armature="1"/>
-        <geom name="hopper_thigh_geom" type="capsule" size="0.05 0.225" pos="0 0 -0.225" quat="0 0 1 0" rgba="0.300000012 0.330000013 0.379999995 1"/>
+        <geom name="hopper_thigh_geom" type="capsule" size="0.05 0.225" pos="0 0 -0.225" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
         <body name="hopper_leg" pos="0 0 -0.45">
           <joint name="hopper_leg_joint" axis="0 -1 0" range="-2.61799388 0" damping="1" armature="1"/>
-          <geom name="hopper_leg_geom" type="capsule" size="0.04 0.25" pos="0 0 -0.25" quat="0 0 1 0" rgba="0.300000012 0.330000013 0.379999995 1"/>
+          <geom name="hopper_leg_geom" type="capsule" size="0.04 0.25" pos="0 0 -0.25" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
           <body name="hopper_foot" pos="0 0 -0.5">
             <joint name="hopper_foot_joint" axis="0 -1 0" range="-0.785398163 0.785398163" damping="1" armature="1"/>
-            <geom name="hopper_foot_geom" type="capsule" size="0.06 0.195" pos="0.065 0 0" quat="0.707106781 0 0.707106781 0" rgba="0.119999997 0.119999997 0.129999995 1" friction="2 0.005 0.0001"/>
+            <geom name="hopper_foot_geom" type="capsule" size="0.06 0.195" pos="0.065 0 0" quat="0.707106781 0 0.707106781 0" rgba="0.12 0.12 0.13 1" friction="2 0.005 0.0001"/>
           </body>
         </body>
       </body>
     </body>
     <body name="stones" pos="0.4 0 0">
-      <geom name="stones_1_1" type="box" size="0.175 0.175 0.0326817933" pos="0.175 0 0.0326817933" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_2_1" type="box" size="0.175 0.175 0.0235641369" pos="0.605 0 0.0235641369" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_3_1" type="box" size="0.175 0.175 0.0351482866" pos="1.035 0 0.0351482866" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_4_1" type="box" size="0.175 0.175 0.0365622846" pos="1.465 0 0.0365622846" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_5_1" type="box" size="0.175 0.175 0.0306636799" pos="1.895 0 0.0306636799" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_6_1" type="box" size="0.175 0.175 0.0289781424" pos="2.325 0 0.0289781424" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_7_1" type="box" size="0.175 0.175 0.0343527942" pos="2.755 0 0.0343527942" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_8_1" type="box" size="0.175 0.175 0.0350085961" pos="3.185 0 0.0350085961" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_9_1" type="box" size="0.175 0.175 0.0306823454" pos="3.615 0 0.0306823454" rgba="0.479999989 0.469999999 0.449999988 1"/>
-      <geom name="stones_10_1" type="box" size="0.175 0.175 0.0370353308" pos="4.045 0 0.0370353308" rgba="0.479999989 0.469999999 0.449999988 1"/>
+      <geom name="stones_1_1" type="box" size="0.175 0.175 0.0326817933" pos="0.175 0 0.0326817933" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_2_1" type="box" size="0.175 0.175 0.0235641369" pos="0.605 0 0.0235641369" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_3_1" type="box" size="0.175 0.175 0.0351482866" pos="1.035 0 0.0351482866" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_4_1" type="box" size="0.175 0.175 0.0365622846" pos="1.465 0 0.0365622846" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_5_1" type="box" size="0.175 0.175 0.0306636799" pos="1.895 0 0.0306636799" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_6_1" type="box" size="0.175 0.175 0.0289781424" pos="2.325 0 0.0289781424" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_7_1" type="box" size="0.175 0.175 0.0343527942" pos="2.755 0 0.0343527942" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_8_1" type="box" size="0.175 0.175 0.0350085961" pos="3.185 0 0.0350085961" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_9_1" type="box" size="0.175 0.175 0.0306823454" pos="3.615 0 0.0306823454" rgba="0.48 0.47 0.45 1"/>
+      <geom name="stones_10_1" type="box" size="0.175 0.175 0.0370353308" pos="4.045 0 0.0370353308" rgba="0.48 0.47 0.45 1"/>
     </body>
   </worldbody>
   <actuator>
