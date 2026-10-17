@@ -2,8 +2,10 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <unordered_set>
 
 #include "analysis/Analysis.h"
+#include "core/Generators.h"
 #include "core/Merge.h"
 #include "core/MjcfWriter.h"
 #include "core/Ops.h"
@@ -311,4 +313,42 @@ TEST_CASE("DC motors: import, export, analysis and a fresh one") {
   Id a = addActuator(fresh, ActuatorType::Motor, j);
   setActuatorType(fresh, *fresh.actuator(a), ActuatorType::DcMotor);
   compile(fresh);
+}
+
+TEST_CASE("combine: generated terrain brought into a scene that has one regenerates on its own") {
+  Document dst, src;
+  REQUIRE(makeTemplate("empty", dst));
+  REQUIRE(makeTemplate("empty", src));
+  Id mine = addGenerated(dst, "rough", {0, 0, 0});
+  Id theirs = addGenerated(src, "rough", {0, 0, 0});
+  for (Geom& g : src.geoms)
+    if (g.body == theirs) g.friction.x = 0.2;  // edited before the import
+  MergeOptions opt;
+  mergeDocument(dst, src, opt);
+  Id imported = kNoId;
+  for (const Body& b : dst.bodies)
+    if (b.generator == "rough" && b.id != mine) imported = b.id;
+  REQUIRE(imported);
+  std::vector<float> before;
+  for (const Geom& g : dst.geoms)
+    if (g.body == mine) before = *dst.hfield(g.hfield)->data;
+  dst.body(imported)->genParams[7] = 99;  // a new seed for the imported terrain only
+  REQUIRE(regenerate(dst, imported));
+  int pieces = 0;
+  std::unordered_set<Id> ids;
+  std::unordered_set<std::string> names;
+  bool unique = true;
+  for (const Geom& g : dst.geoms) {
+    unique = ids.insert(g.id).second && names.insert(g.name).second && unique;
+    if (g.body == imported) {
+      ++pieces;
+      CHECK(g.friction.x == doctest::Approx(0.2));
+    }
+    if (g.body == mine) CHECK(*dst.hfield(g.hfield)->data == before);
+  }
+  CHECK(unique);
+  CHECK(pieces == 1);
+  CompileResult cr = compileMjcf(writeMjcf(dst));
+  INFO(cr.error);
+  CHECK(cr.ok);
 }
