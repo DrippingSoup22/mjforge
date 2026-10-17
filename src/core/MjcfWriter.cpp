@@ -4,8 +4,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <filesystem>
+#include <list>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -27,7 +27,8 @@ namespace {
 struct XmlNode {
   std::string tag;
   std::vector<std::pair<std::string, std::string>> attrs;
-  std::deque<XmlNode> children;  // deque: references stay valid while siblings are added
+  std::list<XmlNode> children;  // list: references stay valid while siblings are added (and the
+                                // element type may be incomplete here, unlike deque)
   std::string comment;
 
   XmlNode() = default;
