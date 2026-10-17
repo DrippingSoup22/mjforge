@@ -445,9 +445,31 @@ int repairReferences(Document& doc) {
     single(m.emission, 0);
   }
   color(doc.visual.haze);
-  for (Light& l : doc.lights)
-    for (Vec3* v : {&l.diffuse, &l.ambient, &l.specular})
+  for (Vec3* v : {&doc.visual.headlightAmbient, &doc.visual.headlightDiffuse, &doc.visual.headlightSpecular})
+    for (int i = 0; i < 3; ++i) single((*v)[i], 0.3);
+  const Light defLight;
+  for (Light& l : doc.lights) {
+    for (Vec3* v : {&l.diffuse, &l.ambient, &l.specular, &l.attenuation})
       for (int i = 0; i < 3; ++i) single((*v)[i], 0.5);
+    single(l.cutoff, defLight.cutoff);
+    single(l.exponent, defLight.exponent);
+    single(l.intensity, defLight.intensity);
+    single(l.range, defLight.range);
+    single(l.bulbradius, defLight.bulbradius);
+    single(l.softness, defLight.softness);
+  }
+  // Masses beyond any real object overflow MuJoCo's inertia computation.
+  const Geom defGeom;
+  for (Geom& g : doc.geoms) {
+    if (!std::isfinite(g.mass) || g.mass > 1e30) g.mass = defGeom.mass;
+    if (!std::isfinite(g.density) || std::fabs(g.density) > 1e30) g.density = defGeom.density;
+  }
+  const Body defBody;
+  for (Body& b : doc.bodies) {
+    if (!std::isfinite(b.mass) || std::fabs(b.mass) > 1e30) b.mass = defBody.mass;
+    for (int i = 0; i < 3; ++i)
+      if (!std::isfinite(b.diaginertia[i]) || std::fabs(b.diaginertia[i]) > 1e30) b.diaginertia[i] = defBody.diaginertia[i];
+  }
   for (Actuator& a : doc.actuators) {
     nonNegative(a.kv);
     nonNegative(a.dampratio);

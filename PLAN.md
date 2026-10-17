@@ -207,6 +207,18 @@ headless settle).
       models; friction-aware stance loads; floating-base joint inertia equal to MuJoCo's; checked
       against Menagerie robots and the MuJoCo humanoid
 - [x] Keyframe activations and mocap poses; DC motor actuators; physically-based light attributes
+- [x] Random editing sequences (thousands of steps per campaign, under AddressSanitizer): the
+      document stays consistent, save/load gives back the same export bit for bit, and every
+      refusal by MuJoCo is predicted by an analysis Error about the model; each MuJoCo compile rule
+      for the elements the editor writes was checked against MuJoCo's source
+- [x] MuJoCo Warp rules checked against `mujoco_warp.put_model` on ~1000 random exports (no
+      mismatch); new rules for what it refuses or treats differently
+- [x] Fix honesty: every offered fix applied on random models makes its issue go away without
+      adding an Error or breaking compilation
+- [x] Simulator under random documents, control modes, live edits, perturbations and resets:
+      state finite unless a divergence is reported, live edits keep every joint's state
+- [x] Hostile project files (random corruption, deep nesting, huge arrays, damaged settings):
+      refused or repaired, never a crash or an unbounded allocation
 
 ## 5. Testing strategy
 

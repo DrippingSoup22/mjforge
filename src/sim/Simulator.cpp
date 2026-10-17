@@ -200,6 +200,28 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
       mju_copy(d->history + n->sensor_historyadr[s], od->history + o->sensor_historyadr[os], 2 + ns * (1 + dim));
   }
   d->time = od->time;
+  // Manual controls and plot history are per actuator: they follow the actuators when reordered.
+  bool reordered = false;
+  for (int i = 0; i < n->nu; ++i) reordered |= oldAct[size_t(i)] != i;
+  if (reordered) {
+    if (manual.size() == size_t(o->nu)) {
+      std::vector<double> m(size_t(n->nu));
+      for (int i = 0; i < n->nu; ++i) m[size_t(i)] = manual[size_t(oldAct[size_t(i)])];
+      manual = std::move(m);
+    }
+    auto remap = [&](std::vector<float>& v) {
+      if (v.size() != size_t(o->nu)) return;
+      std::vector<float> r(size_t(n->nu));
+      for (int i = 0; i < n->nu; ++i) r[size_t(i)] = v[size_t(oldAct[size_t(i)])];
+      v = std::move(r);
+    };
+    for (SimSample& smp : history_) {
+      remap(smp.length);
+      remap(smp.target);
+      remap(smp.ctrl);
+      remap(smp.force);
+    }
+  }
   model_ = std::move(nm);
   data_ = std::move(d);
   map_ = map;

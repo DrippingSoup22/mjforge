@@ -1071,6 +1071,7 @@ class Analyzer {
       if (g.type == GeomType::Plane || g.type == GeomType::Hfield || g.type == GeomType::Mesh) n = 0;
       bool bad = false;
       for (int i = 0; i < n; ++i) bad |= !(g.size[i] >= 1e-15);  // the export writes smaller values as 0
+      if (g.type == GeomType::Plane) bad |= !(g.size[2] >= 1e-15);  // the grid spacing
       if (bad) add(Severity::Error, IssueArea::Model, "geom-size", fmt("Geom %s has a zero or negative size", quote(g.name).c_str()), "", {g.id});
       if (g.mass < 0 && g.density < 0)
         add(Severity::Error, IssueArea::Model, "geom-density", fmt("Geom %s has a negative density", quote(g.name).c_str()), "", {g.id});

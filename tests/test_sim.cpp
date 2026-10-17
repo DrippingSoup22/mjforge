@@ -301,3 +301,24 @@ TEST_CASE("simulator: live edits keep delayed controls (no jerk towards zero)") 
     CHECK(worst < 0.05);
   }
 }
+
+TEST_CASE("simulator: manual controls follow their actuators when the order changes") {
+  Document doc = makeArm(5);
+  Id j = doc.joints[0].id;
+  Id second = addActuator(doc, ActuatorType::Velocity, j, "shoulder_velocity");
+  CompileResult cr = compileDoc(doc);
+  Simulator sim;
+  REQUIRE(sim.start(cr.model, cr.map));
+  sim.mode = CtrlMode::Manual;
+  REQUIRE(sim.manual.size() == 2);
+  sim.manual = {0.3, -0.2};
+  run(sim, 0.1);
+  std::swap(doc.actuators[0], doc.actuators[1]);  // reorder (as moving an actuator in the list does)
+  doc.touch();
+  CompileResult cr2 = compileDoc(doc);
+  REQUIRE(sim.update(cr2.model, cr2.map));
+  CHECK(sim.actuatorIndex(second) == 0);
+  CHECK(sim.manual[0] == doctest::Approx(-0.2));
+  CHECK(sim.manual[1] == doctest::Approx(0.3));
+  for (const SimSample& s : sim.history()) CHECK(s.ctrl[0] == doctest::Approx(-0.2));
+}
