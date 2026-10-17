@@ -115,6 +115,7 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a == "limbtool") limbTool_ = true;
     else if (a == "posemode") setPoseMode(true);
     else if (a == "quit") quit_ = true;
+    else if (a == "prefs") showPrefs_ = true;
     else if (a == "recover") showRecover_ = !recoverPath_.empty();
     else if (a.rfind("pose:", 0) == 0) {
       // pose:<joint>=<value> (degrees for hinges), as if dragged in pose mode.
@@ -378,8 +379,13 @@ void Editor::loadPrefs() {
   snap_ = j.value("snap", false);
   snapMove_ = j.value("snapMove", 0.05f);
   snapAngle_ = j.value("snapAngle", 15.0f);
+  snapScale_ = j.value("snapScale", 0.01f);
   vp_.showShadows = j.value("shadows", true);
   vp_.showGrid = j.value("grid", true);
+  autosaveSeconds_ = j.value("autosaveSeconds", 30.0);
+  exportAngle_ = j.value("exportAngle", 0);
+  exportSplit_ = j.value("exportSplit", false);
+  exportLoader_ = j.value("exportLoader", true);
 }
 
 void Editor::savePrefs() {
@@ -390,8 +396,13 @@ void Editor::savePrefs() {
   j["snap"] = snap_;
   j["snapMove"] = snapMove_;
   j["snapAngle"] = snapAngle_;
+  j["snapScale"] = snapScale_;
   j["shadows"] = vp_.showShadows;
   j["grid"] = vp_.showGrid;
+  j["autosaveSeconds"] = autosaveSeconds_;
+  j["exportAngle"] = exportAngle_;
+  j["exportSplit"] = exportSplit_;
+  j["exportLoader"] = exportLoader_;
   writeTextFile(configDir_ + "/prefs.json", j.dump(2));
 }
 
@@ -507,6 +518,7 @@ void Editor::frame() {
 
   drawUnsavedModal();
   drawRecoverModal();
+  drawPreferences();
   if (!fileDialog_.isOpen() && afterSave_ && !ImGui::IsPopupOpen("Unsaved changes")) afterSave_ = nullptr;  // save cancelled
   if (fileDialog_.draw()) {
     const std::string& p = fileDialog_.result();
@@ -704,6 +716,8 @@ void Editor::drawMenuBar() {
       ImGui::SetTooltip("Equal spacing between the outermost selected elements. Select at least three.");
     ImGui::Separator();
     if (ImGui::MenuItem("Select none", "Esc")) sel_.clear();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Preferences...", "Ctrl+,")) showPrefs_ = true;
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Add")) {
@@ -1004,6 +1018,7 @@ void Editor::handleShortcuts() {
   if (ctrl && pressed(ImGuiKey_D)) { duplicateSelection(); return; }
   if (ctrl && pressed(ImGuiKey_M)) { mirrorSelection(1); return; }
   if (ctrl && pressed(ImGuiKey_R)) { resetSimulation(); return; }
+  if (ctrl && pressed(ImGuiKey_Comma)) { showPrefs_ = true; return; }
   if (ctrl) return;
   if (pressed(ImGuiKey_F1)) showShortcuts_ = !showShortcuts_;
   // Single-key shortcuts only when the mouse is not over a text field.

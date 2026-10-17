@@ -16,13 +16,10 @@ namespace fs = std::filesystem;
 namespace mjf {
 
 namespace {
-// Seconds between autosaves of a modified project (MJFORGE_AUTOSAVE_INTERVAL overrides, for tests).
-double autosaveInterval() {
-  static double v = [] {
-    const char* e = std::getenv("MJFORGE_AUTOSAVE_INTERVAL");
-    return e && std::atof(e) > 0 ? std::atof(e) : 30.0;
-  }();
-  return v;
+// MJFORGE_AUTOSAVE_INTERVAL overrides the preference (for tests).
+double autosaveOverride() {
+  const char* e = std::getenv("MJFORGE_AUTOSAVE_INTERVAL");
+  return e && std::atof(e) > 0 ? std::atof(e) : 0.0;
 }
 const char* const kAutosavePrefix = "autosave-";
 double secondsNow() {
@@ -116,8 +113,9 @@ void Editor::initAutosave() {
 }
 
 bool Editor::autosaveDue() const {
-  return !autosavePath_.empty() && modified_ && editRevision_ != autosavedRevision_ && !autosaveJob_.valid() &&
-         secondsNow() - lastAutosaveTime_ >= autosaveInterval();
+  double interval = autosaveOverride() > 0 ? autosaveOverride() : autosaveSeconds_;
+  return interval > 0 && !autosavePath_.empty() && modified_ && editRevision_ != autosavedRevision_ && !autosaveJob_.valid() &&
+         secondsNow() - lastAutosaveTime_ >= interval;
 }
 
 void Editor::maybeAutosave() {

@@ -216,8 +216,10 @@ parameters, hidden/locked flags, the camera). Closing the window, quitting, *Fil
 *File > Open* ask before discarding unsaved changes. A modified project is also autosaved in the
 background every 30 seconds into the settings folder; if MJForge ends without saving (a crash, a
 power cut), the next start offers to recover it. Mesh data is stored inside the project (base64), so
-a project does not depend on the original mesh files; texture images are referenced by path. Preferences and recent files are stored in
-`$XDG_CONFIG_HOME/mjforge` (usually `~/.config/mjforge`).
+a project does not depend on the original mesh files; texture images are referenced by path. *Edit > Preferences* (Ctrl+,) sets the autosave
+interval, snapping steps, shadows and grid, and export defaults. Preferences and recent files are
+stored in `$XDG_CONFIG_HOME/mjforge` (usually `~/.config/mjforge`; `%APPDATA%\mjforge` on
+Windows, `~/Library/Application Support/mjforge` on macOS).
 
 ## Keyboard and mouse
 

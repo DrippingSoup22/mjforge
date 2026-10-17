@@ -193,7 +193,7 @@ headless settle).
       joint, tendon) and contact pairs: editing, drawing, import/export, merge, analysis checks,
       tendon motors in the simulation; Menagerie robots using them round-trip exactly
 - [x] CI on Linux, Windows and macOS
-- [ ] Preferences window
+- [x] Preferences window (autosave interval, snapping steps, viewport, export defaults)
 - [x] Unit/integration tests (export → MuJoCo compile, JSON and MJCF round trips, analysis,
       simulator, generators, merge), `tools/check_mjwarp.py`, example projects verified in MJWarp,
       GitHub Actions CI (build, tests, headless validation, MJWarp CPU check)

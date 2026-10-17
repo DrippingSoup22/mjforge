@@ -318,6 +318,9 @@ class Editor {
   void finishAutosave();
   void removeAutosave();
   void drawRecoverModal();
+  void drawPreferences();
+  double autosaveSeconds_ = 30;  // 0: off
+  bool showPrefs_ = false;
   std::function<void()> pendingDiscard_, afterSave_;
   bool showUnsaved_ = false;
   bool quitConfirmed_ = false;
