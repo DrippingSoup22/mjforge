@@ -7,7 +7,7 @@ namespace mjf {
 
 enum class Icon {
   World, Body, Box, Sphere, Capsule, Cylinder, Ellipsoid, Plane, Hfield, Hinge, Slide, Ball, Free, Site, Camera,
-  Light, Actuator, Sensor, Material, Exclude, EyeOpen, EyeClosed, Play, Pause, Step, Reset, Select, Move, Rotate,
+  Light, Actuator, Sensor, Material, Exclude, EyeOpen, EyeClosed, Play, Pause, Step, Reset, Stop, Select, Move, Rotate,
   Scale, Warning, Error, Info, Ok, Magnet, Limb, Mirror, Plus
 };
 

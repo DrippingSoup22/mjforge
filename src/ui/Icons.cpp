@@ -149,6 +149,9 @@ void drawIcon(ImDrawList* dl, ImVec2 c, float size, Icon icon, ImU32 col) {
       dl->AddRectFilled(off(c, s, -0.55f, -0.65f), off(c, s, -0.15f, 0.65f), col, 1);
       dl->AddRectFilled(off(c, s, 0.15f, -0.65f), off(c, s, 0.55f, 0.65f), col, 1);
       break;
+    case Icon::Stop:
+      dl->AddRectFilled(off(c, s, -0.55f, -0.55f), off(c, s, 0.55f, 0.55f), col, 1.5f);
+      break;
     case Icon::Step:
       dl->AddTriangleFilled(off(c, s, -0.6f, -0.65f), off(c, s, 0.35f, 0), off(c, s, -0.6f, 0.65f), col);
       dl->AddRectFilled(off(c, s, 0.4f, -0.65f), off(c, s, 0.65f, 0.65f), col, 1);

@@ -563,6 +563,94 @@ class Analyzer {
           if (bi <= 0) break;
         }
       }
+      std::vector<int> footBodies;
+      for (const auto& [leg, foot] : perLeg) footBodies.push_back(foot.body);
+      if (nLegs <= 2) checkAnkleBalance(root, footBodies, box.lo.z + tol);
+    }
+    // Soft contacts let feet creep under a constant sideways load (splayed legs standing still).
+    if (rep_.legCount > 0 && (doc_.option.cone == Cone::Pyramidal || doc_.option.impratio < 5)) {
+      Issue& i = add(Severity::Tip, IssueArea::Physics, "friction-creep", "Feet may slowly creep while standing",
+                     "MuJoCo's contacts are slightly soft, so a foot under a constant sideways load (splayed legs) "
+                     "slides very slowly: standing still, a creature can drift and eventually do the splits. Elliptic "
+                     "friction cones with impratio 10-100 make friction much stiffer; both are supported by MuJoCo Warp.",
+                     {});
+      i.fixLabel = "Use elliptic cones, impratio 10";
+      i.fix = [](Document& d) {
+        d.option.cone = Cone::Elliptic;
+        d.option.impratio = std::max(d.option.impratio, 10.0);
+      };
+    }
+  }
+
+  // Standing on one or two flat feet, the body above the ankles is an inverted pendulum: only the
+  // ankle joints resist tipping, so their stiffness must exceed gravity's (m * g * h).
+  void checkAnkleBalance(const Body& root, const std::vector<int>& footBodies, double floorLevel) {
+    struct Group {
+      Vec3 axis;
+      double k = 0;
+      std::vector<Id> joints;
+      Vec3 anchors;
+    };
+    std::vector<Group> groups;
+    MassAccumulator feet;
+    for (int fb : footBodies) {
+      bool flat = false;
+      for (uint32_t gi : doc_.index().bodyGeoms[fb]) {
+        const Geom& g = doc_.geoms[gi];
+        if (g.type != GeomType::Box) continue;
+        flat |= primitiveWorldAabb(g.type, g.size, poses_[fb] * Pose{g.pos, g.quat}).lo.z <= floorLevel;
+      }
+      if (!flat) return;  // point-like feet: covered by the stance check
+      MassProps fm = subtreeMassProps(doc_, poses_, doc_.bodies[fb].id);
+      feet.add(fm.mass, fm.com, fm.inertia);
+      for (uint32_t ji : doc_.index().bodyJoints[fb]) {
+        const Joint& j = doc_.joints[ji];
+        const JointReport* r = findReport(j.id);
+        if (j.type != JointType::Hinge || !r) continue;
+        Vec3 p, a;
+        jointWorldFrame(doc_, poses_, j, &p, &a);
+        if (length(cross(a, gdir_)) < 0.7) continue;  // near-vertical axis: gravity can't tip it
+        Group* grp = nullptr;
+        for (Group& x : groups)
+          if (std::fabs(dot(x.axis, a)) > 0.9) grp = &x;
+        if (!grp) {
+          groups.push_back({a});
+          grp = &groups.back();
+        }
+        grp->k += r->stiffness;
+        grp->joints.push_back(j.id);
+        grp->anchors += p;
+      }
+    }
+    MassProps all = subtreeMassProps(doc_, poses_, root.id);
+    double mAbove = all.mass - feet.mass();
+    if (mAbove <= 0) return;
+    Vec3 comAbove = (all.com * all.mass - feet.com() * feet.mass()) * (1.0 / mAbove);
+    for (const Group& g : groups) {
+      Vec3 anchor = g.anchors * (1.0 / g.joints.size());
+      double h = dot(comAbove - anchor, -gdir_);
+      if (h <= 0) continue;
+      double kGravity = mAbove * gmag_ * h;
+      if (g.k >= 1.5 * kGravity) continue;
+      double kpEach = niceCeil(2.0 * kGravity / g.joints.size());
+      Issue& i = add(Severity::Info, IssueArea::Physics, "ankle-balance",
+                     fmt("%s can't stand still: its ankles are softer than gravity's tipping pull", quote(root.name).c_str()),
+                     fmt("On its feet, the %.3g kg above the ankles (center of mass %.2f m up) is an inverted pendulum: "
+                         "gravity tips it with %.3g N*m/rad while the ankle joints resist with %.3g N*m/rad. Holding "
+                         "a pose it slowly falls over, so a policy must balance it actively. For a stance that holds "
+                         "by itself, raise the ankle kp to about %.3g each.",
+                         mAbove, h, kGravity, g.k, kpEach),
+                     g.joints);
+      std::vector<Id> acts;
+      for (Id j : g.joints)
+        for (Id a : actuatorsOf(j, false)) acts.push_back(a);
+      if (acts.empty()) continue;
+      i.fixLabel = fmt("Set ankle kp to %.3g", kpEach);
+      i.fix = [acts, kpEach](Document& d) {
+        for (Id id : acts)
+          if (Actuator* a = d.actuator(id))
+            if (a->type == ActuatorType::Position || a->type == ActuatorType::IntVelocity) a->kp = std::max(a->kp, kpEach);
+      };
     }
   }
 

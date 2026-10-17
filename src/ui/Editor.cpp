@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 
 #include <imgui.h>
@@ -96,12 +97,22 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a == "about") showAbout_ = true;
     else if (a == "demo") showDemo_ = true;
     else if (a.rfind("focus:", 0) == 0) pendingFocus_.push_back(a.substr(6));
+    else if (a == "play") startSimulation(false);
+    else if (a.rfind("sim:", 0) == 0) {
+      // Start paused and fast-forward: deterministic screenshots of the simulation.
+      cliSimSeconds_ = std::max(1e-9, std::atof(a.c_str() + 4));
+      startSimulation(true);
+    } else if (a.rfind("simmode:", 0) == 0) {
+      std::string m = a.substr(8);
+      sim_.mode = m == "manual" ? CtrlMode::Manual : m == "sine" ? CtrlMode::Sine : m == "limp" ? CtrlMode::Limp : CtrlMode::Hold;
+    }
   }
 }
 
 bool Editor::wantsContinuousRendering() const {
   return vp_.gizmoUsing || vp_.dragButton >= 0 || compiler_.busy() || requestedRevision_ != editRevision_ ||
-         compiledRevision_ != requestedRevision_ || !toasts_.empty() || fileDialog_.isOpen();
+         compiledRevision_ != requestedRevision_ || !toasts_.empty() || fileDialog_.isOpen() || simWanted_ ||
+         (sim_.active() && !sim_.paused() && !sim_.diverged());
 }
 
 bool Editor::hasPendingWork() {
@@ -186,6 +197,7 @@ void Editor::newDocument(const std::string& templateId) {
     notify("Unknown template: " + templateId, pal::kError);
     return;
   }
+  stopSimulation();
   doc_ = std::move(d);
   history_.clear();
   sel_.clear();
@@ -204,6 +216,7 @@ bool Editor::openPath(const std::string& path) {
     notify("Open failed: " + err, pal::kError, 6);
     return false;
   }
+  stopSimulation();
   doc_ = std::move(d);
   history_.clear();
   sel_.clear();
@@ -355,10 +368,22 @@ void Editor::scheduleCompile() {
 
 void Editor::pollCompile() {
   CompileResult r;
-  if (compiler_.poll(r)) {
-    compiledRevision_ = r.revision;
-    compiled_ = std::move(r);
-    if (compiledRevision_ == editRevision_) runAnalysis();
+  if (!compiler_.poll(r)) return;
+  compiledRevision_ = r.revision;
+  compiled_ = std::move(r);
+  if (compiledRevision_ != editRevision_) return;
+  runAnalysis();
+  if (simWanted_) {
+    if (compiled_.ok) launchSimulation();
+    else {
+      simWanted_ = false;
+      notify("Cannot simulate: the model does not compile (see Issues)", pal::kError, 5);
+    }
+  } else if (sim_.active() && compiled_.ok && simRevision_ != compiledRevision_) {
+    // Live tuning: the running simulation picks up the edited model.
+    bool kept = sim_.update(compiled_.model, compiled_.map);
+    simRevision_ = compiledRevision_;
+    if (!kept) notify("The structure changed: the simulation restarted from the start pose", pal::kTextDim, 3);
   }
 }
 
@@ -388,6 +413,7 @@ void Editor::buildDefaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Actuators", bottom);
   ImGui::DockBuilderDockWindow("Sensors", bottom);
   ImGui::DockBuilderDockWindow("MJCF", bottom);
+  ImGui::DockBuilderDockWindow("Simulation", bottom);
   ImGui::DockBuilderFinish(dockId);
 }
 
@@ -395,6 +421,10 @@ void Editor::frame() {
   ++frameCount_;
   pollCompile();
   scheduleCompile();
+  double t = nowSeconds();
+  double dt = lastFrameTime_ > 0 ? t - lastFrameTime_ : 0;
+  lastFrameTime_ = t;
+  if (sim_.active()) sim_.advance(dt);
   handleShortcuts();
   drawMenuBar();
   drawToolbar();
@@ -418,6 +448,7 @@ void Editor::frame() {
   drawSensorsPanel();
   drawXmlPanel();
   drawIssuesPanel();
+  drawSimulationPanel();
   drawViewport();
 
   if (fileDialog_.draw()) {
@@ -672,6 +703,8 @@ void Editor::drawToolbar() {
     if (iconButton("##addsite", Icon::Site, false, "Add a site (sensor / attachment point)")) addSiteTo(targetBody());
     sep();
     if (iconButton("##mirror", Icon::Mirror, false, "Mirror selected body left/right (Ctrl+M)")) mirrorSelection(1);
+    sep();
+    drawSimToolbarButtons();
 
     // Validation status on the right.
     bool upToDate = compiledRevision_ == editRevision_;
@@ -717,6 +750,11 @@ void Editor::drawStatusBar() {
         ImGui::SameLine(0, 24);
         ImGui::TextDisabled("compiled in %.1f ms", compiled_.compileMs);
       }
+      if (sim_.active()) {
+        ImGui::SameLine(0, 24);
+        ImGui::TextColored(pal::v4(pal::kOk), "simulating: %d contacts, %d constraint rows", int(sim_.data()->ncon),
+                           int(sim_.data()->nefc));
+      }
       ImGui::EndMenuBar();
     }
   }
@@ -758,6 +796,7 @@ void Editor::drawAboutWindow() {
     ImGui::Separator();
     ImGui::TextDisabled("Mouse: right-drag orbit, middle-drag or Shift+right-drag pan, wheel zoom, left-click select.");
     ImGui::TextDisabled("Keys: W/E/R move/rotate/resize, F frame, Ctrl+D duplicate, Del delete, Ctrl+Z undo.");
+    ImGui::TextDisabled("Simulation: Space play/pause, Shift+Space stop, Ctrl+R reset, drag a body to push it.");
   }
   ImGui::End();
 }
@@ -775,11 +814,14 @@ void Editor::handleShortcuts() {
   if (ctrl && pressed(ImGuiKey_Q)) { quit_ = true; return; }
   if (ctrl && pressed(ImGuiKey_D)) { duplicateSelection(); return; }
   if (ctrl && pressed(ImGuiKey_M)) { mirrorSelection(1); return; }
+  if (ctrl && pressed(ImGuiKey_R)) { resetSimulation(); return; }
   if (ctrl) return;
   // Single-key shortcuts only when the mouse is not over a text field.
   if (pressed(ImGuiKey_Delete) || (pressed(ImGuiKey_Backspace) && !io.WantCaptureKeyboard)) deleteSelection();
   if (pressed(ImGuiKey_Escape)) sel_.clear();
   if (io.WantCaptureKeyboard && !vp_.hovered) return;
+  if (pressed(ImGuiKey_Space)) shift ? stopSimulation() : toggleSimulation();
+  if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) && sim_.active() && sim_.paused()) stepSimulation();
   if (pressed(ImGuiKey_Q)) gizmoOp_ = GizmoOp::Select;
   if (pressed(ImGuiKey_W)) gizmoOp_ = GizmoOp::Translate;
   if (pressed(ImGuiKey_E)) gizmoOp_ = GizmoOp::Rotate;

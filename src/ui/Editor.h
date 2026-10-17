@@ -15,6 +15,7 @@
 #include "render/DebugDraw.h"
 #include "render/Renderer.h"
 #include "sim/MujocoBridge.h"
+#include "sim/Simulator.h"
 #include "ui/FileDialog.h"
 #include "ui/Props.h"
 
@@ -117,6 +118,15 @@ class Editor {
   // The body new things get attached to: the selected body, or the owner of the selected element.
   Id targetBody() const;
 
+  // ----- simulation preview -----
+  bool simulating() const { return sim_.active(); }
+  void startSimulation(bool paused = false);
+  void stopSimulation();
+  void toggleSimulation();  // play / pause; starts when stopped
+  void resetSimulation();
+  void stepSimulation();
+  Simulator& simulator() { return sim_; }
+
   const CompileResult& compiled() const { return compiled_; }
   const AnalysisReport& report() const { return report_; }
   bool compileValid() const { return compiled_.ok && compiledRevision_ == editRevision_; }
@@ -135,6 +145,9 @@ class Editor {
   void drawXmlPanel();
   void drawScenePanel();
   void drawStatusBar();
+  void drawSimulationPanel();
+  void drawSimToolbarButtons();
+  void launchSimulation();  // starts from the current compile result
   void drawToasts();
   void drawAboutWindow();
   void handleShortcuts();
@@ -165,6 +178,15 @@ class Editor {
   void viewportInput();
   void drawGizmo();
   void drawViewportOverlayUI();
+  // simulation view
+  void applySimPoses();
+  void buildSimOverlays();
+  void drawSimBadge();
+  bool simMouseDown(const Ray& ray);  // starts a perturbation drag; true if a moving body was grabbed
+  void simMouseDrag(const Ray& ray);
+  bool movesInSimulation(Id element) const;
+  // Simulated joint position relative to the reference (0 when not simulating).
+  double simJointOffset(Id joint) const;
 
   // outliner internals
   void outlinerBody(uint32_t bodyIndex, const std::string& filter);
@@ -232,6 +254,21 @@ class Editor {
   void drawStrength(Id joint);
   std::string xmlPreview_;
   uint64_t xmlPreviewRevision_ = 0;
+
+  // simulation
+  Simulator sim_;
+  bool simWanted_ = false;     // start (paused if simStartPaused_) when the next valid compile arrives
+  bool simStartPaused_ = false;
+  uint64_t simRevision_ = 0;   // edit revision of the model being simulated
+  double lastFrameTime_ = 0;
+  double cliSimSeconds_ = 0;   // --action sim:<seconds>: fast-forward after starting
+  int simPlotActuator_ = 0;    // compiled actuator index shown in the plot
+  bool simShowForces_ = true;
+  std::vector<SimContact> simContacts_;
+  struct SimDrag {
+    bool active = false;
+    Vec3 planePoint, planeNormal;
+  } simDrag_;
 
   // dialogs
   FileDialog fileDialog_;

@@ -56,6 +56,9 @@ const std::vector<TemplateInfo>& templateList() {
 
 void addDefaultEnvironment(Document& doc) {
   doc.option.integrator = Integrator::ImplicitFast;
+  // Stiff friction: without it, feet under sideways load slowly creep (supported by MuJoCo Warp).
+  doc.option.cone = Cone::Elliptic;
+  doc.option.impratio = 10;
   doc.visual.headlightDiffuse = {0.6, 0.6, 0.6};
   doc.visual.headlightAmbient = {0.3, 0.3, 0.3};
   doc.visual.headlightSpecular = {0, 0, 0};
@@ -203,7 +206,7 @@ Id addBiped(Document& doc, const Vec3& pos, const std::string& name) {
   servo(doc, hr, 120, 80);
   servo(doc, hp, 150, 100);
   servo(doc, kn, 150, 100);
-  servo(doc, an, 60, 40);
+  servo(doc, an, 200, 60);  // stiffer than gravity's tipping pull, so it can stand still
   mirrorSubtree(doc, thigh, 1);
   placeOnFloor(doc, pelvis);
   return pelvis;

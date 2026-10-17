@@ -113,48 +113,64 @@ Each milestone ends in a working, committed application.
 
 ### M0 — Foundations
 - [x] Research MuJoCo 3.16 / MJWarp 3.16 feature support and sizing API
-- [ ] Repo, CMake (FetchContent: GLFW, ImGui docking, ImGuizmo, ImPlot, nlohmann/json;
+- [x] Repo, CMake (FetchContent: GLFW, ImGui docking, ImGuizmo, ImPlot, nlohmann/json;
       vendored glad + stb), MuJoCo discovery (`MUJOCO_DIR` / Python package / release download)
-- [ ] App shell: window, docking layout, theme, fonts, HiDPI, idle-friendly main loop
-- [ ] `--screenshot` / scripted frames for headless testing (Xvfb)
+- [x] App shell: window, docking layout, theme, fonts, HiDPI, idle-friendly main loop
+- [x] `--screenshot` / scripted frames for headless testing (Xvfb)
 
 ### M1 — Document, viewport, editing
-- [ ] Data model + undo/redo + selection
-- [ ] Renderer: primitives (shader-stretched capsules), checker planes, infinite grid,
+- [x] Data model + undo/redo + selection
+- [x] Renderer: primitives (shader-stretched capsules), checker planes, infinite grid,
       lighting, shadows, selection highlight; joint/COM/site/light/camera overlays
-- [ ] Orbit camera, view presets, frame-selected; picking; ImGuizmo with snapping
-- [ ] Outliner (tree, drag & drop reparent, context menus, rename, visibility)
-- [ ] Inspector (property grid, MuJoCo defaults with reset, units, doc tooltips,
+- [x] Orbit camera, view presets, frame-selected; picking; ImGuizmo with snapping
+- [x] Outliner (tree, drag & drop reparent, context menus, rename, visibility)
+- [x] Inspector (property grid, MuJoCo defaults with reset, units, doc tooltips,
       multi-selection editing)
-- [ ] Add menu (bodies, geoms, joints, sites, lights, cameras)
-- [ ] Save/Open project (JSON), Export MJCF, recent files
+- [x] Add menu (bodies, geoms, joints, sites, lights, cameras)
+- [x] Save/Open project (JSON), Export MJCF, recent files
 
 ### M2 — Physics authoring & validation
-- [ ] Complete geom / joint / body / inertial attributes
-- [ ] Actuators: motor, position, velocity, intvelocity, damper, cylinder, muscle, adhesion,
+- [x] Complete geom / joint / body / inertial attributes
+- [x] Actuators: motor, position, velocity, intvelocity, damper, cylinder, muscle, adhesion,
       general, dcmotor (+ table panel, "add actuators to all joints")
-- [ ] Sensors, sites, contact excludes/pairs, scene options (timestep, integrator, solver, …)
-- [ ] Background MuJoCo compile; Issues panel with click-to-select and auto-fix buttons
-- [ ] Physics analysis: subtree mass/COM, effective joint inertia, gravity torque vs actuator
+- [x] Sensors, sites, contact excludes, scene options (timestep, integrator, solver, …)
+- [ ] Explicit contact `<pair>`s
+- [x] Background MuJoCo compile; Issues panel with click-to-select and auto-fix buttons
+- [x] Physics analysis: subtree mass/COM, effective joint inertia, gravity torque vs actuator
       strength, servo sag, PD/timestep stability, mass ratios, initial penetration
-- [ ] MJWarp rules + performance hints; live XML preview
+- [x] MJWarp rules + performance hints; live XML preview
 
 ### M3 — Simulation preview
-- [ ] Play/pause/step/reset, speed control, instability detection
-- [ ] Actuator sliders, test signals (sine sweep per actuator), perturbation by dragging
-- [ ] Contact points/forces overlay, live plots (joint vs target, force vs limit)
-- [ ] Live parameter tuning (recompile + state transfer)
-- [ ] Peak `ncon`/`nefc` measurement → `nconmax`/`njmax` recommendation
+
+Done: Play (Space) runs MuJoCo on a private copy of the compiled model and draws it with the
+editor's renderer. Control modes: *Hold pose* (servos target the start pose; torque motors get a
+built-in, stability-limited PD), *Manual* sliders, *Sine test*, *Limp*. Drag bodies to push them
+(spring like MuJoCo's own perturbation). Contacts and contact forces are drawn; the panel shows
+per-actuator control, position, tracking error and force vs capacity, with an ImPlot chart of
+target/actual/force. Edits while running recompile in the background and swap the model in,
+keeping the state when the structure is unchanged. Blow-ups are detected (NaN or MuJoCo's
+bad-qacc warnings), attributed to a joint and explained. Peak contacts, constraint rows and
+MJWarp broadphase candidates give `nconmax`/`njmax` (copyable Python snippet).
+
+- [x] Play/pause/step/reset, speed control, instability detection
+- [x] Actuator sliders, test signals (sine sweep per actuator), perturbation by dragging
+- [x] Contact points/forces overlay, live plots (joint vs target, force vs limit)
+- [x] Live parameter tuning (recompile + state transfer)
+- [x] Peak `ncon`/`nefc` measurement → `nconmax`/`njmax` recommendation
 
 ### M4 — Modeling tools, environments, import/combine
 - [ ] Add-limb tool (click a surface to attach a jointed limb), extend limb
-- [ ] Mirror subtree (left/right naming, symmetric joint axes), duplicate, linear/radial array
-- [ ] Drop to floor, snapping, align
-- [ ] Creature templates (quadruped, hexapod, biped, hopper, arm)
+- [x] Mirror subtree (left/right naming, symmetric joint axes), duplicate
+- [ ] Linear/radial array
+- [x] Drop to floor, snapping
+- [ ] Align / distribute
+- [x] Creature templates (quadruped, hexapod, biped, arm)
+- [ ] Hopper template
 - [ ] Environment generators: stairs, ramps, rough terrain, heightfield (noise), arena walls,
       obstacle fields; materials & textures; lights & cameras
 - [ ] Import MJCF (mjSpec); import a model/environment from another project
-- [ ] Split export (`scene.xml` + `model.xml`), Python MJWarp loader snippet
+- [x] Split export (`scene.xml` + `model.xml`)
+- [ ] Python MJWarp loader snippet on export
 
 ### M5 — Polish
 - [ ] Keyframes / pose mode

@@ -184,6 +184,7 @@ int App::run(const CliOptions& cli) {
       continue;
     }
 
+    double workStart = glfwGetTime();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -201,7 +202,7 @@ int App::run(const CliOptions& cli) {
     ++frame;
     if (trace) {
       double t = glfwGetTime();
-      std::fprintf(stderr, "frame %d  %.1f ms\n", frame, (t - lastTime) * 1000);
+      std::fprintf(stderr, "frame %d  %.1f ms (work %.1f ms)\n", frame, (t - lastTime) * 1000, (t - workStart) * 1000);
       lastTime = t;
     }
     if (!cli.screenshot.empty() && frame >= cli.frames) {

@@ -182,3 +182,33 @@ TEST_CASE("collision presets: feet only and no self-collision") {
   CompileResult cr = compileMjcf(writeMjcf(doc));
   CHECK(cr.ok);
 }
+
+TEST_CASE("analysis: friction creep tip for legged models with soft friction") {
+  Document doc;
+  REQUIRE(makeTemplate("quadruped", doc));
+  CHECK(countCode(analyzeCompiled(doc), "friction-creep") == 0);  // templates use elliptic cones
+  doc.option.cone = Cone::Pyramidal;
+  doc.option.impratio = 1;
+  AnalysisReport r = analyzeCompiled(doc);
+  const Issue* creep = findCode(r, "friction-creep");
+  REQUIRE(creep);
+  REQUIRE(creep->fix);
+  creep->fix(doc);
+  CHECK(doc.option.cone == Cone::Elliptic);
+  CHECK(countCode(analyzeCompiled(doc), "friction-creep") == 0);
+}
+
+TEST_CASE("analysis: a biped with soft ankles can't stand still") {
+  Document doc;
+  REQUIRE(makeTemplate("biped", doc));
+  CHECK(countCode(analyzeCompiled(doc), "ankle-balance") == 0);
+  for (Actuator& a : doc.actuators)
+    if (doc.nameOf(a.target).find("ankle") != std::string::npos) a.kp = 60;
+  AnalysisReport r = analyzeCompiled(doc);
+  const Issue* ankle = findCode(r, "ankle-balance");
+  REQUIRE(ankle);
+  CHECK(ankle->elements.size() == 2);  // both ankle joints
+  REQUIRE(ankle->fix);
+  ankle->fix(doc);
+  CHECK(countCode(analyzeCompiled(doc), "ankle-balance") == 0);
+}

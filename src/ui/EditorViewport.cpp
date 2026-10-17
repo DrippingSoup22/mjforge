@@ -79,6 +79,7 @@ double bodyScale(const Document& doc, const std::vector<Pose>& poses, Id body) {
 
 void Editor::buildScene(std::vector<DrawItem>& items) {
   poses_ = computeBodyPoses(doc_);
+  if (sim_.active()) applySimPoses();
   const DocIndex& ix = doc_.index();
   std::unordered_set<Id> selected(sel_.ids.begin(), sel_.ids.end());
   Id primary = sel_.primary();
@@ -196,17 +197,21 @@ void Editor::buildOverlays() {
           if (length(d) > 1e-6) ref = normalize(d);
         }
         double r = L * 0.6;
+        // While simulating, the range stays attached to the parent and the needle shows the angle.
+        Vec3 zero = ref;
+        double q = simJointOffset(j.id);
+        if (q != 0) zero = rotate(axisAngle(axis, -q), ref);
         if (j.limited && j.range.y > j.range.x) {
           Color fill = c;
           fill.a = sel ? 0.35f : 0.18f;
-          dbg_.sector(anchor, axis, ref, r, j.range.x, j.range.y, fill, layer);
-          dbg_.arc(anchor, axis, ref, r, j.range.x, j.range.y, c, w * 0.8f, layer);
+          dbg_.sector(anchor, axis, zero, r, j.range.x, j.range.y, fill, layer);
+          dbg_.arc(anchor, axis, zero, r, j.range.x, j.range.y, c, w * 0.8f, layer);
         } else {
           Color cc = c;
           cc.a = 0.5f;
           dbg_.circle(anchor, axis, r, cc, w * 0.7f, layer);
         }
-        dbg_.line(anchor, anchor + ref * r, c, w * 0.8f, layer);  // q = 0 direction
+        dbg_.line(anchor, anchor + ref * r, c, w * 0.8f, layer);  // current direction (q = 0 when editing)
         break;
       }
       case JointType::Slide: {
@@ -214,7 +219,8 @@ void Editor::buildOverlays() {
         dbg_.arrow(anchor + axis * (L * 0.4), anchor - axis * (L * 0.8), c, w, layer);
         if (j.limited) {
           Vec3 u = perpendicular(axis) * (L * 0.15);
-          for (double v : {j.range.x, j.range.y}) dbg_.line(anchor + axis * v - u, anchor + axis * v + u, c, w + 1, layer);
+          Vec3 zero = anchor - axis * simJointOffset(j.id);
+          for (double v : {j.range.x, j.range.y}) dbg_.line(zero + axis * v - u, zero + axis * v + u, c, w + 1, layer);
         }
         break;
       }
@@ -304,6 +310,10 @@ void Editor::buildOverlays() {
     }
   }
 
+  if (sim_.active()) {
+    buildSimOverlays();
+    return;
+  }
   // Penetrating contacts at the reference pose (from the last MuJoCo compile).
   if (vp_.showContacts && compileValid()) {
     for (const InitialContact& c : compiled_.initialContacts) {
@@ -332,7 +342,7 @@ Id Editor::pick(const Ray& ray, double* tHit) {
   };
   const double tol = 9.0 * scale_;
   double bestScreen = tol;
-  if (vp_.showJoints) {
+  if (vp_.showJoints && !sim_.active()) {
     for (const Joint& j : doc_.joints) {
       const Body* b = doc_.body(j.body);
       if (!b || j.hidden || b->hidden) continue;
@@ -438,6 +448,7 @@ void Editor::viewportInput() {
         vp_.dragMoved = false;
         vp_.pressX = m.x;
         vp_.pressY = m.y;
+        if (b == 0 && sim_.active()) simMouseDown(ray);  // grab a moving body to push it
         break;
       }
     }
@@ -446,12 +457,17 @@ void Editor::viewportInput() {
     int b = vp_.dragButton;
     if (std::hypot(m.x - vp_.pressX, m.y - vp_.pressY) > 3.0f * scale_) vp_.dragMoved = true;
     if (ImGui::IsMouseDown(b)) {
+      if (b == 0 && simDrag_.active) simMouseDrag(ray);
       ImVec2 d = io.MouseDelta;
       bool pan = b == 2 || (b == 1 && io.KeyShift);
       if (b == 1 && !pan) vp_.cam.orbit(-d.x * 0.35, d.y * 0.35);
       if (pan) vp_.cam.pan(d.x, d.y, vp_.h);
     } else {
       // Released.
+      if (simDrag_.active) {
+        sim_.clearPerturb();
+        simDrag_.active = false;
+      }
       if (b == 0 && !vp_.dragMoved && inside) {
         Id hit = pick(ray);
         if (hit) select(hit, io.KeyShift, io.KeyCtrl);
@@ -482,6 +498,8 @@ void Editor::drawGizmo() {
   if (gizmoOp_ == GizmoOp::Select || id == kNoId || id == kWorldId) return;
   if (k != Kind::Body && k != Kind::Geom && k != Kind::Joint && k != Kind::Site && k != Kind::Camera && k != Kind::Light) return;
   if (gizmoOp_ == GizmoOp::Scale && k != Kind::Geom && k != Kind::Site) return;
+  // While simulating only static things (environment) can be moved; the rest follows the physics.
+  if (sim_.active() && movesInSimulation(id)) return;
 
   Pose world = elementWorldPose(doc_, poses_, id);
   Vec3 scale{1, 1, 1};
@@ -674,10 +692,15 @@ void Editor::drawViewportOverlayUI() {
   if (iconButton("##vframes", Icon::Free, vp_.showFrames, "Show body frames")) vp_.showFrames = !vp_.showFrames;
   ImGui::PopStyleVar();
 
+  if (sim_.active()) drawSimBadge();
+
   // Hover name and hints (bottom left).
   std::string hint;
   if (vp_.hoverId) {
     hint = std::string(kindName(doc_.kindOf(vp_.hoverId))) + "  " + doc_.nameOf(vp_.hoverId);
+    if (sim_.active() && movesInSimulation(vp_.hoverId)) hint += "   (drag to push)";
+  } else if (sim_.active()) {
+    hint = "Left-drag a body: push it   Space: pause / resume   Shift+Space: stop   Ctrl+R: reset";
   } else {
     hint = "Right-drag: orbit   Middle/Shift+right-drag: pan   Wheel: zoom   Click: select   F: frame";
   }
