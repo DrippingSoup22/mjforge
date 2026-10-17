@@ -960,12 +960,16 @@ void Editor::inspectSensor(Sensor& s) {
       return std::vector<std::pair<Id, std::string>>{};
     };
     // Changing an object's type clears the object (it would be of the wrong kind).
+    // `other` (when of the same type) is left out of the list: for objects that must differ.
     auto typed = [&](const char* typeLabel, FrameObj* t, const auto& table, FrameObj def, const char* label, Id* obj,
-                     bool allowNone, const char* noneLabel, const char* tip) {
+                     bool allowNone, const char* noneLabel, const char* tip, Id other = kNoId) {
       FrameObj before = *t;
       props::combo(typeLabel, t, table, def, tip);
       if (*t != before) *obj = kNoId;
-      props::element(label, obj, objects(*t), allowNone, tip, noneLabel);
+      auto list = objects(*t);
+      if (other != kNoId)
+        list.erase(std::remove_if(list.begin(), list.end(), [&](const auto& e) { return e.first == other; }), list.end());
+      props::element(label, obj, list, allowNone, tip, noneLabel);
     };
     static constexpr EnumEntry<FrameObj> kGeomOrBody[] = {{FrameObj::Geom, "geom", "Geom"}, {FrameObj::Body, "body", "Body (all its geoms)"}};
     static constexpr EnumEntry<FrameObj> kContact1[] = {
@@ -994,8 +998,11 @@ void Editor::inspectSensor(Sensor& s) {
               "Optional frame in which the quantity is expressed.");
         break;
       case SensorObj::GeomPair:
-        typed("First is a", &s.objtype, kGeomOrBody, FrameObj::Geom, "First", &s.obj, false, "(none)", nullptr);
-        typed("Second is a", &s.reftype, kGeomOrBody, FrameObj::Geom, "Second", &s.ref, false, "(none)", nullptr);
+        // MuJoCo refuses the same object on both sides.
+        typed("First is a", &s.objtype, kGeomOrBody, FrameObj::Geom, "First", &s.obj, false, "(none)", nullptr,
+              s.reftype == s.objtype ? s.ref : kNoId);
+        typed("Second is a", &s.reftype, kGeomOrBody, FrameObj::Geom, "Second", &s.ref, false, "(none)", nullptr,
+              s.reftype == s.objtype ? s.obj : kNoId);
         props::info("Search distance", "%s", s.cutoff > 0 ? "the Cutoff below" : "0: set Cutoff to the largest distance of interest");
         break;
       case SensorObj::Contact: {

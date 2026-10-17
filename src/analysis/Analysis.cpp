@@ -806,6 +806,11 @@ class Analyzer {
               "MuJoCo refuses height fields in distance, normal and fromto sensors (they are not convex). Measure "
               "against the body or another geom.",
               {s.id});
+        if (s.obj != kNoId && s.obj == s.ref && s.objtype == s.reftype)
+          add(Severity::Error, IssueArea::Model, "sensor-same", fmt("Sensor %s measures an object against itself", quote(s.name).c_str()),
+              "MuJoCo refuses a distance, normal or fromto sensor whose two sides are the same geom or body. Choose "
+              "another second object.",
+              {s.id, s.obj});
       }
       if (o == SensorObj::CamProj)
         if (const Camera* c = doc_.camera(s.ref); c && (c->resolution[0] <= 0 || c->resolution[1] <= 0))
@@ -2492,6 +2497,7 @@ std::string explainCompileError(const std::string& e) {
        "An explicit inertia is impossible for a rigid body: each principal inertia must be at most the sum of the "
        "other two."},
       {"is repeated in equality constraint", "An equality constraint uses the same element on both sides."},
+      {"1st body/geom must be different from 2nd", "A distance sensor measures a geom or body against itself."},
       {"joint must be slide or hinge in sensor",
        "Joint position and velocity sensors need a hinge or slide joint; ball joints use ball sensors, free joints "
        "frame sensors."},

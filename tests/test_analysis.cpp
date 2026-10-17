@@ -347,6 +347,17 @@ TEST_CASE("analysis: predicts MuJoCo's refusals, each rule checked against the c
       {"muscle-params", [&](Document& d) { d.actuator(muscle)->lmin = 1.2; }},
       {"muscle-params", [&](Document& d) { d.actuator(muscle)->muscleRange = {1, 0.8}; }},
       {"sensor-cutoff", [&](Document& d) { d.sensor(quat)->cutoff = 0.5; }},
+      {"sensor-same", [&](Document& d) {
+         Sensor* x = d.sensor(addSensor(d, SensorType::Distance, g, "gap"));
+         x->objtype = x->reftype = FrameObj::Geom;
+         x->obj = x->ref = g;
+         x->cutoff = 1;
+       }},
+      {"sensor-same", [&](Document& d) {
+         Sensor* x = d.sensor(addSensor(d, SensorType::FromTo, b, "closest"));
+         x->objtype = x->reftype = FrameObj::Body;
+         x->obj = x->ref = b;
+       }},
       {"light-softness", [&](Document& d) { d.light(light)->softness = 1.5; }},
       {"geom-density", [&](Document& d) { d.geom(g)->density = -10; }},
   };
