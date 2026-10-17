@@ -1018,7 +1018,10 @@ void Editor::inspectSensor(Sensor& s) {
     int dim = sensorDim(s);
     props::info("Output size", "%d value%s", dim, dim > 1 ? "s" : "");
     props::real("Noise (std)", &s.noise, 0, O(D("sensor.noise"), nullptr, 0.001, 0, 1e6));
-    props::real("Cutoff", &s.cutoff, 0, O(D("sensor.cutoff"), nullptr, 0.01, 0, 1e9));
+    // MuJoCo refuses a cutoff on directions and orientations.
+    bool unitData = s.type == SensorType::FrameXAxis || s.type == SensorType::FrameYAxis || s.type == SensorType::FrameZAxis ||
+                    s.type == SensorType::FrameQuat || s.type == SensorType::BallQuat;
+    if (!unitData || s.cutoff != 0) props::real("Cutoff", &s.cutoff, 0, O(D("sensor.cutoff"), nullptr, 0.01, 0, 1e9));
   }
   if (props::section("Latency and rate", s.delay > 0 || s.nsample > 0 || s.interval.x > 0)) {
     props::real("Delay", &s.delay, 0, O(D("sensor.delay"), "s", 0.001, 0, 10));

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <limits>
+#include <random>
 
 #include <nlohmann/json.hpp>
 
@@ -408,12 +409,22 @@ bool hasIssue(const AnalysisReport& r, const char* code) {
 
 TEST_CASE("review: save and load give back every digit of the export") {
   // Quaternions a rounding error off unit length, as edits leave them, came back renormalized.
+  // Many of them change in the last digit when normalized again (which ones depends on the
+  // platform's arithmetic), so the round trip below covers that case everywhere.
   Document doc;
   makeTemplate("quadruped", doc);
-  Quat q{0.6350912284318131, -0.5881470238628586, 0.05390620477312463, 0.4978316291450259};
-  REQUIRE(normalize(q).w != q.w);
-  doc.bodies[2].quat = q;
-  doc.geoms[1].quat = q;
+  std::mt19937 rng(3);
+  std::uniform_real_distribution<double> u(-1, 1);
+  int renormalized = 0;
+  auto randomQuat = [&] {
+    Quat q = normalize(Quat{u(rng), u(rng), u(rng), u(rng)});
+    Quat again = normalize(q);
+    renormalized += again.w != q.w || again.x != q.x || again.y != q.y || again.z != q.z;
+    return q;
+  };
+  for (size_t i = 1; i < doc.bodies.size(); ++i) doc.bodies[i].quat = randomQuat();
+  for (Geom& g : doc.geoms) g.quat = randomQuat();
+  WARN(renormalized > 0);
   startKeyframe(doc);
   std::string xml = writeMjcf(doc);
   Document back;

@@ -257,3 +257,47 @@ TEST_CASE("simulator: the motor PD holds steadily in stance (no chattering)") {
   CHECK_FALSE(sim.diverged());
   for (int a = 0; a < 3; ++a) CHECK(hi[a] - lo[a] < 0.05);
 }
+
+TEST_CASE("simulator: live edits keep delayed controls (no jerk towards zero)") {
+  // A servo holding a raised arm through a 30 ms control delay. Adding a delayed sensor while it
+  // runs resizes MuJoCo's history buffer; a fresh buffer holds zero controls.
+  Document doc;
+  Id base = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "base");
+  Id arm = addBody(doc, base, {}, "arm");
+  Id j = addJoint(doc, arm, JointType::Hinge, {}, {0, 1, 0}, "shoulder");
+  doc.joint(j)->limited = true;
+  doc.joint(j)->range = {-2, 2};
+  addGeom(doc, arm, GeomType::Capsule, {0.03, 0.2, 0}, {{0.2, 0, 0}, {axisAngle({0, 1, 0}, kPi / 2)}}, "link");
+  Id a = addActuator(doc, ActuatorType::Position, j, "servo");
+  doc.actuator(a)->kp = 200;
+  doc.actuator(a)->dampratio = 1;
+  doc.actuator(a)->ctrlrange = {-2, 2};
+  doc.actuator(a)->delay = 0.03;
+  doc.actuator(a)->nsample = 20;
+  Keyframe& key = startKeyframe(doc);
+  setKeyJointQpos(key, j, {-1.0});
+  syncKeyframeControls(doc, key);
+  CompileResult cr = compileDoc(doc);
+  Simulator sim;
+  REQUIRE(sim.start(cr.model, cr.map));
+  run(sim, 0.5);
+  double held = sim.data()->qpos[0];
+  CHECK(held == doctest::Approx(-1.0).epsilon(0.05));
+  for (int edit = 0; edit < 2; ++edit) {
+    if (edit == 0) {
+      Id s = addSensor(doc, SensorType::JointPos, j, "angle");
+      doc.sensor(s)->delay = 0.01;
+      doc.sensor(s)->nsample = 10;
+    } else {
+      doc.actuator(a)->nsample = 40;  // its own buffer resized
+    }
+    CompileResult cr2 = compileDoc(doc);
+    CHECK(sim.update(cr2.model, cr2.map));
+    double worst = 0;
+    for (int i = 0; i < 100; ++i) {
+      sim.stepOnce();
+      worst = std::max(worst, std::fabs(sim.data()->qpos[0] - held));
+    }
+    CHECK(worst < 0.05);
+  }
+}

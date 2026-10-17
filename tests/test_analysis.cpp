@@ -301,3 +301,81 @@ TEST_CASE("analysis: a biped with soft ankles can't stand still") {
   ankle->fix(doc);
   CHECK(countCode(analyzeCompiled(doc), "ankle-balance") == 0);
 }
+
+TEST_CASE("analysis: predicts MuJoCo's refusals, each rule checked against the compiler") {
+  // A model that compiles, with one element of each kind the rules look at.
+  Document base;
+  Id b = addBody(base, kWorldId, {{0, 0, 1}, {}}, "arm");
+  Id j = addJoint(base, b, JointType::Hinge, {}, {0, 1, 0}, "shoulder");
+  base.joint(j)->limited = true;
+  base.joint(j)->range = {-1, 1};
+  Id g = addGeom(base, b, GeomType::Capsule, {0.03, 0.2, 0}, {{0.2, 0, 0}, axisAngle({0, 1, 0}, kPi / 2)}, "link");
+  Id s1 = addSite(base, kWorldId, {{0, 0, 1.2}, {}}, "anchor");
+  Id s2 = addSite(base, b, {{0.3, 0, 0}, {}}, "tip");
+  Id t = addTendon(base, TendonType::Spatial, "cable");
+  base.tendon(t)->path = {{TendonPoint::Type::Site, s1}, {TendonPoint::Type::Site, s2}};
+  Id motor = addActuator(base, ActuatorType::Motor, j, "motor");
+  Id general = addActuator(base, ActuatorType::Motor, j, "general");
+  setActuatorType(base, *base.actuator(general), ActuatorType::General);
+  Id intvel = addActuator(base, ActuatorType::Motor, j, "intvel");
+  setActuatorType(base, *base.actuator(intvel), ActuatorType::IntVelocity);
+  Id muscle = addActuator(base, ActuatorType::Motor, j, "muscle");
+  setActuatorType(base, *base.actuator(muscle), ActuatorType::Muscle);
+  base.actuator(muscle)->lengthrange = {-0.5, 0.5};
+  Id quat = addSensor(base, SensorType::FrameQuat, s2, "tip_orientation");
+  Id light = addLight(base, kWorldId, {0, 0, 3}, {0, 0, -1}, "lamp");
+  REQUIRE(compileMjcf(writeMjcf(base)).ok);
+
+  struct Case {
+    const char* code;
+    std::function<void(Document&)> breakIt;
+  };
+  const Case cases[] = {
+      {"joint-actfrcrange", [&](Document& d) { d.joint(j)->actuatorfrclimited = true; d.joint(j)->actuatorfrcrange = {2, 2}; }},
+      {"tendon-actfrcrange", [&](Document& d) { d.tendon(t)->actfrclimited = true; d.tendon(t)->actuatorfrcrange = {0.5, 1}; }},
+      {"tendon-springlength", [&](Document& d) { d.tendon(t)->springlength = {0.3, -1}; }},
+      {"tendon-width", [&](Document& d) { d.tendon(t)->width = 0; }},
+      {"ctrl-range-order", [&](Document& d) { d.actuator(motor)->ctrlrange = {0.5, 0.5}; }},
+      {"force-range-order", [&](Document& d) { d.actuator(motor)->forcelimited = true; d.actuator(motor)->forcerange = {3, -3}; }},
+      {"act-range-nodyn", [&](Document& d) { d.actuator(general)->actlimited = true; d.actuator(general)->actrange = {-1, 1}; }},
+      {"act-range-order", [&](Document& d) {
+         setActuatorType(d, *d.actuator(general), ActuatorType::General);
+         d.actuator(general)->dyntype = DynType::Integrator;
+         d.actuator(general)->actlimited = true;
+         d.actuator(general)->actrange = {1, -1};
+       }},
+      {"muscle-params", [&](Document& d) { d.actuator(muscle)->lmin = 1.2; }},
+      {"muscle-params", [&](Document& d) { d.actuator(muscle)->muscleRange = {1, 0.8}; }},
+      {"sensor-cutoff", [&](Document& d) { d.sensor(quat)->cutoff = 0.5; }},
+      {"light-softness", [&](Document& d) { d.light(light)->softness = 1.5; }},
+      {"geom-density", [&](Document& d) { d.geom(g)->density = -10; }},
+  };
+  // On an intvelocity servo MuJoCo silently drops an empty activation range instead.
+  {
+    Document doc = base;
+    doc.actuator(intvel)->actlimited = true;
+    doc.actuator(intvel)->actrange = {1, -1};
+    CHECK(compileMjcf(writeMjcf(doc)).ok);
+    AnalysisReport r = analyzeModel(doc, nullptr, false);
+    const Issue* i = findCode(r, "act-range-order");
+    REQUIRE(i);
+    CHECK(i->severity == Severity::Warning);
+  }
+  for (const Case& c : cases) {
+    INFO(std::string(c.code));
+    Document doc = base;
+    c.breakIt(doc);
+    CompileResult cr = compileMjcf(writeMjcf(doc));
+    CHECK_FALSE(cr.ok);
+    AnalysisReport r = analyzeModel(doc, nullptr, false);
+    const Issue* i = findCode(r, c.code);
+    REQUIRE(i);
+    CHECK(i->severity == Severity::Error);
+    if (i->fix) {
+      i->fix(doc);
+      CompileResult fixed = compileMjcf(writeMjcf(doc));
+      INFO(fixed.error);
+      CHECK(fixed.ok);
+    }
+  }
+}

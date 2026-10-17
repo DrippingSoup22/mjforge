@@ -161,10 +161,8 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
   if (!nm || !d) return false;
   // Keep the dynamic state; mocap bodies take their (possibly edited) positions from the new model.
   const mjData* od = data_.get();
-  bool reordered = false;
   for (int j = 0; j < n->njnt; ++j) {
     int oj = oldJoint[size_t(j)];
-    reordered |= oj != j;
     int nq = n->jnt_type[j] == mjJNT_FREE ? 7 : n->jnt_type[j] == mjJNT_BALL ? 4 : 1;
     int nv = n->jnt_type[j] == mjJNT_FREE ? 6 : n->jnt_type[j] == mjJNT_BALL ? 3 : 1;
     mju_copy(d->qpos + n->jnt_qposadr[j], od->qpos + o->jnt_qposadr[oj], nq);
@@ -173,13 +171,34 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
   }
   for (int i = 0; i < n->nu; ++i) {
     int oi = oldAct[size_t(i)];
-    reordered |= oi != i;
     d->ctrl[i] = od->ctrl[oi];
     if (n->actuator_actnum[i] > 0)
       mju_copy(d->act + n->actuator_actadr[i], od->act + o->actuator_actadr[oi], n->actuator_actnum[i]);
   }
-  // Delayed controls: the buffer layout follows the actuators, so it is kept for the same order.
-  if (!reordered && o->nhistory == n->nhistory && n->nhistory > 0) mju_copy(d->history, od->history, n->nhistory);
+  // History buffers (layout: a user slot, a cursor, the sample times, the values) follow their
+  // actuator or sensor while their size is unchanged. A new or resized control history starts
+  // filled with the actuator's current control: a fresh one holds zeros, which would drive the
+  // joint towards 0 for the length of the delay.
+  for (int i = 0; i < n->nu; ++i) {
+    int ns = n->actuator_history[2 * i], dim = n->actuator_ctrlnum[i];
+    if (ns <= 0 || n->actuator_historyadr[i] < 0) continue;
+    int oi = oldAct[size_t(i)];
+    if (o->actuator_history[2 * oi] == ns && o->actuator_ctrlnum[oi] == dim && o->actuator_historyadr[oi] >= 0) {
+      mju_copy(d->history + n->actuator_historyadr[i], od->history + o->actuator_historyadr[oi], 2 + ns * (1 + dim));
+    } else if (dim == 1) {
+      std::vector<mjtNum> times(static_cast<size_t>(ns), 0.0), values(static_cast<size_t>(ns), od->ctrl[oi]);
+      for (int k = 0; k < ns; ++k) times[size_t(k)] = od->time - (ns - k) * n->opt.timestep;
+      mj_initCtrlHistory(nm.get(), d.get(), i, times.data(), values.data());
+    }
+  }
+  for (int s = 0; s < n->nsensor && size_t(s) < map.sensors.size(); ++s) {
+    int ns = n->sensor_history[2 * s], dim = n->sensor_dim[s];
+    int os = indexOf(map_.sensors, map.sensors[size_t(s)]);
+    if (ns <= 0 || n->sensor_historyadr[s] < 0 || os < 0 || os >= o->nsensor) continue;
+    if (o->sensor_history[2 * os] == ns && o->sensor_dim[os] == dim && o->sensor_historyadr[os] >= 0 &&
+        o->sensor_interval[2 * os] == n->sensor_interval[2 * s])
+      mju_copy(d->history + n->sensor_historyadr[s], od->history + o->sensor_historyadr[os], 2 + ns * (1 + dim));
+  }
   d->time = od->time;
   model_ = std::move(nm);
   data_ = std::move(d);

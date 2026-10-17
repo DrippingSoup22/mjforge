@@ -337,12 +337,14 @@ void bakeTotalMass(Document& d) {
   d.compiler.settotalmass = -1;
   CompileResult r = compileMjcf(writeMjcf(d));
   double total = 0;
-  if (r.ok)
+  if (r.ok) {
     for (int b = 1; b < r.model->nbody; ++b) total += r.model->body_mass[b];
-  if (!(total > 0)) {
-    d.compiler.settotalmass = target;
-    return;
+  } else {
+    // A model MuJoCo refuses for another reason: MJForge's own estimate (exact for primitives).
+    std::vector<Pose> poses = computeBodyPoses(d);
+    for (size_t b = 1; b < d.bodies.size(); ++b) total += bodyMassProps(d, poses, d.bodies[b].id).mass;
   }
+  if (!(total > 0)) return;  // no mass to scale: MuJoCo ignores settotalmass, so dropping it is exact
   double s = target / total;
   for (Geom& g : d.geoms) {
     if (g.mass >= 0) g.mass *= s;
@@ -428,7 +430,8 @@ class Analyzer {
       merged.title = fmt("%zu %s", idx.size(), g.title);
       merged.detail = rep_.issues[idx[0]].detail + "\n\n" + detail;
       if (!fixes.empty()) {
-        merged.fixLabel = "Fix all " + std::to_string(fixes.size());
+        merged.fixLabel = fixes.size() == idx.size() ? fmt("Fix all %zu", fixes.size())
+                                                     : fmt("Fix %zu of %zu", fixes.size(), idx.size());
         merged.fix = [fixes](Document& d) { for (const auto& f : fixes) f(d); };
       }
       for (auto it = idx.rbegin(); it != idx.rend(); ++it) rep_.issues.erase(rep_.issues.begin() + long(*it));
@@ -581,10 +584,82 @@ class Analyzer {
         i.fixLabel = useJoint ? "Use the joint range" : "Limit to [-1, 1]";
         i.fix = [id, r](Document& d) { if (Actuator* x = d.actuator(id)) { x->ctrllimited = true; x->ctrlrange = r; } };
       }
-      if (a.ctrllimited && a.ctrlrange.x > a.ctrlrange.y)
-        add(Severity::Error, IssueArea::Model, "ctrl-range-order", fmt("Actuator %s: control range lower > upper", quote(a.name).c_str()), "", {a.id});
-      if (a.forcelimited && a.forcerange.x > a.forcerange.y)
-        add(Severity::Error, IssueArea::Model, "force-range-order", fmt("Actuator %s: force range lower > upper", quote(a.name).c_str()), "", {a.id});
+      // MuJoCo refuses an empty or reversed range on a limited control, force or activation, as the
+      // export writes them (an inherited range, a DC motor's force and a zero adhesion force range
+      // are not written).
+      bool integratorDyn = a.type == ActuatorType::IntVelocity || (a.type == ActuatorType::General && a.dyntype == DynType::Integrator);
+      bool inherits = a.inheritrange > 0 && (a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity ||
+                                             a.type == ActuatorType::General);
+      bool ctrlWritten = a.ctrllimited && a.type != ActuatorType::Damper && a.type != ActuatorType::Adhesion && !(inherits && !integratorDyn);
+      bool forceWritten = a.forcelimited && a.type != ActuatorType::DcMotor &&
+                          (a.type != ActuatorType::Adhesion || std::fabs(a.forcerange.x) > 1e-12 || std::fabs(a.forcerange.y) > 1e-12);
+      bool actWritten = a.actlimited && (a.type == ActuatorType::IntVelocity || a.type == ActuatorType::General) &&
+                        !(inherits && integratorDyn);
+      auto rangeOrder = [&](bool written, const Vec2& r, const char* code, const char* what, Vec2 Actuator::*field, bool Actuator::*flag,
+                            bool silent = false) {
+        if (!written || r.x < r.y) return;
+        Issue& i = add(silent ? Severity::Warning : Severity::Error, IssueArea::Model, code,
+                       fmt("Actuator %s: %s range lower limit is not below the upper limit", quote(a.name).c_str(), what),
+                       silent ? "MuJoCo silently drops such a limit on an intvelocity servo, so its target is unlimited."
+                              : "MuJoCo refuses an empty or reversed range on a limited actuator.",
+                       {a.id});
+        Id id = a.id;
+        bool swap = r.x > r.y;
+        i.fixLabel = swap ? "Swap the limits" : "Turn the limit off";
+        i.fix = [id, swap, field, flag](Document& d) {
+          if (Actuator* x = d.actuator(id)) {
+            if (swap) std::swap((x->*field).x, (x->*field).y);
+            else x->*flag = false;
+          }
+        };
+      };
+      rangeOrder(ctrlWritten, a.ctrlrange, "ctrl-range-order", "control", &Actuator::ctrlrange, &Actuator::ctrllimited);
+      rangeOrder(forceWritten, a.forcerange, "force-range-order", "force", &Actuator::forcerange, &Actuator::forcelimited);
+      rangeOrder(actWritten, a.actrange, "act-range-order", "activation", &Actuator::actrange, &Actuator::actlimited,
+                 a.type == ActuatorType::IntVelocity);
+      if (actWritten && a.type == ActuatorType::General && a.dyntype == DynType::None) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "act-range-nodyn",
+                       fmt("Actuator %s limits an activation it does not have", quote(a.name).c_str()),
+                       "An activation range needs activation dynamics (integrator, filter, muscle or user); MuJoCo refuses "
+                       "it with dynamics 'none'.",
+                       {a.id});
+        Id id = a.id;
+        i.fixLabel = "Turn the activation limit off";
+        i.fix = [id](Document& d) { if (Actuator* x = d.actuator(id)) x->actlimited = false; };
+      }
+      // Muscle parameters (as gain and bias of a general actuator too): MuJoCo needs range[0] <
+      // range[1], lmin < 1 < lmax and positive scale, vmax, fpmax and fvmax.
+      auto muscleBad = [](double r0, double r1, double scale, double lmin, double lmax, double vmax, double fpmax, double fvmax) {
+        return !(r0 < r1) || !(lmin < 1) || !(lmax > 1) || !(scale > 0) || !(vmax > 0) || !(fpmax > 0) || !(fvmax > 0);
+      };
+      bool badMuscle = false;
+      if (a.type == ActuatorType::Muscle)
+        badMuscle = muscleBad(a.muscleRange.x, a.muscleRange.y, a.muscleScale, a.lmin, a.lmax, a.vmax, a.fpmax, a.fvmax);
+      if (a.type == ActuatorType::General)
+        for (const Vec10* p : {a.gaintype == GainType::Muscle ? &a.gainprm : nullptr, a.biastype == BiasType::Muscle ? &a.biasprm : nullptr})
+          if (p) badMuscle |= muscleBad((*p)[0], (*p)[1], (*p)[3], (*p)[4], (*p)[5], (*p)[6], (*p)[7], (*p)[8]);
+      if (badMuscle) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "muscle-params", fmt("Muscle %s has invalid parameters", quote(a.name).c_str()),
+                       "MuJoCo needs an operating range with lower < upper, lmin < 1 < lmax, and a positive scale, vmax, "
+                       "fpmax and fvmax.",
+                       {a.id});
+        if (a.type == ActuatorType::Muscle) {
+          Id id = a.id;
+          i.fixLabel = "Reset the invalid ones";
+          i.fix = [id](Document& d) {
+            Actuator* x = d.actuator(id);
+            if (!x) return;
+            const Actuator def;
+            if (!(x->muscleRange.x < x->muscleRange.y)) x->muscleRange = def.muscleRange;
+            if (!(x->lmin < 1)) x->lmin = def.lmin;
+            if (!(x->lmax > 1)) x->lmax = def.lmax;
+            if (!(x->muscleScale > 0)) x->muscleScale = def.muscleScale;
+            if (!(x->vmax > 0)) x->vmax = def.vmax;
+            if (!(x->fpmax > 0)) x->fpmax = def.fpmax;
+            if (!(x->fvmax > 0)) x->fvmax = def.fvmax;
+          };
+        }
+      }
       const Joint* tj = a.trn == TrnType::Joint ? doc_.joint(a.target) : nullptr;
       // The range of joint angles a servo targets: the control of a position servo, the integrated
       // activation of an intvelocity servo (whose control is a speed).
@@ -692,6 +767,34 @@ class Analyzer {
       if (s.noise < 0 || s.cutoff < 0)
         add(Severity::Error, IssueArea::Model, "sensor-negative", fmt("Sensor %s has a negative noise or cutoff", quote(s.name).c_str()),
             "", {s.id});
+      bool unitData = s.type == SensorType::FrameXAxis || s.type == SensorType::FrameYAxis || s.type == SensorType::FrameZAxis ||
+                      s.type == SensorType::FrameQuat || s.type == SensorType::BallQuat;
+      if (unitData && s.cutoff > 0) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "sensor-cutoff",
+                       fmt("Sensor %s: a cutoff cannot clip an axis or quaternion", quote(s.name).c_str()),
+                       "MuJoCo refuses a cutoff on directions and orientations (clipping would break their unit length).",
+                       {s.id});
+        Id id = s.id;
+        i.fixLabel = "Remove the cutoff";
+        i.fix = [id](Document& d) { if (Sensor* x = d.sensor(id)) x->cutoff = 0; };
+      }
+      if (o == SensorObj::GeomPair) {
+        auto hfield = [&](FrameObj t, Id g) {
+          const Geom* x = t == FrameObj::Geom ? doc_.geom(g) : nullptr;
+          return x && x->type == GeomType::Hfield;
+        };
+        if (hfield(s.objtype, s.obj) || hfield(s.reftype, s.ref))
+          add(Severity::Error, IssueArea::Model, "sensor-hfield",
+              fmt("Sensor %s measures a height field, which distance sensors do not support", quote(s.name).c_str()),
+              "MuJoCo refuses height fields in distance, normal and fromto sensors (they are not convex). Measure "
+              "against the body or another geom.",
+              {s.id});
+      }
+      if (o == SensorObj::CamProj)
+        if (const Camera* c = doc_.camera(s.ref); c && (c->resolution[0] <= 0 || c->resolution[1] <= 0))
+          add(Severity::Error, IssueArea::Model, "sensor-target",
+              fmt("Sensor %s projects onto camera %s, which has no resolution", quote(s.name).c_str(), quote(c->name).c_str()), "",
+              {s.id, c->id});
       // Update period and phase: MuJoCo takes a phase in (-period, 0], the first update being at
       // period + phase.
       if (s.interval.x < 0 || s.interval.y > 0 || (s.interval.x > 0 && s.interval.y <= -s.interval.x)) {
@@ -748,11 +851,17 @@ class Analyzer {
     }
     for (const Camera& c : doc_.cameras) {
       bool sensor = c.sensorsize.x > 0 && c.sensorsize.y > 0;
-      bool intrinsic = c.focal.x != 0 || c.focal.y != 0 || c.principal.x != 0 || c.principal.y != 0;
-      if ((intrinsic && !sensor) || (sensor && (c.resolution[0] <= 0 || c.resolution[1] <= 0))) {
-        Issue& i = add(Severity::Error, IssueArea::Model, "camera-intrinsics",
+      bool partial = !sensor && (c.sensorsize.x != 0 || c.sensorsize.y != 0 || c.focal.x != 0 || c.focal.y != 0 ||
+                                 c.principal.x != 0 || c.principal.y != 0);
+      bool noResolution = sensor && (c.resolution[0] <= 0 || c.resolution[1] <= 0);
+      if (partial || noResolution) {
+        // An incomplete lens is left out of the export (the field of view applies); a lens without
+        // a resolution is refused by MuJoCo.
+        Issue& i = add(noResolution ? Severity::Error : Severity::Warning, IssueArea::Model, "camera-intrinsics",
                        fmt("Camera %s: incomplete lens settings", quote(c.name).c_str()),
-                       "A focal length or principal point needs the sensor size, and a sensor size needs a resolution.",
+                       noResolution ? "A sensor size needs a resolution."
+                                    : "The lens needs both sensor sizes (a focal length or principal point without them "
+                                      "does nothing), so the export uses the field of view instead.",
                        {c.id});
         Id id = c.id;
         i.fixLabel = "Use the field of view";
@@ -765,6 +874,14 @@ class Analyzer {
         };
       }
     }
+    for (const Light& l : doc_.lights)
+      if (!(l.softness >= 0 && l.softness <= 1)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "light-softness", fmt("Light %s: softness must be between 0 and 1", quote(l.name).c_str()),
+                       "", {l.id});
+        Id id = l.id;
+        i.fixLabel = "Clamp it";
+        i.fix = [id](Document& d) { if (Light* x = d.light(id)) x->softness = std::isfinite(x->softness) ? clampv(x->softness, 0.0, 1.0) : 0.2; };
+      }
     for (const Exclude& e : doc_.excludes)
       if (!doc_.body(e.body1) || !doc_.body(e.body2))
         add(Severity::Error, IssueArea::Model, "exclude-target", "Contact exclusion refers to a missing body", "", {e.id});
@@ -784,6 +901,14 @@ class Analyzer {
       if (b->mocap)
         add(Severity::Error, IssueArea::Model, "mocap-joint", fmt("Mocap body %s cannot have joints", quote(b->name).c_str()),
             "Mocap bodies are moved kinematically; remove the joint or turn off mocap.", {j.id, b->id});
+      if (j.actuatorfrclimited && j.actuatorfrcrange.x >= j.actuatorfrcrange.y) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "joint-actfrcrange",
+                       fmt("Joint %s: actuator force range lower limit is not below the upper limit", quote(j.name).c_str()),
+                       "MuJoCo refuses an empty or reversed actuator force range on a joint.", {j.id});
+        Id id = j.id;
+        i.fixLabel = "Turn the limit off";
+        i.fix = [id](Document& d) { if (Joint* x = d.joint(id)) x->actuatorfrclimited = false; };
+      }
       if (j.limited && (j.type == JointType::Hinge || j.type == JointType::Slide) && j.range.x >= j.range.y) {
         Issue& i = add(Severity::Error, IssueArea::Model, "joint-range",
                        fmt("Joint %s: lower limit is not below the upper limit", quote(j.name).c_str()),
@@ -902,6 +1027,8 @@ class Analyzer {
       bool bad = false;
       for (int i = 0; i < n; ++i) bad |= !(g.size[i] > 0);
       if (bad) add(Severity::Error, IssueArea::Model, "geom-size", fmt("Geom %s has a zero or negative size", quote(g.name).c_str()), "", {g.id});
+      if (g.mass < 0 && g.density < 0)
+        add(Severity::Error, IssueArea::Model, "geom-density", fmt("Geom %s has a negative density", quote(g.name).c_str()), "", {g.id});
       if (g.type == GeomType::Plane && g.body != kWorldId && weld_.weld[doc_.bodyIndex(g.body)] != 0) {
         add(Severity::Error, IssueArea::Model, "plane-moving", fmt("Plane %s is on a moving body", quote(g.name).c_str()),
             "Planes are infinite and static. Use a thin box for moving parts.", {g.id});
@@ -997,6 +1124,33 @@ class Analyzer {
       if (t.limited && t.range.x >= t.range.y)
         add(Severity::Error, IssueArea::Model, "tendon-range", fmt("Tendon %s: lower limit is not below the upper limit", n.c_str()), "",
             {t.id});
+      Id id = t.id;
+      if (t.actfrclimited && (t.actuatorfrcrange.x >= t.actuatorfrcrange.y || t.actuatorfrcrange.x > 0 || t.actuatorfrcrange.y < 0)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "tendon-actfrcrange", fmt("Tendon %s: invalid actuator force range", n.c_str()),
+                       "MuJoCo needs lower < upper, with 0 inside the range.", {t.id});
+        i.fixLabel = "Turn the limit off";
+        i.fix = [id](Document& d) { if (Tendon* x = d.tendon(id)) x->actfrclimited = false; };
+      }
+      if (t.springlength.x > t.springlength.y) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "tendon-springlength",
+                       fmt("Tendon %s: spring length lower value above the upper one", n.c_str()),
+                       "The two values bound the spring's dead band (-1 -1 uses the length at the reference pose). "
+                       "MuJoCo refuses a lower value above the upper one.",
+                       {t.id});
+        i.fixLabel = "Use one rest length";
+        i.fix = [id](Document& d) {
+          if (Tendon* x = d.tendon(id)) {
+            double l = x->springlength.y < 0 ? x->springlength.x : x->springlength.y;  // -1 alone: the value typed
+            x->springlength = {l, l};
+          }
+        };
+      }
+      if (t.type == TendonType::Spatial && !(t.width > 0)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "tendon-width", fmt("Spatial tendon %s needs a positive width", n.c_str()),
+                       "MuJoCo refuses a spatial tendon of zero width (it only affects drawing).", {t.id});
+        i.fixLabel = "Use 3 mm";
+        i.fix = [id](Document& d) { if (Tendon* x = d.tendon(id)) x->width = 0.003; };
+      }
     }
   }
 
@@ -1562,6 +1716,31 @@ class Analyzer {
     return out;
   }
 
+  // Armature that keeps a joint of total stiffness K accurate at the timestep (w*dt <= 0.5), or 0
+  // when it already is. Fixes that stiffen servos add it, so they don't trade one issue for a
+  // timestep one (the stiff-servo fix uses the same rule).
+  double stableArmature(Id joint, double K) {
+    const JointReport* r = findReport(joint);
+    const Joint* j = doc_.joint(joint);
+    if (!r || !j || !(r->inertia > 0) || !(K > 0)) return 0;
+    double dt = doc_.option.timestep;
+    double arm = K * (dt / 0.5) * (dt / 0.5) - (r->inertia - j->armature);
+    return arm > j->armature ? niceCeil(arm) : 0;
+  }
+
+  // The stiffening fix for a set of joints: the servo factors, plus armature where needed.
+  void stiffenFix(Issue& i, const std::vector<std::pair<Id, double>>& scales, const std::vector<std::pair<Id, double>>& jointStiffness) {
+    std::vector<std::pair<Id, double>> armature;
+    for (const auto& [jid, K] : jointStiffness)
+      if (double a = stableArmature(jid, K); a > 0) armature.push_back({jid, a});
+    i.fixLabel = stiffenLabel(doc_, scales) + (armature.empty() ? "" : " and add armature");
+    i.fix = [scales, armature](Document& d) {
+      for (const auto& [id, s] : scales) stiffenServo(d, id, s);
+      for (const auto& [id, a] : armature)
+        if (Joint* x = d.joint(id)) x->armature = std::max(x->armature, a);
+    };
+  }
+
   // Standing on one or two flat feet, the body above the ankles is an inverted pendulum: only the
   // ankle joints resist tipping, so their stiffness must exceed gravity's (m * g * h).
   void checkAnkleBalance(const Body& root, const std::vector<int>& footBodies, double floorLevel) {
@@ -1622,14 +1801,15 @@ class Analyzer {
                          "by itself, raise each ankle's stiffness to about %.3g N*m/rad.",
                          mAbove, h, kGravity, g.k, kEach),
                      g.joints);
-      std::vector<std::pair<Id, double>> scales;
+      std::vector<std::pair<Id, double>> scales, stiffness;
       for (Id jid : g.joints) {
         const Joint* jj = doc_.joint(jid);
-        for (const auto& s : servoScales(jid, kEach - (jj ? jj->stiffness : 0))) scales.push_back(s);
+        std::vector<std::pair<Id, double>> js = servoScales(jid, kEach - (jj ? jj->stiffness : 0));
+        if (!js.empty()) stiffness.push_back({jid, kEach});
+        scales.insert(scales.end(), js.begin(), js.end());
       }
       if (scales.empty()) continue;
-      i.fixLabel = stiffenLabel(doc_, scales);
-      i.fix = [scales](Document& d) { for (const auto& [id, s] : scales) stiffenServo(d, id, s); };
+      stiffenFix(i, scales, stiffness);
     }
   }
 
@@ -1718,10 +1898,7 @@ class Analyzer {
                        actuatorsOf(r.joint, true));
         double K = r.holdLoad / (r.angular ? 0.05 : 0.005);
         std::vector<std::pair<Id, double>> scales = servoScales(r.joint, K - j->stiffness);
-        if (!scales.empty()) {
-          i.fixLabel = stiffenLabel(doc_, scales);
-          i.fix = [scales](Document& d) { for (const auto& [id, s] : scales) stiffenServo(d, id, s); };
-        }
+        if (!scales.empty()) stiffenFix(i, scales, {{r.joint, K}});
       }
       // Very overpowered (only a tip).
       double useful = std::max(need, footReach_.count(r.joint) ? footReach_[r.joint] : 0.0);
@@ -1883,7 +2060,7 @@ class Analyzer {
     for (const auto& [pair, dist] : worst) {
       const Geom* a = doc_.geom(pair.first);
       const Geom* b = doc_.geom(pair.second);
-      if (!a || !b) continue;
+      if (!a || !b || a == b) continue;  // a geom paired with itself is reported as such
       if ((floors.count(a->id) && floorChecked.count(doc_.rootOf(b->body))) ||
           (floors.count(b->id) && floorChecked.count(doc_.rootOf(a->body))))
         continue;  // reported by the floor check above
@@ -1892,7 +2069,11 @@ class Analyzer {
                      "Overlapping geoms of different bodies are pushed apart violently on the first step. Move them apart, "
                      "or exclude contacts between the two bodies if they are adjacent parts of the same creature.",
                      {a->id, b->id});
-      if (a->body != kWorldId && b->body != kWorldId) {
+      // An exclusion does not stop an explicit contact pair: those geoms have to be moved apart.
+      bool explicitPair = false;
+      for (const ContactPair& c : doc_.pairs)
+        explicitPair |= (c.geom1 == a->id && c.geom2 == b->id) || (c.geom1 == b->id && c.geom2 == a->id);
+      if (a->body != kWorldId && b->body != kWorldId && a->body != b->body && !explicitPair) {
         Id b1 = a->body, b2 = b->body;
         i.fixLabel = "Exclude contacts between the bodies";
         i.fix = [b1, b2](Document& d) { addExclude(d, b1, b2); };

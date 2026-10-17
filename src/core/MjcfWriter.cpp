@@ -793,9 +793,11 @@ class Writer {
         if (c.output & (1 << k)) s += (s.empty() ? "" : " ") + std::string(outs[k]);
       if (!s.empty()) n.set("output", s);
     }
-    if (!nearly(c.sensorsize, Vec2{})) n.set("sensorsize", vec(c.sensorsize));
-    if (!nearly(c.focal, Vec2{})) n.set("focal", vec(c.focal));
-    if (!nearly(c.principal, Vec2{})) n.set("principal", vec(c.principal));
+    if (lens) {  // an incomplete lens is left out (the analysis says so)
+      n.set("sensorsize", vec(c.sensorsize));
+      if (!nearly(c.focal, Vec2{})) n.set("focal", vec(c.focal));
+      if (!nearly(c.principal, Vec2{})) n.set("principal", vec(c.principal));
+    }
     if (!nearly(c.ipd, 0.068)) n.set("ipd", num(c.ipd));
   }
 
@@ -810,7 +812,8 @@ class Writer {
     if (targeted && targetOk) n.set("target", nameOf(l.target));
     if (l.type != LightType::Spot) n.set("type", toXml(l.type));
     if (!nearly(l.pos, Vec3{})) n.set("pos", vec(l.pos));
-    if (!nearly(normalize(l.dir), Vec3{0, 0, -1})) n.set("dir", vec(normalize(l.dir)));
+    Vec3 dir = normalize(l.dir, {0, 0, -1});  // a zero direction (refused by MuJoCo) points down
+    if (!nearly(dir, Vec3{0, 0, -1})) n.set("dir", vec(dir));
     if (!l.castshadow) n.set("castshadow", "false");
     if (!l.active) n.set("active", "false");
     if (!nearly(l.diffuse, d.diffuse)) n.set("diffuse", vec(l.diffuse));
