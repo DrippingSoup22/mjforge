@@ -20,8 +20,11 @@ struct Mesh {
   void release();
 };
 
+// Round shapes come in three levels of detail (0 = finest); small or distant geoms use coarser
+// ones, which matters on integrated GPUs and software renderers with hundreds of geoms.
+constexpr int kLodLevels = 3;
 struct PrimitiveMeshes {
-  Mesh sphere, capsule, cylinder, box, plane, cone;
+  Mesh sphere[kLodLevels], capsule[kLodLevels], cylinder[kLodLevels], box, plane, cone;
   void build();
   void release();
 };

@@ -243,11 +243,13 @@ void Renderer::drawItem(Shader& sh, const DrawItem& it, bool depthOnly) {
   const Mesh* mesh = nullptr;
   Vec3 scale{1, 1, 1}, offset{};
   int mode = 0;
+  // Shadows are soft anyway: never the finest level there.
+  const int lod = std::min(kLodLevels - 1, depthOnly ? std::max(1, int(it.lod)) : int(it.lod));
   switch (it.shape) {
-    case Shape::Sphere: mesh = &meshes_.sphere; scale = {it.size.x, it.size.x, it.size.x}; break;
-    case Shape::Ellipsoid: mesh = &meshes_.sphere; scale = it.size; break;
-    case Shape::Capsule: mesh = &meshes_.capsule; mode = 1; break;
-    case Shape::Cylinder: mesh = &meshes_.cylinder; scale = {it.size.x, it.size.x, it.size.y}; break;
+    case Shape::Sphere: mesh = &meshes_.sphere[lod]; scale = {it.size.x, it.size.x, it.size.x}; break;
+    case Shape::Ellipsoid: mesh = &meshes_.sphere[lod]; scale = it.size; break;
+    case Shape::Capsule: mesh = &meshes_.capsule[lod]; mode = 1; break;
+    case Shape::Cylinder: mesh = &meshes_.cylinder[lod]; scale = {it.size.x, it.size.x, it.size.y}; break;
     case Shape::Box: mesh = &meshes_.box; scale = it.size; break;
     case Shape::Cone: mesh = &meshes_.cone; scale = it.size; break;
     case Shape::Plane:
@@ -311,6 +313,21 @@ void Renderer::render(const std::vector<DrawItem>& items_, const OrbitCamera& ca
 
   // Infinite planes become large quads centered under the camera target.
   std::vector<DrawItem> items = items_;
+  // Level of detail from the projected radius in pixels.
+  const double pixelsPerUnit = h / (2.0 * std::tan(deg2rad(cam.fovy) * 0.5));
+  for (DrawItem& it : items) {
+    double r = 0;
+    switch (it.shape) {
+      case Shape::Sphere: r = it.size.x; break;
+      case Shape::Ellipsoid: r = std::max({it.size.x, it.size.y, it.size.z}); break;
+      case Shape::Capsule: r = it.size.x + it.size.y; break;
+      case Shape::Cylinder: r = std::hypot(it.size.x, it.size.y); break;
+      default: continue;
+    }
+    double d = cam.ortho ? cam.distance : std::max(1e-3, length(it.pose.pos - eye));
+    double px = r / d * pixelsPerUnit;
+    it.lod = px > 60 ? 0 : px > 14 ? 1 : 2;
+  }
   const double planeExtent = std::max(60.0, cam.distance * 30.0);
   for (DrawItem& it : items) {
     if (it.shape != Shape::Plane) continue;

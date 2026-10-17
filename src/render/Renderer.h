@@ -32,6 +32,7 @@ struct DrawItem {
   const Mesh* mesh = nullptr;
   bool heightTint = false;  // shade by height with contour lines (height fields)
   Vec3 localOffset;  // set by the renderer for camera-following infinite planes
+  uint8_t lod = 0;   // set by the renderer from the on-screen size
 };
 
 struct FrameParams {

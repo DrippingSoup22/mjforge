@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -130,7 +131,9 @@ int runHeadless(const CliOptions& cli) {
                   int(r.model->nsensor), int(r.model->nq), int(r.model->nv));
       for (const auto& w : r.warnings) std::printf("WARN   %s\n", w.c_str());
     }
+    auto t0 = std::chrono::steady_clock::now();
     AnalysisReport rep = analyzeModel(doc, &r, true);
+    double analysisMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     for (const Issue& is : rep.issues) {
       std::printf("%-7s [%s] %s\n", severityName(is.severity), areaName(is.area), is.title.c_str());
       if (!is.detail.empty()) {
@@ -142,9 +145,9 @@ int runHeadless(const CliOptions& cli) {
       if (is.severity == Severity::Error) rc = 1;
     }
     std::printf("Summary: %d errors, %d warnings, %d info, %d tips. %d legs, %d contact pairs, %d MJWarp broadphase "
-                "pairs at rest.\n",
+                "pairs at rest. Analysis took %.0f ms.\n",
                 rep.counts[0], rep.counts[1], rep.counts[2], rep.counts[3], rep.legCount, rep.collisionPairs,
-                rep.broadphaseAtRest);
+                rep.broadphaseAtRest, analysisMs);
   }
   if (!cli.exportPath.empty()) {
     std::vector<std::string> written;

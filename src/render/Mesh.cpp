@@ -88,19 +88,19 @@ void buildSphereLike(Builder& b, int slices, int stacks, bool capsule) {
 }  // namespace
 
 void PrimitiveMeshes::build() {
-  {
-    Builder b;
-    buildSphereLike(b, 48, 24, false);
-    sphere.upload(b.v, b.i);
+  const int sphereRes[kLodLevels][2] = {{48, 24}, {24, 12}, {12, 6}};
+  const int capsuleRes[kLodLevels][2] = {{40, 24}, {20, 12}, {12, 8}};  // even stacks: split at the equator
+  const int cylinderRes[kLodLevels] = {48, 24, 12};
+  for (int lod = 0; lod < kLodLevels; ++lod) {
+    Builder s, c;
+    buildSphereLike(s, sphereRes[lod][0], sphereRes[lod][1], false);
+    sphere[lod].upload(s.v, s.i);
+    buildSphereLike(c, capsuleRes[lod][0], capsuleRes[lod][1], true);
+    capsule[lod].upload(c.v, c.i);
   }
-  {
+  for (int lod = 0; lod < kLodLevels; ++lod) {  // cylinder, radius 1, z in [-1, 1]
     Builder b;
-    buildSphereLike(b, 40, 24, true);
-    capsule.upload(b.v, b.i);
-  }
-  {  // cylinder, radius 1, z in [-1, 1]
-    Builder b;
-    const int n = 48;
+    const int n = cylinderRes[lod];
     std::vector<uint32_t> top, bot;
     for (int k = 0; k <= n; ++k) {
       double th = 2 * kPi * k / n;
@@ -123,7 +123,7 @@ void PrimitiveMeshes::build() {
         else b.tri(c, ring[k + 1], ring[k]);
       }
     }
-    cylinder.upload(b.v, b.i);
+    cylinder[lod].upload(b.v, b.i);
   }
   {  // box, half-size 1
     Builder b;
@@ -167,9 +167,11 @@ void PrimitiveMeshes::build() {
 }
 
 void PrimitiveMeshes::release() {
-  sphere.release();
-  capsule.release();
-  cylinder.release();
+  for (int lod = 0; lod < kLodLevels; ++lod) {
+    sphere[lod].release();
+    capsule[lod].release();
+    cylinder[lod].release();
+  }
   box.release();
   plane.release();
   cone.release();
