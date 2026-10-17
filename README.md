@@ -47,9 +47,11 @@ ready-to-run MuJoCo Warp loader.
   planar walkers are told apart, and joint inertia on a floating body matches MuJoCo's mass matrix.
   On MuJoCo Menagerie robots every warning it raises holds up in MuJoCo (start poses that sink into
   the floor, an MJWarp margin rule).
-- MuJoCo Warp rules: unsupported features (PGS, noslip, PID actuators, ...), features it silently
-  ignores (actuator armature, with a fix that keeps the dynamics), the box/mesh contact margin trap,
-  which contact pairs need MJWarp's slower convex collider, self-collision pair counts.
+- MuJoCo Warp rules, each checked against `mujoco_warp.put_model` on random models: unsupported
+  features (PGS, noslip, explicit sleep policies, contact sensor velocities, ...), features it
+  silently ignores (actuator armature, with a fix that keeps the dynamics; disabled actuator groups),
+  the box/mesh contact margin trap, which contact pairs need MJWarp's slower convex collider,
+  self-collision pair counts.
 
 ![The Issues panel explains problems and offers fixes](docs/images/analysis.jpg)
 

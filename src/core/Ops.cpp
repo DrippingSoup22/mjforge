@@ -196,20 +196,19 @@ Id addActuator(Document& doc, ActuatorType type, Id joint, const std::string& na
 }
 
 Id addSensor(Document& doc, SensorType type, Id obj, const std::string& name) {
+  // Joint position / velocity of a ball or free joint: the sensors MuJoCo has for those.
+  if (const Joint* j = doc.joint(obj); j && (type == SensorType::JointPos || type == SensorType::JointVel)) {
+    bool pos = type == SensorType::JointPos;
+    if (j->type == JointType::Ball) type = pos ? SensorType::BallQuat : SensorType::BallAngVel;
+    if (j->type == JointType::Free) {
+      type = pos ? SensorType::FramePos : SensorType::FrameLinVel;
+      obj = j->body;
+    }
+  }
   Sensor s;
   s.id = doc.newId();
   s.type = type;
-  s.obj = obj;
-  SensorObj kind = sensorInfo(type).obj;
-  if (kind == SensorObj::Frame || kind == SensorObj::GeomPair || kind == SensorObj::Contact || kind == SensorObj::Inside) {
-    switch (doc.kindOf(obj)) {
-      case Kind::Body: s.objtype = FrameObj::Body; break;
-      case Kind::Geom: s.objtype = FrameObj::Geom; break;
-      case Kind::Camera: s.objtype = FrameObj::Camera; break;
-      default: s.objtype = kind == SensorObj::GeomPair ? FrameObj::Geom : FrameObj::Site; break;
-    }
-    if (kind == SensorObj::GeomPair || kind == SensorObj::Contact) s.reftype = FrameObj::Geom;
-  }
+  attachSensor(doc, s, obj);
   std::string base = name;
   if (base.empty()) {
     std::string on = doc.nameOf(obj);
@@ -219,6 +218,45 @@ Id addSensor(Document& doc, SensorType type, Id obj, const std::string& name) {
   doc.sensors.push_back(s);
   doc.touch();
   return s.id;
+}
+
+void attachSensor(const Document& doc, Sensor& s, Id obj) {
+  SensorObj kind = sensorInfo(s.type).obj;
+  Kind k = doc.kindOf(obj);
+  bool fits = false;
+  switch (kind) {
+    case SensorObj::Joint: fits = k == Kind::Joint; break;
+    case SensorObj::Actuator: fits = k == Kind::Actuator; break;
+    case SensorObj::Site:
+    case SensorObj::CamProj: fits = k == Kind::Site; break;
+    case SensorObj::Body: fits = k == Kind::Body; break;
+    case SensorObj::Tendon: fits = k == Kind::Tendon; break;
+    case SensorObj::Frame:
+    case SensorObj::Inside: fits = k == Kind::Body || k == Kind::Geom || k == Kind::Site || k == Kind::Camera; break;
+    case SensorObj::GeomPair: fits = k == Kind::Body || k == Kind::Geom; break;
+    case SensorObj::Contact: fits = k == Kind::Body || k == Kind::Geom || k == Kind::Site; break;
+    case SensorObj::None: break;
+  }
+  s.obj = fits ? obj : kNoId;
+  if (kind == SensorObj::Frame || kind == SensorObj::GeomPair || kind == SensorObj::Contact || kind == SensorObj::Inside) {
+    bool geoms = kind == SensorObj::GeomPair || kind == SensorObj::Contact;
+    switch (fits ? k : Kind::None) {
+      case Kind::Body: s.objtype = FrameObj::Body; break;
+      case Kind::Geom: s.objtype = FrameObj::Geom; break;
+      case Kind::Site: s.objtype = FrameObj::Site; break;
+      case Kind::Camera: s.objtype = FrameObj::Camera; break;
+      default: s.objtype = geoms ? FrameObj::Geom : FrameObj::Site; break;
+    }
+    s.reftype = geoms ? FrameObj::Geom : FrameObj::Site;
+  }
+}
+
+void setSensorType(const Document& doc, Sensor& s, SensorType type) {
+  bool sameKind = sensorInfo(type).obj == sensorInfo(s.type).obj;
+  s.type = type;
+  if (sameKind) return;
+  s.ref = kNoId;
+  attachSensor(doc, s, s.obj);
 }
 
 Id addExclude(Document& doc, Id body1, Id body2) {

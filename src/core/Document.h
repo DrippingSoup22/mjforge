@@ -150,10 +150,18 @@ struct Camera {
   Id body = kWorldId;
   Vec3 pos;
   Quat quat;  // camera looks along its local -Z axis with +Y up
-  double fovy = 45.0;  // degrees (always, regardless of compiler angle)
+  double fovy = 45.0;  // degrees (always, regardless of compiler angle); a length when orthographic
   CameraMode mode = CameraMode::Fixed;
   Id target = kNoId;  // body for targetbody/targetbodycom
   bool hidden = false;
+  // Image settings for vision policies (batch renderers and camera sensors read them).
+  bool orthographic = false;
+  int resolution[2] = {1, 1};  // pixels: width, height
+  int output = 1;              // bits: rgb 1, depth 2, distance 4, normal 8, segmentation 16
+  Vec2 sensorsize{0, 0};       // physical sensor (m): when set, focal and principal replace fovy
+  Vec2 focal{0, 0};            // focal length (m)
+  Vec2 principal{0, 0};        // principal point offset from the image center (m)
+  double ipd = 0.068;          // stereo eye distance
 };
 
 struct Light {
@@ -287,6 +295,9 @@ struct Sensor {
 };
 // Number of values a sensor writes to sensordata.
 int sensorDim(const Sensor& s);
+// History samples a sensor needs for its delay: MuJoCo keeps one per step, or one per update period
+// plus the one being held when there is a period (measured with MuJoCo 3.16).
+int sensorHistoryNeeded(const Sensor& s, double timestep);
 
 struct Exclude {
   Id id = kNoId;

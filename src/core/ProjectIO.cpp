@@ -18,6 +18,14 @@ using json = nlohmann::json;
 
 namespace {
 
+// A stored quaternion as it was when it is a rotation already (so saving and loading is exact),
+// normalized when a hand-edited or damaged file gives anything else.
+Quat unitQuat(const Quat& q) {
+  double n2 = q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z;
+  return std::fabs(n2 - 1) <= 1e-12 ? q : normalize(q);
+}
+
+
 inline constexpr EnumEntry<Role> kRoles[] = {{Role::Model, "model", "Model"}, {Role::Environment, "environment", "Environment"}};
 
 template <class E> struct EnumTable;
@@ -108,7 +116,7 @@ struct Loader {
   void operator()(const char* k, Quat& v) {
     double a[4] = {v.w, v.x, v.y, v.z};
     arr(k, a, 4);
-    v = normalize(Quat{a[0], a[1], a[2], a[3]});
+    v = unitQuat(Quat{a[0], a[1], a[2], a[3]});
   }
   void operator()(const char* k, Color& v) { float a[4] = {v.r, v.g, v.b, v.a}; arr(k, a, 4); v = {a[0], a[1], a[2], a[3]}; }
   template <int N> void operator()(const char* k, VecN<N>& v) { arr(k, v.v, N); }
@@ -205,7 +213,9 @@ template <class V> void visit(V& v, Site& s) {
 }
 template <class V> void visit(V& v, Camera& c) {
   v("id", c.id); v("name", c.name); v("body", c.body); v("pos", c.pos); v("quat", c.quat); v("fovy", c.fovy);
-  v("mode", c.mode); v("target", c.target); v("hidden", c.hidden);
+  v("mode", c.mode); v("target", c.target); v("hidden", c.hidden); v("orthographic", c.orthographic);
+  v("resx", c.resolution[0]); v("resy", c.resolution[1]); v("output", c.output); v("sensorsize", c.sensorsize);
+  v("focal", c.focal); v("principal", c.principal); v("ipd", c.ipd);
 }
 template <class V> void visit(V& v, Light& l) {
   v("id", l.id); v("name", l.name); v("body", l.body); v("type", l.type); v("pos", l.pos); v("dir", l.dir);
@@ -566,7 +576,7 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         std::vector<std::pair<Id, std::vector<double>>> mocap;
         pairs("mocap", mocap);
         for (const auto& [id, v] : mocap)
-          if (v.size() == 7) k.mocap.push_back({id, Pose{{v[0], v[1], v[2]}, normalize(Quat{v[3], v[4], v[5], v[6]})}});
+          if (v.size() == 7) k.mocap.push_back({id, Pose{{v[0], v[1], v[2]}, unitQuat(Quat{v[3], v[4], v[5], v[6]})}});
         doc.keyframes.push_back(std::move(k));
       }
     }

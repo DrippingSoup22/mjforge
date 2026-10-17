@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <limits>
 
+#include <nlohmann/json.hpp>
+
+#include "analysis/Analysis.h"
 #include "core/Document.h"
 #include "core/Generators.h"
 #include "core/Kinematics.h"
@@ -387,6 +390,158 @@ TEST_CASE("review: new physics settings round-trip through MJCF") {
   CHECK(m->sensor_dim[0] == 2 * (1 + 3));
   CHECK(m->sensor_delay[0] == doctest::Approx(0.004));
   // Import and export again: the same file.
+  Document back;
+  std::string err;
+  REQUIRE(importMjcfString(xml, back, &err));
+  CHECK(writeMjcf(back) == xml);
+}
+
+namespace {
+
+bool hasIssue(const AnalysisReport& r, const char* code) {
+  for (const Issue& i : r.issues)
+    if (i.code == code) return true;
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("review: save and load give back every digit of the export") {
+  // Quaternions a rounding error off unit length, as edits leave them, came back renormalized.
+  Document doc;
+  makeTemplate("quadruped", doc);
+  Quat q{0.6350912284318131, -0.5881470238628586, 0.05390620477312463, 0.4978316291450259};
+  REQUIRE(normalize(q).w != q.w);
+  doc.bodies[2].quat = q;
+  doc.geoms[1].quat = q;
+  startKeyframe(doc);
+  std::string xml = writeMjcf(doc);
+  Document back;
+  std::string err;
+  REQUIRE(projectFromJson(back, projectToJson(doc), &err));
+  CHECK(writeMjcf(back) == xml);
+  // A quaternion that is really not unit length (a hand-edited file) is still normalized.
+  std::string json = projectToJson(doc);
+  nlohmann::json j = nlohmann::json::parse(json);
+  for (auto& b : j["bodies"])
+    if (b.contains("quat")) b["quat"] = {2, 0, 0, 0};
+  REQUIRE(projectFromJson(back, j.dump(), &err));
+  CHECK(back.bodies[2].quat.w == doctest::Approx(1));
+}
+
+TEST_CASE("review: sensors fit the joints and objects they read") {
+  Document doc;
+  Id b = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "b");
+  addGeom(doc, b, GeomType::Sphere, {0.1, 0, 0}, {}, "b_geom");
+  Id free = addJoint(doc, b, JointType::Free, {}, {0, 0, 1}, "root");
+  Id c = addBody(doc, b, {{0.2, 0, 0}, {}}, "c");
+  addGeom(doc, c, GeomType::Sphere, {0.05, 0, 0}, {});
+  Id ball = addJoint(doc, c, JointType::Ball, {}, {0, 0, 1}, "shoulder");
+  Id site = addSite(doc, c, {}, "tip");
+  // Joint position and velocity sensors on ball and free joints become the ones MuJoCo has for them.
+  CHECK(doc.sensor(addSensor(doc, SensorType::JointPos, ball))->type == SensorType::BallQuat);
+  CHECK(doc.sensor(addSensor(doc, SensorType::JointVel, ball))->type == SensorType::BallAngVel);
+  Id fp = addSensor(doc, SensorType::JointPos, free);
+  CHECK(doc.sensor(fp)->type == SensorType::FramePos);
+  CHECK(doc.sensor(fp)->obj == b);
+  CHECK(doc.sensor(fp)->objtype == FrameObj::Body);
+  compileDoc(doc);
+
+  // A joint sensor put on a ball joint is refused by MuJoCo, and the analysis says so first.
+  Document bad = doc;
+  bad.sensors[0].type = SensorType::JointPos;
+  CHECK_FALSE(compileMjcf(writeMjcf(bad)).ok);
+  AnalysisReport rep = analyzeModel(bad, nullptr, false);
+  CHECK(hasIssue(rep, "sensor-kind"));
+
+  // Changing a sensor's type keeps an object that fits the new type, with matching object types.
+  Sensor& s = *doc.sensor(fp);
+  s.ref = site;
+  s.reftype = FrameObj::Site;
+  setSensorType(doc, s, SensorType::FrameQuat);  // same kind: everything stays
+  CHECK(s.obj == b);
+  CHECK(s.ref == site);
+  setSensorType(doc, s, SensorType::Contact);  // a body is a valid contact match, a site is not a second one
+  CHECK(s.obj == b);
+  CHECK(s.objtype == FrameObj::Body);
+  CHECK(s.ref == kNoId);
+  CHECK(s.reftype == FrameObj::Geom);
+  setSensorType(doc, s, SensorType::Touch);  // touch reads a site
+  CHECK(s.obj == kNoId);
+  s.obj = site;
+  setSensorType(doc, s, SensorType::Contact);  // contacts inside a site volume
+  CHECK(s.obj == site);
+  CHECK(s.objtype == FrameObj::Site);
+  compileDoc(doc);
+}
+
+TEST_CASE("review: impossible inertias and self-referencing constraints are reported before MuJoCo refuses them") {
+  Document doc;
+  Id b = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "b");
+  addJoint(doc, b, JointType::Hinge, {}, {0, 1, 0});
+  addGeom(doc, b, GeomType::Sphere, {0.05, 0, 0}, {});
+  Body& body = *doc.body(b);
+  body.hasInertial = true;
+  body.mass = 1;
+  body.diaginertia = {0.01, 0.01, 0.05};  // 0.01 + 0.01 < 0.05
+  CHECK_FALSE(compileMjcf(writeMjcf(doc)).ok);
+  {
+    AnalysisReport rep = analyzeModel(doc, nullptr, false);
+    const Issue* tri = nullptr;
+    for (const Issue& i : rep.issues)
+      if (i.code == "inertia-triangle") tri = &i;
+    REQUIRE(tri);
+    REQUIRE(tri->fix);
+    Document fixed = doc;
+    tri->fix(fixed);
+    compileDoc(fixed);
+  }
+  // MuJoCo averages them itself with balanceinertia, and ignores them when inertia comes from geoms.
+  doc.compiler.balanceinertia = true;
+  compileDoc(doc);
+  CHECK_FALSE(hasIssue(analyzeModel(doc, nullptr, false), "inertia-triangle"));
+  doc.compiler.balanceinertia = false;
+  doc.compiler.inertiafromgeom = InertiaFromGeom::True;
+  compileDoc(doc);
+  CHECK_FALSE(hasIssue(analyzeModel(doc, nullptr, false), "inertia-triangle"));
+  doc.compiler.inertiafromgeom = InertiaFromGeom::Auto;
+  body.diaginertia = {0.01, 0.01, 0.01};
+
+  // A weld from a site to itself.
+  Id site = addSite(doc, b, {}, "s");
+  addEquality(doc, EqualityType::Weld, site, site);
+  CHECK_FALSE(compileMjcf(writeMjcf(doc)).ok);
+  CHECK(hasIssue(analyzeModel(doc, nullptr, false), "equality-target"));
+}
+
+TEST_CASE("review: camera image settings reach MuJoCo and come back on import") {
+  Document doc;
+  Id b = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "b");
+  addGeom(doc, b, GeomType::Sphere, {0.05, 0, 0}, {});
+  Id c = addCamera(doc, kWorldId, {{1, 0, 1}, {}}, "eye");
+  Camera& cam = *doc.camera(c);
+  cam.resolution[0] = 640;
+  cam.resolution[1] = 480;
+  cam.output = 1 | 2;
+  cam.sensorsize = {0.0036, 0.0027};
+  cam.focal = {0.004, 0.004};
+  cam.principal = {0.0001, -0.0002};
+  Id o = addCamera(doc, kWorldId, {{0, 1, 1}, {}}, "top");
+  doc.camera(o)->orthographic = true;
+  doc.camera(o)->fovy = 2;
+  std::string xml = writeMjcf(doc);
+  ModelPtr m = compileDoc(doc);
+  int id = mj_name2id(m.get(), mjOBJ_CAMERA, "eye");
+  REQUIRE(id >= 0);
+  CHECK(m->cam_resolution[2 * id] == 640);
+  CHECK(m->cam_resolution[2 * id + 1] == 480);
+  CHECK(m->cam_output[id] == 3);
+  CHECK(m->cam_sensorsize[2 * id] == doctest::Approx(0.0036));
+  CHECK(m->cam_intrinsic[4 * id] == doctest::Approx(0.004));
+  CHECK(m->cam_intrinsic[4 * id + 3] == doctest::Approx(-0.0002));
+  int top = mj_name2id(m.get(), mjOBJ_CAMERA, "top");
+  CHECK(m->cam_projection[top] == mjPROJ_ORTHOGRAPHIC);
+  CHECK(m->cam_fovy[top] == doctest::Approx(2));
   Document back;
   std::string err;
   REQUIRE(importMjcfString(xml, back, &err));

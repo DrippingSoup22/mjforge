@@ -626,10 +626,27 @@ void Editor::inspectCamera(Camera& c) {
   if (props::section("Camera")) {
     props::vec3("Position", &c.pos, {}, O(D("camera.pos"), "m", 0.005));
     props::orientation("Orientation", &c.quat, "The camera looks along its local -Z axis, with +Y up.");
-    props::real("Field of view", &c.fovy, 45, O(D("camera.fovy"), "deg", 0.2, 1, 179));
+    props::checkbox("Orthographic", &c.orthographic, false, D("camera.projection"));
+    if (c.orthographic) props::real("View height", &c.fovy, 45, O(D("camera.fovy"), "m", 0.01, 1e-4, 1e4));
+    else props::real("Field of view", &c.fovy, 45, O(D("camera.fovy"), "deg", 0.2, 1, 179));
     props::combo("Mode", &c.mode, kCameraModes, CameraMode::Fixed, D("camera.mode"));
     if (c.mode == CameraMode::TargetBody || c.mode == CameraMode::TargetBodyCom)
       props::element("Target body", &c.target, listOfAny(doc_.bodies), true, D("camera.target"));
+  }
+  if (props::section("Image", false)) {
+    props::integer("Width", &c.resolution[0], 1, O(D("camera.resolution"), "px", 1, 1, 16384));
+    props::integer("Height", &c.resolution[1], 1, O(D("camera.resolution"), "px", 1, 1, 16384));
+    static const char* const outs[] = {"RGB", "Depth", "Distance", "Normals", "Segmentation"};
+    for (int k = 0; k < 5; ++k) {
+      bool on = c.output & (1 << k);
+      if (props::checkbox(outs[k], &on, k == 0, D("camera.output"))) c.output = on ? c.output | (1 << k) : c.output & ~(1 << k);
+    }
+    props::vec2("Sensor size", &c.sensorsize, {}, O(D("camera.sensorsize"), "m", 0.0001, 0, 10));
+    if (c.sensorsize.x > 0 && c.sensorsize.y > 0) {
+      props::vec2("Focal length", &c.focal, {}, O(D("camera.focal"), "m", 0.0001, 0, 10));
+      props::vec2("Principal point", &c.principal, {}, O(D("camera.principal"), "m", 0.0001));
+    }
+    props::real("Eye distance (stereo)", &c.ipd, 0.068, O(D("camera.ipd"), "m", 0.001, 0, 1));
   }
   props::end();
   if (ImGui::Button("Set from current view")) {
@@ -914,11 +931,7 @@ void Editor::inspectSensor(Sensor& s) {
       labels.push_back(std::string(kSensorTypes[i].label) + "  (" + kSensorTypes[i].xml + ")");
       if (kSensorTypes[i].value == s.type) idx = int(i);
     }
-    if (props::comboIndex("Type", &idx, labels, 0, "MJCF sensor element.")) {
-      SensorObj before = sensorInfo(s.type).obj;
-      s.type = kSensorTypes[idx].value;
-      if (sensorInfo(s.type).obj != before) s.obj = kNoId;
-    }
+    if (props::comboIndex("Type", &idx, labels, 0, "MJCF sensor element.")) setSensorType(doc_, s, kSensorTypes[idx].value);
     const SensorInfo& info = sensorInfo(s.type);
     auto objects = [&](FrameObj t) {
       switch (t) {
@@ -1012,11 +1025,19 @@ void Editor::inspectSensor(Sensor& s) {
     props::integer("History samples", &s.nsample, 0, O(D("sensor.nsample"), nullptr, 0.2, 0, 100000));
     std::vector<std::string> interp = {"Zero-order hold", "Linear", "Cubic"};
     props::comboIndex("Interpolation", &s.interp, interp, 0, D("sensor.interp"));
-    props::vec2("Period, phase", &s.interval, Vec2{0, 0}, O(D("sensor.interval"), "s", 0.001, 0, 100));
-    if (s.delay > 0 || s.interval.x > 0) {
-      int need = int(std::ceil(std::max(s.delay, s.interval.x) / std::max(1e-9, doc_.option.timestep) - 1e-9)) + 1;
-      props::info("Samples needed", "%d (delay or period / timestep + 1)", need);
+    if (props::real("Update period", &s.interval.x, 0, O(D("sensor.interval"), "s", 0.001, 0, 100)) &&
+        s.interval.y <= -s.interval.x)
+      s.interval.y = 0;  // keep the phase valid for the new period
+    if (s.interval.x > 0) {
+      // MuJoCo's phase lies in (-period, 0]: the first update is at period + phase (at 0 for phase 0).
+      double first = s.interval.y < 0 && s.interval.y > -s.interval.x ? s.interval.x + s.interval.y : 0;
+      if (props::real("First update at", &first, 0,
+                      O("When the sensor is first computed; it then updates once per period and holds its value in "
+                        "between (MJCF: phase = this time - period).", "s", 0.001, 0, s.interval.x)))
+        s.interval.y = first > 0 && first < s.interval.x ? first - s.interval.x : 0;
     }
+    if (s.delay > 0 || s.interval.x > 0)
+      props::info("Samples needed", "%d", sensorHistoryNeeded(s, doc_.option.timestep));
   }
   props::end();
 }
@@ -1093,8 +1114,14 @@ void Editor::inspectPair(ContactPair& c) {
   ImGui::PopTextWrapPos();
   if (!props::begin("##pair")) return;
   if (props::section("Geoms")) {
-    props::element("Geom 1", &c.geom1, listDisplay(doc_, doc_.geoms), false, D("pair.geom1"));
-    props::element("Geom 2", &c.geom2, listDisplay(doc_, doc_.geoms), false, D("pair.geom2"));
+    // A geom cannot be paired with itself: each list leaves out the other side's geom.
+    auto others = [&](Id other) {
+      std::vector<std::pair<Id, std::string>> list = listDisplay(doc_, doc_.geoms);
+      list.erase(std::remove_if(list.begin(), list.end(), [&](const auto& e) { return e.first == other; }), list.end());
+      return list;
+    };
+    props::element("Geom 1", &c.geom1, others(c.geom2), false, D("pair.geom1"));
+    props::element("Geom 2", &c.geom2, others(c.geom1), false, D("pair.geom2"));
   }
   if (props::section("Contact")) {
     int idx = c.condim == 1 ? 0 : c.condim == 4 ? 2 : c.condim == 6 ? 3 : 1;

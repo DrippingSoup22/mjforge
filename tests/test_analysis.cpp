@@ -132,6 +132,87 @@ TEST_CASE("analysis: MJWarp incompatibilities are errors with fixes") {
   CHECK(doc.geom(g1)->margin == 0);
 }
 
+TEST_CASE("analysis: MJWarp rules measured with mujoco-warp's put_model") {
+  // Each case was refused (or warned about) by mujoco_warp 3.16 and missed by the analysis before.
+  Document doc;
+  REQUIRE(makeTemplate("empty", doc));
+  Id b1 = addBody(doc, kWorldId, {{0, 0, 0.2}, {}}, "crate1", Role::Environment);
+  addJoint(doc, b1, JointType::Free);
+  Id g1 = addGeom(doc, b1, GeomType::Box, {0.1, 0.1, 0.1}, {});
+  Id b2 = addBody(doc, kWorldId, {{0.5, 0, 0.2}, {}}, "crate2", Role::Environment);
+  addJoint(doc, b2, JointType::Free);
+  Id g2 = addGeom(doc, b2, GeomType::Box, {0.1, 0.1, 0.1}, {});
+  CHECK(countCode(analyzeCompiled(doc), "mjw-box-margin") == 0);
+
+  // Explicit sleep policies are refused even with sleeping off.
+  doc.body(b1)->sleep = SleepPolicy::Init;
+  CHECK(countCode(analyzeCompiled(doc), "mjw-sleep-policy") == 1);
+  doc.body(b1)->sleep = SleepPolicy::Auto;
+
+  // An explicit box pair is checked with its own margin: refused with multiccd, or nativeccd for boxes.
+  Id p = addContactPair(doc, g1, g2);
+  doc.pair(p)->margin = 0.01;
+  AnalysisReport r = analyzeCompiled(doc);
+  const Issue* margin = findCode(r, "mjw-box-margin");
+  REQUIRE(margin);
+  doc.option.multiccd = false;
+  CHECK(countCode(analyzeCompiled(doc), "mjw-box-margin") == 1);
+  doc.option.nativeccd = false;
+  CHECK(countCode(analyzeCompiled(doc), "mjw-box-margin") == 0);
+  doc.option.multiccd = doc.option.nativeccd = true;
+  margin->fix(doc);
+  CHECK(doc.pair(p)->margin == 0);
+  CHECK(countCode(analyzeCompiled(doc), "mjw-box-margin") == 0);
+
+  // Zero torsional friction with condim 4, zero rolling friction with condim 6.
+  CHECK(countCode(analyzeCompiled(doc), "mjw-friction") == 0);
+  doc.geom(g1)->condim = 4;
+  doc.geom(g1)->friction = {1, 0, 0.0001};
+  CHECK(countCode(analyzeCompiled(doc), "mjw-friction") == 1);
+  doc.geom(g1)->condim = 3;
+  CHECK(countCode(analyzeCompiled(doc), "mjw-friction") == 0);
+  doc.pair(p)->condim = 6;
+  doc.pair(p)->friction = Vec5{{1, 1, 0.005, 0, 0.0001}};
+  CHECK(countCode(analyzeCompiled(doc), "mjw-friction") == 1);
+
+  // A pair of a geom with itself: MuJoCo ignores it, mujoco_warp fails to load the model.
+  doc.pair(p)->geom2 = g1;
+  r = analyzeCompiled(doc);
+  const Issue* same = findCode(r, "pair-same");
+  REQUIRE(same);
+  REQUIRE(same->fix);
+  same->fix(doc);
+  CHECK(doc.pairs.empty());
+}
+
+TEST_CASE("analysis: sensor update phase follows MuJoCo's rule") {
+  Document doc;
+  REQUIRE(makeTemplate("arm", doc));
+  Id s = addSensor(doc, SensorType::JointPos, doc.joints[0].id);
+  Sensor& sensor = *doc.sensor(s);
+  sensor.nsample = 4;
+  sensor.interval = {0.01, -0.004};  // first update at 6 ms
+  CHECK(compileMjcf(writeMjcf(doc)).ok);
+  CHECK(countCode(analyzeCompiled(doc), "sensor-interval") == 0);
+  for (Vec2 bad : {Vec2{0.01, 0.004}, Vec2{0.01, -0.01}, Vec2{-0.01, 0}}) {
+    sensor.interval = bad;
+    CHECK_FALSE(compileMjcf(writeMjcf(doc)).ok);
+    AnalysisReport r = analyzeModel(doc, nullptr, false);
+    const Issue* i = findCode(r, "sensor-interval");
+    REQUIRE(i);
+    i->fix(doc);
+    CHECK(compileMjcf(writeMjcf(doc)).ok);
+  }
+  // Samples a delayed sensor needs: one per step, or one per period plus the one being held.
+  sensor.interval = {0, 0};
+  sensor.delay = 0.02;
+  CHECK(sensorHistoryNeeded(sensor, 0.002) == 10);
+  sensor.interval = {0.01, 0};
+  CHECK(sensorHistoryNeeded(sensor, 0.002) == 3);
+  sensor.delay = 0;
+  CHECK(sensorHistoryNeeded(sensor, 0.002) == 1);
+}
+
 TEST_CASE("analysis: silent MuJoCo mistakes and start pose") {
   Document doc;
   REQUIRE(makeTemplate("quadruped", doc));

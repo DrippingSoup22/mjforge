@@ -600,6 +600,17 @@ class Builder {
       x.pos = v3(m_->cam_pos + 3 * c);
       x.quat = q4(m_->cam_quat + 4 * c);
       x.fovy = m_->cam_fovy[c];
+      x.orthographic = m_->cam_projection[c] == mjPROJ_ORTHOGRAPHIC;
+      x.resolution[0] = m_->cam_resolution[2 * c];
+      x.resolution[1] = m_->cam_resolution[2 * c + 1];
+      x.output = m_->cam_output[c];
+      x.ipd = m_->cam_ipd[c];
+      x.sensorsize = {fromFloat(m_->cam_sensorsize[2 * c]), fromFloat(m_->cam_sensorsize[2 * c + 1])};
+      if (x.sensorsize.x > 0 && x.sensorsize.y > 0) {
+        const float* in = m_->cam_intrinsic + 4 * c;  // focal length, principal point (lengths)
+        x.focal = {fromFloat(in[0]), fromFloat(in[1])};
+        x.principal = {fromFloat(in[2]), fromFloat(in[3])};
+      }
       x.mode = CameraMode(std::min<int>(m_->cam_mode[c], int(CameraMode::TargetBodyCom)));
       if (m_->cam_targetbodyid[c] >= 0) x.target = bodyIds_[m_->cam_targetbodyid[c]];
       camIds_[c] = x.id;

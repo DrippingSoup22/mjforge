@@ -781,7 +781,22 @@ class Writer {
     if (c.mode != CameraMode::Fixed && (!targeted || targetOk)) n.set("mode", toXml(c.mode));
     if (targeted && targetOk) n.set("target", nameOf(c.target));
     setPose(n, c.pos, c.quat);
-    if (!nearly(c.fovy, 45.0)) n.set("fovy", num(c.fovy));
+    if (c.orthographic) n.set("projection", "orthographic");
+    bool lens = c.sensorsize.x > 0 && c.sensorsize.y > 0;  // MJCF takes either the lens or fovy
+    if (!lens && !nearly(c.fovy, 45.0)) n.set("fovy", num(c.fovy));
+    if (c.resolution[0] != 1 || c.resolution[1] != 1)
+      n.set("resolution", std::to_string(c.resolution[0]) + " " + std::to_string(c.resolution[1]));
+    if (c.output != 1) {
+      static const char* const outs[] = {"rgb", "depth", "distance", "normal", "segmentation"};
+      std::string s;
+      for (int k = 0; k < 5; ++k)
+        if (c.output & (1 << k)) s += (s.empty() ? "" : " ") + std::string(outs[k]);
+      if (!s.empty()) n.set("output", s);
+    }
+    if (!nearly(c.sensorsize, Vec2{})) n.set("sensorsize", vec(c.sensorsize));
+    if (!nearly(c.focal, Vec2{})) n.set("focal", vec(c.focal));
+    if (!nearly(c.principal, Vec2{})) n.set("principal", vec(c.principal));
+    if (!nearly(c.ipd, 0.068)) n.set("ipd", num(c.ipd));
   }
 
   void writeLight(XmlNode& parent, const Light& l) {

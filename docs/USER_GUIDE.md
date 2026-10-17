@@ -91,7 +91,9 @@ self-collisions, or only the feet touch the world (the cheapest setup for locomo
 *Tools > Exclude contacts between selected bodies* adds `<exclude>` pairs.
 
 **Sensors.** *Tools > Add sensors* adds an IMU at the model root or touch sensors on the feet; the
-Sensors panel adds joint position and velocity sensors in one click.
+Sensors panel adds joint position and velocity sensors in one click. A sensor can report late
+(*Delay*) or at a slower rate than the simulation (*Update period*, with the time of its first
+update), like a real camera or encoder; the Inspector shows how many history samples that needs.
 
 **Meshes.** *Add > Geom > Mesh from file* (or *+ Geom* on a body) loads an STL, OBJ or MSH file
 through MuJoCo, so it is read exactly as in training. The mesh keeps the position it has in the file
@@ -146,7 +148,10 @@ Issues are grouped by area:
   the one MuJoCo sees with the body free. The fix adds armature.
 - **Start pose**: the model floating above or starting inside the floor, the center of mass outside
   the feet, overlapping geoms. Evaluated at the start pose (the first keyframe if there is one).
-- **MuJoCo Warp**: features MJWarp rejects, with fixes.
+- **MuJoCo Warp**: what MJWarp would reject when loading the model (the PGS solver, noslip, some
+  flags, explicit sleep policies, box contacts with a margin, contact sensor velocities) and what it
+  silently ignores or treats differently (actuator armature, disabled actuator groups, a contact
+  pair of a geom with itself), with fixes. Each rule was checked against `mujoco_warp.put_model`.
 - **Performance**: tips for training speed, such as which contact pairs need MJWarp's slower convex
   collider and how many self-collision pairs your creature has.
 

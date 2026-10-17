@@ -34,6 +34,10 @@ Id addMaterial(Document& doc, const Material& m);
 
 // Sets type-specific defaults when an actuator changes type (kp/kv/ranges).
 void setActuatorType(Document& doc, Actuator& a, ActuatorType type);
+// Attaches a sensor to `obj` with the object and reference types its kind reads; an object of the
+// wrong kind leaves it unattached. setSensorType keeps the object when it fits the new type.
+void attachSensor(const Document& doc, Sensor& s, Id obj);
+void setSensorType(const Document& doc, Sensor& s, SensorType type);
 
 // Capsule / cylinder / box helpers: describe the geom by its two axis endpoints (body frame).
 void geomEndpoints(const Geom& g, Vec3* a, Vec3* b);

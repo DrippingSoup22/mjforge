@@ -323,6 +323,11 @@ std::vector<Id> Document::subtree(Id b) const {
   return out;
 }
 
+int sensorHistoryNeeded(const Sensor& s, double timestep) {
+  if (s.interval.x > 0) return std::max(1, int(std::ceil(s.delay / s.interval.x - 1e-9)) + 1);
+  return std::max(1, int(std::ceil(s.delay / std::max(timestep, 1e-12) - 1e-9)));
+}
+
 int sensorDim(const Sensor& s) {
   int per = 0;
   if (s.type == SensorType::RangeFinder) {

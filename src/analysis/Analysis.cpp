@@ -1,6 +1,7 @@
 #include "analysis/Analysis.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -657,10 +658,57 @@ class Analyzer {
       }
       if (!ok) add(Severity::Error, IssueArea::Model, "sensor-target", fmt("Sensor %s has no valid target", quote(s.name).c_str()),
                    "Choose what this sensor is attached to in the inspector.", {s.id});
+      // MuJoCo's rules on the kind of joint or tendon a sensor reads.
+      const Joint* sj = o == SensorObj::Joint ? doc_.joint(s.obj) : nullptr;
+      const Tendon* st = o == SensorObj::Tendon ? doc_.tendon(s.obj) : nullptr;
+      const char* why = nullptr;
+      switch (s.type) {
+        case SensorType::JointPos:
+        case SensorType::JointVel:
+        case SensorType::JointActuatorFrc:
+          if (sj && sj->type != JointType::Hinge && sj->type != JointType::Slide)
+            why = "reads a single joint coordinate, so it needs a hinge or slide joint (ball joints have ballquat / "
+                  "ballangvel sensors; a free body has frame sensors)";
+          break;
+        case SensorType::BallQuat:
+        case SensorType::BallAngVel:
+          if (sj && sj->type != JointType::Ball) why = "needs a ball joint (hinge and slide joints have jointpos / jointvel)";
+          break;
+        case SensorType::JointLimitPos:
+        case SensorType::JointLimitVel:
+        case SensorType::JointLimitFrc:
+          if (sj && !sj->limited) why = "reports the joint's limit, so the joint must be limited";
+          break;
+        case SensorType::TendonLimitPos:
+        case SensorType::TendonLimitVel:
+        case SensorType::TendonLimitFrc:
+          if (st && !st->limited) why = "reports the tendon's limit, so the tendon must be limited";
+          break;
+        default: break;
+      }
+      if (why)
+        add(Severity::Error, IssueArea::Model, "sensor-kind", fmt("Sensor %s does not fit its target", quote(s.name).c_str()),
+            std::string("MuJoCo refuses it: it ") + why + ".", {s.id, s.obj});
+      if (s.noise < 0 || s.cutoff < 0)
+        add(Severity::Error, IssueArea::Model, "sensor-negative", fmt("Sensor %s has a negative noise or cutoff", quote(s.name).c_str()),
+            "", {s.id});
+      // Update period and phase: MuJoCo takes a phase in (-period, 0], the first update being at
+      // period + phase.
+      if (s.interval.x < 0 || s.interval.y > 0 || (s.interval.x > 0 && s.interval.y <= -s.interval.x)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "sensor-interval",
+                       fmt("Sensor %s has an invalid update period or phase", quote(s.name).c_str()),
+                       "MuJoCo takes a period of zero or more and a phase between minus the period and 0 (the first "
+                       "update is at period + phase).",
+                       {s.id});
+        Id id = s.id;
+        i.fixLabel = "Update from the start";
+        i.fix = [id](Document& d) {
+          if (Sensor* x = d.sensor(id)) x->interval = {std::max(0.0, x->interval.x), 0};
+        };
+      }
       // Delayed and slower-rate values are read from the sensor's history buffer: one sample per step,
       // or per update period when there is one.
-      int needSamples = std::max(1, s.interval.x > 0 ? int(std::ceil(s.delay / s.interval.x - 1e-9)) + 1
-                                                     : int(std::ceil(s.delay / doc_.option.timestep - 1e-9)));
+      int needSamples = sensorHistoryNeeded(s, doc_.option.timestep);
       bool noBuffer = s.nsample <= 0;
       if ((s.delay > 0 && s.nsample < needSamples) || (s.interval.x > 0 && noBuffer)) {
         bool refused = s.delay > 0 && noBuffer;
@@ -696,6 +744,25 @@ class Analyzer {
             if (Sensor* x = d.sensor(id)) x->condata = (x->condata & ~kVel) ? x->condata & ~kVel : 1;
           };
         }
+      }
+    }
+    for (const Camera& c : doc_.cameras) {
+      bool sensor = c.sensorsize.x > 0 && c.sensorsize.y > 0;
+      bool intrinsic = c.focal.x != 0 || c.focal.y != 0 || c.principal.x != 0 || c.principal.y != 0;
+      if ((intrinsic && !sensor) || (sensor && (c.resolution[0] <= 0 || c.resolution[1] <= 0))) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "camera-intrinsics",
+                       fmt("Camera %s: incomplete lens settings", quote(c.name).c_str()),
+                       "A focal length or principal point needs the sensor size, and a sensor size needs a resolution.",
+                       {c.id});
+        Id id = c.id;
+        i.fixLabel = "Use the field of view";
+        i.fix = [id](Document& d) {
+          if (Camera* x = d.camera(id)) {
+            x->sensorsize = x->focal = x->principal = Vec2{};
+            x->resolution[0] = std::max(x->resolution[0], 1);
+            x->resolution[1] = std::max(x->resolution[1], 1);
+          }
+        };
       }
     }
     for (const Exclude& e : doc_.excludes)
@@ -804,6 +871,31 @@ class Analyzer {
         };
       }
     }
+    // Explicit inertials are checked by MuJoCo as written, after the compiler's lower bounds (with
+    // inertiafromgeom="true" the geoms replace them).
+    if (doc_.compiler.inertiafromgeom != InertiaFromGeom::True)
+      for (size_t bi = 1; bi < doc_.bodies.size(); ++bi) {
+        const Body& b = doc_.bodies[bi];
+        if (!b.hasInertial) continue;
+        double lo = doc_.compiler.boundinertia;
+        Vec3 I = {std::max(b.diaginertia.x, lo), std::max(b.diaginertia.y, lo), std::max(b.diaginertia.z, lo)};
+        if (std::max(b.mass, doc_.compiler.boundmass) < 0 || I.x < 0 || I.y < 0 || I.z < 0) {
+          add(Severity::Error, IssueArea::Model, "inertial-negative", fmt("Body %s has a negative mass or inertia", quote(b.name).c_str()),
+              "Mass and inertia must be zero or positive.", {b.id});
+        } else if (!doc_.compiler.balanceinertia && (I.x + I.y < I.z || I.x + I.z < I.y || I.y + I.z < I.x)) {
+          Issue& i = add(Severity::Error, IssueArea::Model, "inertia-triangle",
+                         fmt("Body %s has an impossible inertia", quote(b.name).c_str()),
+                         fmt("No rigid body has the principal inertias %.3g, %.3g, %.3g: each must be at most the sum of "
+                             "the other two (A + B >= C), so MuJoCo refuses the model.",
+                             I.x, I.y, I.z),
+                         {b.id});
+          Id id = b.id;
+          i.fixLabel = "Average the three";
+          i.fix = [id, I](Document& d) {
+            if (Body* x = d.body(id)) x->diaginertia = Vec3{1, 1, 1} * ((I.x + I.y + I.z) / 3);
+          };
+        }
+      }
     for (const Geom& g : doc_.geoms) {
       int n = g.type == GeomType::Sphere ? 1 : (g.type == GeomType::Capsule || g.type == GeomType::Cylinder) ? 2 : 3;
       if (g.type == GeomType::Plane || g.type == GeomType::Hfield || g.type == GeomType::Mesh) n = 0;
@@ -837,8 +929,16 @@ class Analyzer {
       if (!doc_.geom(c.geom1) || !doc_.geom(c.geom2))
         add(Severity::Error, IssueArea::Model, "pair-target", fmt("Contact pair %s needs two geoms", n.c_str()),
             "Pick both geoms in the inspector.", {c.id});
-      else if (c.geom1 == c.geom2)
-        add(Severity::Error, IssueArea::Model, "pair-same", fmt("Contact pair %s uses the same geom twice", n.c_str()), "", {c.id});
+      else if (c.geom1 == c.geom2) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "pair-same", fmt("Contact pair %s uses the same geom twice", n.c_str()),
+                       "MuJoCo then makes contacts of the geom with itself that push on nothing, and MuJoCo Warp 3.16 "
+                       "applies the pair to a different pair of geoms (or fails to load a model with a single geom). "
+                       "Pick a second geom, or delete the pair.",
+                       {c.id});
+        Id id = c.id;
+        i.fixLabel = "Delete the pair";
+        i.fix = [id](Document& d) { deleteElements(d, {id}); };
+      }
       if (c.condim != 1 && c.condim != 3 && c.condim != 4 && c.condim != 6)
         add(Severity::Error, IssueArea::Model, "pair-condim", fmt("Contact pair %s: contact dimension must be 1, 3, 4 or 6", n.c_str()), "", {c.id});
     }
@@ -851,8 +951,8 @@ class Analyzer {
         case EqualityType::Connect:
         case EqualityType::Weld:
           if (k1 == Kind::Site) {
-            ok = k2 == Kind::Site;
-            why = "Site constraints need two sites.";
+            ok = k2 == Kind::Site && e.obj1 != e.obj2;
+            why = "Site constraints need two different sites.";
           } else {
             // The world may be either body, but not both.
             ok = k1 == Kind::Body && (e.obj2 == kNoId || k2 == Kind::Body) && e.obj1 != e.obj2 &&
@@ -1884,9 +1984,31 @@ class Analyzer {
       i.fixLabel = "Use Newton";
       i.fix = [](Document& d) { d.option.solver = Solver::Newton; };
     }
+    // Measured with mujoco-warp 3.16: put_model refuses explicit tree sleep policies (never, allowed,
+    // init), whether sleeping is enabled or not; only the automatic one is supported.
+    std::vector<Id> policies;
+    for (const Body& b : doc_.bodies)
+      if (b.sleep != SleepPolicy::Auto && doc_.isTreeRoot(b.id)) policies.push_back(b.id);
+    if (!policies.empty()) {
+      Issue& i = add(Severity::Error, IssueArea::MJWarp, "mjw-sleep-policy",
+                     fmt("MuJoCo Warp does not support the sleep policy of %zu body(s)", policies.size()),
+                     "MuJoCo Warp 3.16 refuses explicit sleep policies (never, allowed, start asleep) even with sleeping "
+                     "off; it supports only Auto.",
+                     policies);
+      i.fixLabel = "Use Auto";
+      i.fix = [policies](Document& d) {
+        for (Id id : policies)
+          if (Body* b = d.body(id)) b->sleep = SleepPolicy::Auto;
+      };
+    }
     // Box/mesh pairs with margins are rejected when (multi/native)CCD is on.
     if (opt.multiccd || opt.nativeccd) {
       std::vector<Id> offenders;
+      auto explicitPair = [&](Id a, Id b) {
+        for (const ContactPair& c : doc_.pairs)
+          if ((c.geom1 == a && c.geom2 == b) || (c.geom1 == b && c.geom2 == a)) return true;
+        return false;
+      };
       const DocIndex& ix = doc_.index();
       ExclSet excl = excludeSet(doc_);
       for (size_t b1 = 0; b1 < doc_.bodies.size(); ++b1)
@@ -1901,29 +2023,60 @@ class Analyzer {
               if (g1.margin == 0 && g2.margin == 0) continue;
               if (!opt.multiccd && !(g1.type == GeomType::Box && g2.type == GeomType::Box)) continue;
               if (!pairPasses(doc_, weld_, excl, g1, int(b1), g2, int(b2))) continue;
+              if (explicitPair(g1.id, g2.id)) continue;  // the pair's own margin counts
               if (g1.margin != 0) offenders.push_back(g1.id);
               if (g2.margin != 0) offenders.push_back(g2.id);
             }
         }
+      // Explicit pairs are checked with their own margin.
+      for (const ContactPair& c : doc_.pairs) {
+        const Geom* g1 = doc_.geom(c.geom1);
+        const Geom* g2 = doc_.geom(c.geom2);
+        if (!g1 || !g2 || c.margin == 0) continue;
+        bool box1 = g1->type == GeomType::Box, box2 = g2->type == GeomType::Box;
+        if ((!box1 && g1->type != GeomType::Mesh) || (!box2 && g2->type != GeomType::Mesh)) continue;
+        if (opt.multiccd || (box1 && box2)) offenders.push_back(c.id);
+      }
       std::sort(offenders.begin(), offenders.end());
       offenders.erase(std::unique(offenders.begin(), offenders.end()), offenders.end());
       if (!offenders.empty()) {
         Issue& i = add(Severity::Error, IssueArea::MJWarp, "mjw-box-margin",
-                       fmt("%zu box geom(s) with a contact margin can collide with other boxes", offenders.size()),
-                       "With multiccd / nativeccd enabled (the default), MuJoCo Warp rejects box-box and box-mesh pairs "
-                       "with nonzero margin. Set the margin to 0, or disable multiccd and nativeccd in Scene > Flags.",
+                       fmt("%zu box geom(s) or contact pair(s) with a margin can make box contacts", offenders.size()),
+                       "With multiccd / nativeccd enabled (the default), MuJoCo Warp rejects box-box and box-mesh contacts "
+                       "with a nonzero margin. Set the margin to 0, or disable multiccd and nativeccd in Scene > Flags.",
                        offenders);
         i.fixLabel = "Set those margins to 0";
-        i.fix = [offenders](Document& d) { for (Id id : offenders) if (Geom* g = d.geom(id)) g->margin = 0; };
+        i.fix = [offenders](Document& d) {
+          for (Id id : offenders) {
+            if (Geom* g = d.geom(id)) g->margin = 0;
+            if (ContactPair* c = d.pair(id)) c->margin = 0;
+          }
+        };
       }
     }
-    for (const Geom& g : doc_.geoms) {
-      if (g.condim >= 3 && g.friction.x < 1e-5 && (g.contype || g.conaffinity)) {
-        add(Severity::Warning, IssueArea::MJWarp, "mjw-friction",
-            fmt("Geom %s has sliding friction below 1e-5", quote(g.name).c_str()),
-            "MuJoCo Warp warns that this may produce NaN with condim >= 3. Use condim 1 for frictionless contacts.", {g.id});
-      }
+    // MuJoCo Warp warns that friction coefficients below mjMINMU in the directions a contact uses
+    // (sliding from condim 3, torsional from 4, rolling at 6) may produce NaN.
+    auto lowFriction = [](int condim, const std::array<double, 5>& f, std::initializer_list<std::pair<int, int>> checks) {
+      for (auto [minCondim, idx] : checks)
+        if (condim >= minCondim && f[size_t(idx)] < 1e-5) return true;
+      return false;
+    };
+    std::vector<Id> slippery;
+    for (const Geom& g : doc_.geoms)
+      if ((g.contype || g.conaffinity) &&
+          lowFriction(g.condim, {g.friction.x, g.friction.y, g.friction.z, 0, 0}, {{3, 0}, {4, 1}, {6, 2}}))
+        slippery.push_back(g.id);
+    for (const ContactPair& c : doc_.pairs) {
+      const Vec5& f = c.friction;
+      if (lowFriction(c.condim, {f[0], f[1], f[2], f[3], f[4]}, {{3, 0}, {4, 1}, {4, 2}, {6, 3}, {6, 4}})) slippery.push_back(c.id);
     }
+    if (!slippery.empty())
+      add(Severity::Warning, IssueArea::MJWarp, "mjw-friction",
+          fmt("%zu geom(s) or contact pair(s) have a friction coefficient below 1e-5", slippery.size()),
+          "MuJoCo Warp warns that a zero friction in a direction the contact uses (sliding with condim 3, torsional "
+          "with 4, rolling with 6) may produce NaN. Lower the contact dimension instead, e.g. condim 1 for "
+          "frictionless contacts.",
+          slippery);
   }
 
   // ---------------------------------------------------------------- collisions
@@ -1990,7 +2143,8 @@ class Analyzer {
       s.a = GeomType(t.first);
       s.b = GeomType(t.second);
       s.count = n;
-      s.ccd = isCcdPair(s.a, s.b);
+      // With nativeccd off, MJWarp collides boxes with its primitive box-box collider.
+      s.ccd = isCcdPair(s.a, s.b) && !(s.a == GeomType::Box && s.b == GeomType::Box && !doc_.option.nativeccd);
       rep_.pairTypes.push_back(s);
       if (s.ccd) {
         ccdPairs += n;
@@ -2100,6 +2254,13 @@ std::string explainCompileError(const std::string& e) {
       {"is not a fixed child of world", "Mocap bodies must be children of the world without joints."},
       {"setting delay > 0 without a history buffer", "A delayed actuator or sensor needs a history buffer (nsample)."},
       {"repeated name", "Two elements of the same type share a name."},
+      {"inertia must satisfy A + B >= C",
+       "An explicit inertia is impossible for a rigid body: each principal inertia must be at most the sum of the "
+       "other two."},
+      {"is repeated in equality constraint", "An equality constraint uses the same element on both sides."},
+      {"joint must be slide or hinge in sensor",
+       "Joint position and velocity sensors need a hinge or slide joint; ball joints use ball sensors, free joints "
+       "frame sensors."},
       {"unrecognized attribute", "The XML uses an attribute this MuJoCo version doesn't know (version mismatch?)."},
   };
   for (const M& m : table)
