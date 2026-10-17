@@ -1,8 +1,22 @@
 // Not losing work: the "save changes?" prompt before replacing or closing a modified project, a
 // background autosave of modified projects, and recovery of the autosave after a crash.
 #include <chrono>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 #include <imgui.h>
 #include <nlohmann/json.hpp>
@@ -25,6 +39,36 @@ const char* const kAutosavePrefix = "autosave-";
 double secondsNow() {
   return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+
+long processId() {
+#if defined(_WIN32)
+  return long(GetCurrentProcessId());
+#else
+  return long(getpid());
+#endif
+}
+
+// Whether another MJForge that owns an autosave is still running (then it is not a crash leftover).
+bool processAlive(long pid) {
+  if (pid <= 0 || pid == processId()) return false;
+#if defined(_WIN32)
+  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, DWORD(pid));
+  if (!h) return GetLastError() == ERROR_ACCESS_DENIED;
+  DWORD code = 0;
+  bool alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+  CloseHandle(h);
+  return alive;
+#else
+  return kill(pid_t(pid), 0) == 0 || errno == EPERM;
+#endif
+}
+
+// "autosave-<time>-<pid>.mjforge" -> pid (0 for older files without one).
+long autosaveOwner(const std::string& name) {
+  size_t dash = name.rfind('-'), dot = name.rfind('.');
+  if (dash == std::string::npos || dot == std::string::npos || dash < std::string(kAutosavePrefix).size() || dot <= dash + 1) return 0;
+  return std::strtol(name.substr(dash + 1, dot - dash - 1).c_str(), nullptr, 10);
+}
 }  // namespace
 
 // ------------------------------------------------------------------------------------ unsaved
@@ -45,7 +89,7 @@ void Editor::drawUnsavedModal() {
     showUnsaved_ = false;
   }
   if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-  std::string name = path_.empty() ? "This project" : fs::path(path_).filename().string();
+  std::string name = path_.empty() ? "This project" : fs::u8path(path_).filename().u8string();
   ImGui::Text("%s has unsaved changes.", name.c_str());
   ImGui::TextDisabled("Save them first?");
   ImGui::Spacing();
@@ -63,9 +107,9 @@ void Editor::drawUnsavedModal() {
   }
   ImGui::SameLine();
   if (ImGui::Button("Don't save", ImVec2(w, 0))) {
+    // The action itself drops the changes when it succeeds (new / open / quit reset the modified
+    // flag and remove the autosave); an Open dialog that gets cancelled keeps them protected.
     ImGui::CloseCurrentPopup();
-    removeAutosave();
-    modified_ = false;
     if (pendingDiscard_) pendingDiscard_();
     pendingDiscard_ = nullptr;
   }
@@ -96,16 +140,20 @@ bool Editor::confirmQuit() {
 void Editor::initAutosave() {
   if (configDir_.empty()) return;
   long long stamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-  autosavePath_ = (fs::path(configDir_) / (std::string(kAutosavePrefix) + std::to_string(stamp) + ".mjforge")).string();
-  // A previous session that ended without saving left its autosave behind: offer the newest.
+  autosavePath_ = (fs::u8path(configDir_) /
+                   (std::string(kAutosavePrefix) + std::to_string(stamp) + "-" + std::to_string(processId()) + ".mjforge"))
+                      .u8string();
+  // A previous session that ended without saving left its autosave behind: offer the newest. An
+  // MJForge that is still running owns its autosave: leave that one alone.
   std::error_code ec;
   fs::file_time_type newest{};
-  for (const auto& e : fs::directory_iterator(configDir_, ec)) {
-    std::string n = e.path().filename().string();
+  for (const auto& e : fs::directory_iterator(fs::u8path(configDir_), ec)) {
+    std::string n = e.path().filename().u8string();
     if (n.rfind(kAutosavePrefix, 0) != 0 || e.path().extension() != ".mjforge") continue;
+    if (processAlive(autosaveOwner(n))) continue;
     auto t = fs::last_write_time(e.path(), ec);
     if (recoverPath_.empty() || t > newest) {
-      recoverPath_ = e.path().string();
+      recoverPath_ = e.path().u8string();
       newest = t;
     }
   }
@@ -128,13 +176,14 @@ void Editor::maybeAutosave() {
   nlohmann::json state = nlohmann::json::parse(editorStateJson(), nullptr, false);
   if (state.is_discarded()) state = nlohmann::json::object();
   state["autosaveOf"] = path_;
-  std::string stateText = state.dump(), path = autosavePath_;
+  std::string stateText = state.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), path = autosavePath_;
   autosaveJob_ = std::async(std::launch::async, [copy, stateText, path] {
-    std::string tmp = path + ".tmp", err;
-    if (!saveProject(*copy, tmp, &err, stateText)) return false;
-    std::error_code ec;
-    fs::rename(tmp, path, ec);  // atomic replace: a crash mid-write never leaves a broken file
-    return !ec;
+    try {  // an exception here would surface on the UI thread at get()
+      std::string err;
+      return saveProject(*copy, path, &err, stateText);  // written to a temporary file and renamed
+    } catch (const std::exception&) {
+      return false;
+    }
   });
 }
 
@@ -146,7 +195,7 @@ void Editor::removeAutosave() {
   finishAutosave();
   if (autosavePath_.empty()) return;
   std::error_code ec;
-  fs::remove(autosavePath_, ec);
+  fs::remove(fs::u8path(autosavePath_), ec);
   autosavedRevision_ = editRevision_;
 }
 
@@ -157,7 +206,7 @@ void Editor::drawRecoverModal() {
   }
   if (!ImGui::BeginPopupModal("Recover unsaved work?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
   std::error_code ec;
-  auto age = fs::file_time_type::clock::now() - fs::last_write_time(recoverPath_, ec);
+  auto age = fs::file_time_type::clock::now() - fs::last_write_time(fs::u8path(recoverPath_), ec);
   long long minutes = std::chrono::duration_cast<std::chrono::minutes>(age).count();
   ImGui::TextUnformatted("MJForge closed before the last changes were saved.");
   ImGui::TextDisabled("An autosave from %s ago is available.",
@@ -178,7 +227,7 @@ void Editor::drawRecoverModal() {
       path_ = !j.is_discarded() && j.contains("autosaveOf") && j["autosaveOf"].is_string() ? j["autosaveOf"].get<std::string>() : "";
       applyEditorState(state);
       markDirty();  // recovered work still has to be saved
-      fs::remove(recoverPath_, ec);
+      fs::remove(fs::u8path(recoverPath_), ec);
       notify("Recovered the autosaved project. Save it to keep it.", pal::kOk, 6);
     } else {
       notify("Could not recover: " + err, pal::kError, 6);
@@ -188,7 +237,7 @@ void Editor::drawRecoverModal() {
   ImGui::SameLine();
   if (ImGui::Button("Discard", ImVec2(w, 0))) {
     ImGui::CloseCurrentPopup();
-    fs::remove(recoverPath_, ec);
+    fs::remove(fs::u8path(recoverPath_), ec);
     recoverPath_.clear();
   }
   ImGui::SameLine();

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
@@ -453,7 +454,8 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
     json e = json::parse(editorStateJson, nullptr, false);
     if (!e.is_discarded()) root["editor"] = e;
   }
-  return root.dump(1);
+  // Invalid UTF-8 in names (from a Latin-1 file, say) must not make saving throw.
+  return root.dump(1, ' ', false, json::error_handler_t::replace);
 }
 
 bool projectFromJson(Document& out, const std::string& text, std::string* error, std::string* editorStateJson) {
@@ -599,7 +601,8 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
       for (Geom& g : doc.geoms)
         if (g.material != kNoId && g.rgba == Color{1, 1, 1, 1}) g.rgba = Geom{}.rgba;
     doc.touch();
-    if (editorStateJson) *editorStateJson = root.contains("editor") ? root["editor"].dump() : std::string();
+    if (editorStateJson)
+      *editorStateJson = root.contains("editor") ? root["editor"].dump(-1, ' ', false, json::error_handler_t::replace) : std::string();
     out = std::move(doc);
     out.touch();
     return true;
@@ -610,7 +613,7 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
 }
 
 bool readTextFile(const std::string& path, std::string& out, std::string* error) {
-  std::ifstream f(path, std::ios::binary);
+  std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
   if (!f) {
     if (error) *error = "Cannot open " + path;
     return false;
@@ -622,15 +625,30 @@ bool readTextFile(const std::string& path, std::string& out, std::string* error)
 }
 
 bool writeTextFile(const std::string& path, const std::string& content, std::string* error) {
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  if (!f) {
-    if (error) *error = "Cannot write " + path;
-    return false;
+  // Write a temporary file next to the target and rename it over: a failed or interrupted write
+  // never destroys the previous version.
+  namespace fs = std::filesystem;
+  fs::path target = fs::u8path(path), tmp = fs::u8path(path + ".mjforge-tmp");
+  {
+    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+    if (!f) {
+      if (error) *error = "Cannot write " + path;
+      return false;
+    }
+    f << content;
+    f.close();
+    if (!f) {
+      std::error_code ec;
+      fs::remove(tmp, ec);
+      if (error) *error = "Error while writing " + path;
+      return false;
+    }
   }
-  f << content;
-  f.close();
-  if (!f) {
-    if (error) *error = "Error while writing " + path;
+  std::error_code ec;
+  fs::rename(tmp, target, ec);
+  if (ec) {
+    fs::remove(tmp, ec);
+    if (error) *error = "Cannot replace " + path + ": " + ec.message();
     return false;
   }
   return true;

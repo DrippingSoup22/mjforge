@@ -71,9 +71,31 @@ Color c4(const float* c) { return {c[0], c[1], c[2], c[3]}; }
 Vec2 v2(const mjtNum* v) { return {v[0], v[1]}; }
 Vec5 v5(const mjtNum* v) { return Vec5{{v[0], v[1], v[2], v[3], v[4]}}; }
 
+// Names from files in another encoding (Latin-1, say) become valid UTF-8: invalid bytes are read as
+// Latin-1 characters, so "t\xeate" turns into "tête" instead of breaking the UI and the save.
+std::string validUtf8(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size();) {
+    unsigned char c = (unsigned char)s[i];
+    int n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
+    bool ok = n > 0 && i + n <= s.size();
+    for (int k = 1; ok && k < n; ++k) ok = ((unsigned char)s[i + k] >> 6) == 2;
+    if (ok) {
+      out.append(s, i, size_t(n));
+      i += size_t(n);
+    } else {
+      out += char(0xC0 | (c >> 6));
+      out += char(0x80 | (c & 0x3F));
+      ++i;
+    }
+  }
+  return out;
+}
+
 std::string objName(const mjModel* m, mjtObj type, int id) {
   const char* n = mj_id2name(m, type, id);
-  return n ? n : "";
+  return n ? validUtf8(n) : "";
 }
 
 std::string specString(const mjString* s) {
@@ -170,7 +192,7 @@ class Builder {
 
   void build() {
     doc_ = Document();
-    std::string name = specString(spec_->modelname);
+    std::string name = validUtf8(specString(spec_->modelname));
     doc_.modelName = name.empty() ? "imported" : name;
     options();
     assets();
@@ -294,11 +316,11 @@ class Builder {
       x.height = t->height > 0 ? t->height : m_->tex_height[id];
       if (x.builtin == TextureBuiltin::None) {
         auto absolutePath = [&](const std::string& file) {
-          fs::path p = fs::path(file);
-          if (p.is_relative()) p = fs::path(baseDir_) / specString(spec_->compiler.texturedir) / p;
+          fs::path p = fs::u8path(file);
+          if (p.is_relative()) p = fs::u8path(baseDir_) / specString(spec_->compiler.texturedir) / p;
           std::error_code ec;
           fs::path abs = fs::absolute(p, ec);  // exports can be written anywhere
-          return (ec ? p : abs).lexically_normal().string();
+          return (ec ? p : abs).lexically_normal().u8string();
         };
         // Per-face files (fileright, ...) live in an mjStringVec: a C++ container of the MuJoCo
         // library's own standard library (libc++ in the official builds), unreadable from here.
@@ -1100,13 +1122,13 @@ bool importSpec(mjSpec* spec, const std::string& baseDir, Document& out, std::st
 
 Id loadMeshFile(Document& doc, const std::string& path, double scale, Pose* frame, std::string* error) {
   std::error_code ec;
-  fs::path abs = fs::absolute(fs::path(path), ec);
+  fs::path abs = fs::absolute(fs::u8path(path), ec);
   if (ec || !fs::is_regular_file(abs, ec)) {
     if (error) *error = "File not found: " + path;
     return kNoId;
   }
   std::string file;
-  for (char c : abs.string()) {
+  for (char c : abs.u8string()) {
     if (c == '&') file += "&amp;";
     else if (c == '"') file += "&quot;";
     else if (c == '<') file += "&lt;";
@@ -1127,8 +1149,8 @@ Id loadMeshFile(Document& doc, const std::string& path, double scale, Pose* fram
   }
   MeshAsset a;
   a.id = doc.newId();
-  a.name = doc.uniqueName(Kind::Mesh, abs.stem().string().empty() ? "mesh" : abs.stem().string());
-  a.source = abs.string();
+  a.name = doc.uniqueName(Kind::Mesh, abs.stem().u8string().empty() ? "mesh" : abs.stem().u8string());
+  a.source = abs.u8string();
   std::vector<float> vert;
   std::vector<int> face;
   dedupVertices(m->mesh_vert + 3 * size_t(m->mesh_vertadr[0]), m->mesh_vertnum[0], m->mesh_face + 3 * size_t(m->mesh_faceadr[0]),
@@ -1157,7 +1179,7 @@ bool importMjcfFile(const std::string& path, Document& out, std::string* error, 
     if (error) *error = err[0] ? err : "could not parse the file";
     return false;
   }
-  return importSpec(spec.s, fs::path(path).parent_path().string(), out, error, report);
+  return importSpec(spec.s, fs::u8path(path).parent_path().u8string(), out, error, report);
 }
 
 bool importMjcfString(const std::string& xml, Document& out, std::string* error, ImportReport* report) {

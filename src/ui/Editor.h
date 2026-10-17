@@ -12,6 +12,7 @@
 #include "app/Cli.h"
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/Kinematics.h"
 #include "core/Merge.h"
 #include "core/Ops.h"
 #include "core/MjcfWriter.h"
@@ -273,12 +274,16 @@ class Editor {
   float snapMove_ = 0.05f, snapAngle_ = 15.0f, snapScale_ = 0.01f;
   PickMode pickMode_ = PickMode::Body;
   std::vector<Pose> poses_;  // body world poses for the current frame
+  std::vector<JointFrame> jointFrames_;  // joint anchors / axes for the current frame (indexed like doc.joints)
   struct GizmoDrag {
     bool active = false;
+    bool recorded = false;  // undo step pushed (on the first real change)
+    Document before;        // the document at drag start
     Pose primaryStart;
     std::vector<std::pair<Id, Pose>> starts;  // world poses at drag start
     Vec3 sizeStart;
   } gizmoDrag_;
+  bool poseSliderRecorded_ = false;  // the current pose-slider drag has its undo step
 
   // validation
   BackgroundCompiler compiler_;
@@ -370,6 +375,7 @@ class Editor {
   int exportAngle_ = 0;
   bool exportLoader_ = true;  // also write <name>_mjwarp.py
   WarpSizing lastSizing_;     // peaks of the last simulation (kept after stopping)
+  uint64_t lastSizingRevision_ = ~uint64_t(0);  // edit revision they were measured at
   std::string mjwarpLoader(const std::string& xmlFile, bool* measured) const;
   std::string lastDir_;
   std::vector<std::string> recent_;

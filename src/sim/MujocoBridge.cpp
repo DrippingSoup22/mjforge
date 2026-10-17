@@ -68,7 +68,10 @@ int loadMujocoPlugins() {
   std::error_code ec;
   if (dir.empty() || !std::filesystem::is_directory(dir, ec)) return 0;
   g_pluginLibraries = 0;
-  mj_loadAllPluginLibraries(dir.string().c_str(), [](const char*, int, int count) { g_pluginLibraries += count > 0; });
+  try {  // MuJoCo takes a narrow path; skip plugins rather than fail if the folder name has no such form
+    mj_loadAllPluginLibraries(dir.string().c_str(), [](const char*, int, int count) { g_pluginLibraries += count > 0; });
+  } catch (const std::exception&) {
+  }
   return g_pluginLibraries;
 }
 

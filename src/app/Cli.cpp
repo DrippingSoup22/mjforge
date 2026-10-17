@@ -156,7 +156,7 @@ int runHeadless(const CliOptions& cli) {
   if (!cli.exportPath.empty()) {
     std::vector<std::string> written;
     std::error_code ec;
-    std::filesystem::path parent = std::filesystem::path(cli.exportPath).parent_path();
+    std::filesystem::path parent = std::filesystem::u8path(cli.exportPath).parent_path();
     if (!parent.empty()) std::filesystem::create_directories(parent, ec);
     bool ok = cli.scope == "split" ? exportSplitMjcf(doc, cli.exportPath, opt, &err, &written)
                                    : exportMjcfFile(doc, cli.exportPath, opt, &err, "", &written);

@@ -66,7 +66,7 @@ void Editor::init(GLFWwindow* window, float scale, const std::string& configDir)
   props::setContext(&propCtx_);
   loadPrefs();
   std::error_code ec;
-  if (lastDir_.empty()) lastDir_ = fs::current_path(ec).string();
+  if (lastDir_.empty()) lastDir_ = fs::current_path(ec).u8string();
   newDocument("quadruped");
   initAutosave();
 }
@@ -212,7 +212,7 @@ void Editor::notify(const std::string& text, unsigned int color, double seconds)
 
 void Editor::setTitle() {
   if (!window_) return;
-  std::string name = path_.empty() ? "untitled" : fs::path(path_).filename().string();
+  std::string name = path_.empty() ? "untitled" : fs::u8path(path_).filename().u8string();
   std::string title = (modified_ ? "* " : "") + name + " - MJForge";
   glfwSetWindowTitle(window_, title.c_str());
 }
@@ -243,7 +243,7 @@ bool Editor::openPath(const std::string& path) {
   std::string editorState;
   std::vector<std::string> notes;
   if (!loadAnyFile(path, d, &notes, &editorState)) return false;
-  bool mjcf = fs::path(path).extension() != ".mjforge";
+  bool mjcf = fs::u8path(path).extension() != ".mjforge";
   stopSimulation();
   removeAutosave();
   doc_ = std::move(d);
@@ -255,10 +255,10 @@ bool Editor::openPath(const std::string& path) {
   compileDueTime_ = 0;
   frameModels();
   if (!editorState.empty()) applyEditorState(editorState);
-  lastDir_ = fs::path(path).parent_path().string();
+  lastDir_ = fs::u8path(path).parent_path().u8string();
   addRecent(path);
   setTitle();
-  notify("Opened " + fs::path(path).filename().string(), pal::kOk);
+  notify("Opened " + fs::u8path(path).filename().u8string(), pal::kOk);
   for (const std::string& n : notes) notify(n, pal::kWarning, 8);
   return true;
 }
@@ -272,10 +272,10 @@ bool Editor::savePath(const std::string& path) {
   path_ = path;
   modified_ = false;
   removeAutosave();
-  lastDir_ = fs::path(path).parent_path().string();
+  lastDir_ = fs::u8path(path).parent_path().u8string();
   addRecent(path);
   setTitle();
-  notify("Saved " + fs::path(path).filename().string(), pal::kOk);
+  notify("Saved " + fs::u8path(path).filename().u8string(), pal::kOk);
   if (afterSave_) {
     auto next = std::move(afterSave_);
     afterSave_ = nullptr;
@@ -290,7 +290,7 @@ void Editor::save() {
 }
 
 void Editor::saveAs() {
-  std::string def = path_.empty() ? doc_.modelName + ".mjforge" : fs::path(path_).filename().string();
+  std::string def = path_.empty() ? doc_.modelName + ".mjforge" : fs::u8path(path_).filename().u8string();
   fileDialog_.open(FileDialog::Mode::Save, "Save project", {".mjforge"}, lastDir_, def, kPurposeSaveAs);
 }
 
@@ -314,28 +314,28 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
   fs::path p(path);
   if (split) {
     // The model file next to the scene file; the scene includes it.
-    std::string stem = p.stem().string();
+    std::string stem = p.stem().u8string();
     if (!exportSplitMjcf(doc_, path, opt, &err)) {
       notify("Export failed: " + err, pal::kError, 6);
       return false;
     }
-    notify("Exported " + p.filename().string() + " + " + stem + "_model.xml" + meshNote(stem), pal::kOk, 5);
+    notify("Exported " + p.filename().u8string() + " + " + stem + "_model.xml" + meshNote(stem), pal::kOk, 5);
   } else {
     opt.scope = scope;
     if (!exportMjcfFile(doc_, path, opt, &err)) {
       notify("Export failed: " + err, pal::kError, 6);
       return false;
     }
-    notify("Exported " + p.filename().string() + meshNote(p.stem().string()), pal::kOk, 5);
+    notify("Exported " + p.filename().u8string() + meshNote(p.stem().u8string()), pal::kOk, 5);
   }
   if (exportLoader_) {
     bool measured = false;
-    fs::path py = p.parent_path() / (p.stem().string() + "_mjwarp.py");
-    if (writeTextFile(py.string(), mjwarpLoader(p.filename().string(), &measured), &err))
-      notify(std::string("Wrote ") + py.filename().string() + (measured ? " (sizes from the simulation)" : " (estimated sizes: simulate first for measured ones)"),
+    fs::path py = p.parent_path() / (p.stem().u8string() + "_mjwarp.py");
+    if (writeTextFile(py.u8string(), mjwarpLoader(p.filename().u8string(), &measured), &err))
+      notify(std::string("Wrote ") + py.filename().u8string() + (measured ? " (sizes from the simulation)" : " (estimated sizes: simulate first for measured ones)"),
              pal::kTextDim, 5);
   }
-  lastDir_ = p.parent_path().string();
+  lastDir_ = p.parent_path().u8string();
   return true;
 }
 
@@ -347,7 +347,7 @@ std::string Editor::editorStateJson() const {
                  {"distance", vp_.cam.distance},
                  {"azimuth", vp_.cam.azimuth},
                  {"elevation", vp_.cam.elevation}};
-  return j.dump();
+  return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 void Editor::applyEditorState(const std::string& s) {
@@ -396,12 +396,12 @@ void Editor::savePrefs() {
   j["exportAngle"] = exportAngle_;
   j["exportSplit"] = exportSplit_;
   j["exportLoader"] = exportLoader_;
-  writeTextFile(configDir_ + "/prefs.json", j.dump(2));
+  writeTextFile(configDir_ + "/prefs.json", j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace));
 }
 
 void Editor::addRecent(const std::string& path) {
   std::error_code ec;
-  std::string abs = fs::absolute(path, ec).string();
+  std::string abs = fs::absolute(fs::u8path(path), ec).u8string();
   recent_.erase(std::remove(recent_.begin(), recent_.end(), abs), recent_.end());
   recent_.insert(recent_.begin(), abs);
   if (recent_.size() > 10) recent_.resize(10);
@@ -1000,6 +1000,8 @@ void Editor::drawShortcutsWindow() {
 void Editor::handleShortcuts() {
   ImGuiIO& io = ImGui::GetIO();
   if (io.WantTextInput) return;
+  // Dialogs and menus own the keyboard: Delete behind the export dialog must not delete.
+  if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
   bool ctrl = io.KeyCtrl, shift = io.KeyShift;
   auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
   if (ctrl && pressed(ImGuiKey_Z)) { shift ? redo() : undo(); return; }
@@ -1353,7 +1355,7 @@ Id Editor::addMeshFromFile(Id body, const std::string& path) {
   }
   doc_.touch();
   sel_.set(g);
-  lastDir_ = fs::path(path).parent_path().string();
+  lastDir_ = fs::u8path(path).parent_path().u8string();
   char msg[256];
   std::snprintf(msg, sizeof msg, "Added mesh %s (%zu vertices, %zu triangles)%s", a.name.c_str(), a.vertexCount(), a.faceCount(),
                 mm ? ", scaled from millimeters to meters" : "");

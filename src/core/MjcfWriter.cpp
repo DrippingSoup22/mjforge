@@ -516,9 +516,9 @@ class Writer {
         if (cube)
           for (const std::string& f : t.cubefiles) ok |= !f.empty();
         std::error_code ec;
-        if (ok && !cube) ok = std::filesystem::is_regular_file(t.file, ec);
+        if (ok && !cube) ok = std::filesystem::is_regular_file(std::filesystem::u8path(t.file), ec);
         if (ok && cube)
-          for (const std::string& f : t.cubefiles) ok &= f.empty() || std::filesystem::is_regular_file(f, ec);
+          for (const std::string& f : t.cubefiles) ok &= f.empty() || std::filesystem::is_regular_file(std::filesystem::u8path(f), ec);
         if (!ok) {
           // A missing image would stop MuJoCo from loading the model; a flat color keeps it usable
           // (the analysis reports the missing file).
@@ -1253,8 +1253,8 @@ class Writer {
   std::string imageFile(const std::string& file) {
     std::string image;
     if (!files_ || !readTextFile(file, image)) return file;
-    std::filesystem::path src(file);
-    std::string path = opt_.assetDir + "/" + assetFileName(src.stem().string(), src.extension().string());
+    std::filesystem::path src = std::filesystem::u8path(file);
+    std::string path = opt_.assetDir + "/" + assetFileName(src.stem().u8string(), src.extension().u8string());
     files_->push_back({path, std::move(image)});
     return path;
   }
@@ -1293,12 +1293,12 @@ bool writeExportFiles(const std::filesystem::path& dir, const std::string& asset
     std::error_code ec;
     fs::create_directories(dir / assetDir, ec);
     if (ec) {
-      if (error) *error = "Cannot create " + (dir / assetDir).string() + ": " + ec.message();
+      if (error) *error = "Cannot create " + (dir / assetDir).u8string() + ": " + ec.message();
       return false;
     }
   }
   for (const ExportFile& f : files) {
-    std::string fp = (dir / f.path).string();
+    std::string fp = (dir / f.path).u8string();
     if (!writeTextFile(fp, f.content, error)) return false;
     if (written) written->push_back(fp);
   }
@@ -1310,7 +1310,7 @@ bool exportSplitMjcf(const Document& doc, const std::string& scenePath, const Ex
                      std::vector<std::string>* written) {
   namespace fs = std::filesystem;
   fs::path p(scenePath);
-  std::string stem = p.stem().string();
+  std::string stem = p.stem().u8string();
   fs::path modelPath = p.parent_path() / (stem + "_model.xml");
   ExportOptions base = optIn;
   base.externalMeshVertices = 1000;
@@ -1321,14 +1321,14 @@ bool exportSplitMjcf(const Document& doc, const std::string& scenePath, const Ex
   mo.modelRoot = kNoId;
   mo.includeFile.clear();
   so.scope = ExportOptions::Scope::Environment;
-  so.includeFile = modelPath.filename().string();
+  so.includeFile = modelPath.filename().u8string();
   SplitState split;
   std::vector<ExportFile> files;
   std::string modelXml = Writer(doc, mo, nullptr, &files, &split).run();
   std::string sceneXml = Writer(doc, so, nullptr, &files, &split).run();
   if (!writeExportFiles(p.parent_path(), base.assetDir, files, error, written)) return false;
-  if (!writeTextFile(modelPath.string(), modelXml, error)) return false;
-  if (written) written->push_back(modelPath.string());
+  if (!writeTextFile(modelPath.u8string(), modelXml, error)) return false;
+  if (written) written->push_back(modelPath.u8string());
   if (!writeTextFile(scenePath, sceneXml, error)) return false;
   if (written) written->push_back(scenePath);
   return true;
@@ -1347,7 +1347,7 @@ bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOp
   ExportOptions opt = optIn;
   opt.externalMeshVertices = 1000;
   opt.externalHfieldSamples = 64 * 64;
-  opt.assetDir = (assetStem.empty() ? p.stem().string() : assetStem) + "_assets";
+  opt.assetDir = (assetStem.empty() ? p.stem().u8string() : assetStem) + "_assets";
   std::vector<ExportFile> files;
   std::string xml = writeMjcf(doc, opt, nullptr, &files);
   if (!writeExportFiles(p.parent_path(), opt.assetDir, files, error, written)) return false;

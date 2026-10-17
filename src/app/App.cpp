@@ -56,16 +56,16 @@ std::string configDir() {
 #ifdef _WIN32
   if (const char* a = std::getenv("APPDATA")) base = a;
 #elif defined(__APPLE__)
-  if (const char* h = std::getenv("HOME")) base = fs::path(h) / "Library" / "Application Support";
+  if (const char* h = std::getenv("HOME")) base = fs::u8path(h) / "Library" / "Application Support";
 #else
   if (const char* x = std::getenv("XDG_CONFIG_HOME")) base = x;
-  else if (const char* h = std::getenv("HOME")) base = fs::path(h) / ".config";
+  else if (const char* h = std::getenv("HOME")) base = fs::u8path(h) / ".config";
 #endif
   if (base.empty()) return {};
   fs::path dir = base / "mjforge";
   std::error_code ec;
   fs::create_directories(dir, ec);
-  return dir.string();
+  return dir.u8string();
 }
 
 }  // namespace

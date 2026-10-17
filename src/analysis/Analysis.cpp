@@ -183,7 +183,7 @@ class Analyzer {
 
   AnalysisReport run() {
     // Everything is evaluated at the start pose: the first keyframe if there is one.
-    poses_ = computeBodyPoses(doc_, doc_.keyframes.empty() ? nullptr : &doc_.keyframes[0]);
+    poses_ = computeBodyPoses(doc_, doc_.keyframes.empty() ? nullptr : &doc_.keyframes[0], &jointFrames_);
     weld_ = computeWeld(doc_);
     Vec3 g = doc_.option.gravity;
     gmag_ = doc_.option.gravityFlag ? length(g) : 0.0;
@@ -275,7 +275,7 @@ class Analyzer {
 
     for (const Texture& t : doc_.textures) {
       std::error_code ec;
-      if (t.builtin != TextureBuiltin::None || t.file.empty() || std::filesystem::is_regular_file(t.file, ec)) continue;
+      if (t.builtin != TextureBuiltin::None || t.file.empty() || std::filesystem::is_regular_file(std::filesystem::u8path(t.file), ec)) continue;
       add(Severity::Warning, IssueArea::Model, "texture-file", fmt("Texture image not found: %s", t.file.c_str()),
           fmt("Texture %s is exported as a flat color until the file exists again.", quote(t.name).c_str()), {});
     }
@@ -714,7 +714,7 @@ class Analyzer {
       r.angular = j.type == JointType::Hinge;
       MassAccumulator acc = subtreeAccumulator(doc_, poses_, j.body);
       Vec3 p, a;
-      jointWorldFrame(doc_, poses_, j, &p, &a);
+      jointWorldFrame(doc_, jointFrames_, j, &p, &a);
       r.movedMass = acc.mass();
       double base = r.angular ? acc.inertiaAboutAxis(p, a) : acc.mass();
       r.inertia = base + j.armature;
@@ -823,7 +823,7 @@ class Analyzer {
             JointReport* r = findReport(j.id);
             if (!r) continue;
             Vec3 p, a;
-            jointWorldFrame(doc_, poses_, j, &p, &a);
+            jointWorldFrame(doc_, jointFrames_, j, &p, &a);
             Vec3 up = -gdir_;
             if (r->angular) {
               Vec3 rr = foot.point - p;
@@ -889,7 +889,7 @@ class Analyzer {
         const JointReport* r = findReport(j.id);
         if (j.type != JointType::Hinge || !r) continue;
         Vec3 p, a;
-        jointWorldFrame(doc_, poses_, j, &p, &a);
+        jointWorldFrame(doc_, jointFrames_, j, &p, &a);
         if (length(cross(a, gdir_)) < 0.7) continue;  // near-vertical axis: gravity can't tip it
         Group* grp = nullptr;
         for (Group& x : groups)
@@ -1391,6 +1391,7 @@ class Analyzer {
   bool crValid_;
   AnalysisReport rep_;
   std::vector<Pose> poses_;
+  std::vector<JointFrame> jointFrames_;  // at the start pose, indexed like doc.joints
   Weld weld_;
   double gmag_ = 9.81;
   Vec3 gdir_{0, 0, -1};

@@ -36,8 +36,8 @@ void FileDialog::open(Mode mode, const std::string& title, const std::vector<std
   title_ = title;
   exts_ = extensions;
   std::error_code ec;
-  dir_ = (!startDir.empty() && fs::is_directory(startDir, ec)) ? fs::absolute(startDir, ec).string()
-                                                                : fs::current_path(ec).string();
+  dir_ = (!startDir.empty() && fs::is_directory(fs::u8path(startDir), ec)) ? fs::absolute(fs::u8path(startDir), ec).u8string()
+                                                                : fs::current_path(ec).u8string();
   name_ = defaultName;
   result_.clear();
   error_.clear();
@@ -56,13 +56,13 @@ void FileDialog::refresh() {
   for (fs::directory_iterator it(dir_, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
        it.increment(ec)) {
     const fs::directory_entry& e = *it;
-    std::string name = e.path().filename().string();
+    std::string name = e.path().filename().u8string();
     if (name.empty() || name[0] == '.') continue;
     std::error_code ec2;
     bool isDir = e.is_directory(ec2);
     if (!isDir) {
       if (!exts_.empty()) {
-        std::string ext = lower(e.path().extension().string());
+        std::string ext = lower(e.path().extension().u8string());
         if (std::find(exts_.begin(), exts_.end(), ext) == exts_.end()) continue;
       }
     }
@@ -78,9 +78,9 @@ void FileDialog::refresh() {
 bool FileDialog::accept(const std::string& path) {
   if (mode_ == Mode::Save) {
     std::string p = path;
-    if (!exts_.empty() && fs::path(p).extension().empty()) p += exts_.front();
+    if (!exts_.empty() && fs::u8path(p).extension().empty()) p += exts_.front();
     std::error_code ec;
-    if (fs::exists(p, ec) && !confirmOverwrite_) {
+    if (fs::exists(fs::u8path(p), ec) && !confirmOverwrite_) {
       confirmOverwrite_ = true;
       result_ = p;
       return false;
@@ -112,7 +112,7 @@ bool FileDialog::draw() {
     if (ImGui::Button("Up")) {
       fs::path p(dir_);
       if (p.has_parent_path() && p.parent_path() != p) {
-        dir_ = p.parent_path().string();
+        dir_ = p.parent_path().u8string();
         refresh();
       }
     }
@@ -125,10 +125,10 @@ bool FileDialog::draw() {
     ImGui::SetNextItemWidth(-1);
     if (ImGui::InputText("##path", &pathEdit_, ImGuiInputTextFlags_EnterReturnsTrue)) {
       std::error_code ec;
-      if (fs::is_directory(pathEdit_, ec)) {
-        dir_ = fs::absolute(pathEdit_, ec).string();
+      if (fs::is_directory(fs::u8path(pathEdit_), ec)) {
+        dir_ = fs::absolute(fs::u8path(pathEdit_), ec).u8string();
         refresh();
-      } else if (fs::is_regular_file(pathEdit_, ec)) {
+      } else if (fs::is_regular_file(fs::u8path(pathEdit_), ec)) {
         done = accept(pathEdit_);
       }
     }
@@ -145,12 +145,12 @@ bool FileDialog::draw() {
         if (!e.dir) name_ = e.name;
         if (ImGui::IsMouseDoubleClicked(0)) {
           if (e.dir) {
-            dir_ = (fs::path(dir_) / e.name).string();
+            dir_ = (fs::u8path(dir_) / e.name).u8string();
             refresh();
             ImGui::PopID();
             break;
           } else {
-            done = accept((fs::path(dir_) / e.name).string());
+            done = accept((fs::u8path(dir_) / e.name).u8string());
           }
         }
       }
@@ -169,7 +169,7 @@ bool FileDialog::draw() {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(-1);
       if (ImGui::InputText("##name", &name_, ImGuiInputTextFlags_EnterReturnsTrue) && !name_.empty())
-        done = accept((fs::path(dir_) / name_).string());
+        done = accept((fs::u8path(dir_) / name_).u8string());
     }
     if (confirmOverwrite_) {
       ImGui::TextColored(pal::v4(pal::kWarning), "File exists. Press Save again to overwrite.");
@@ -185,8 +185,8 @@ bool FileDialog::draw() {
     bool canOk = mode_ == Mode::Save ? !name_.empty() : (selected_ >= 0 && !entries_[selected_].dir);
     ImGui::BeginDisabled(!canOk);
     if (ImGui::Button(ok, ImVec2(bw, 0))) {
-      if (mode_ == Mode::Save) done = accept((fs::path(dir_) / name_).string());
-      else if (selected_ >= 0) done = accept((fs::path(dir_) / entries_[selected_].name).string());
+      if (mode_ == Mode::Save) done = accept((fs::u8path(dir_) / name_).u8string());
+      else if (selected_ >= 0) done = accept((fs::u8path(dir_) / entries_[selected_].name).u8string());
     }
     ImGui::EndDisabled();
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) open_ = false;

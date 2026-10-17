@@ -63,6 +63,8 @@ struct ActuatorDrive {
   double gain = 1;          // force per unit control (motors)
   double targetLo = -1e300, targetHi = 1e300;  // PD targets stay inside the joint range (actuator length)
   double lo = 0, hi = 0;    // control range (lo >= hi: unlimited)
+  int qadr = -1, dofadr = -1;  // hinge / slide transmission: the PD reads the current joint state
+  double gear = 1;
 };
 
 class Simulator {
@@ -143,6 +145,7 @@ class Simulator {
   std::string divergeReason_;
   double divergeTime_ = 0;
   int divergeJoint_ = -1;
+  std::vector<double> prevQvel_;  // velocities of the previous step (divergence blame)
   WarpSizing sizing_;
   std::deque<SimSample> history_;
   double lastSampleT_ = -1;

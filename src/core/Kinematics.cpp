@@ -23,19 +23,22 @@ std::vector<Pose> computeBodyPoses(const Document& doc) {
   return poses;
 }
 
-std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key) {
-  if (!key) return computeBodyPoses(doc);
+std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key, std::vector<JointFrame>* frames) {
+  if (!key && !frames) return computeBodyPoses(doc);
   const DocIndex& ix = doc.index();
   std::vector<Pose> poses(doc.bodies.size());
+  if (frames) frames->assign(doc.joints.size(), JointFrame{});
   for (uint32_t bi : ix.dfsOrder) {
     if (bi == 0) continue;
     const Body& b = doc.bodies[bi];
     int pi = doc.bodyIndex(b.parent);
     Pose p = (pi >= 0 ? poses[pi] : Pose{}) * Pose{b.pos, b.quat};
-    // Joints move the body frame in order, rotating about their anchors (as mj_kinematics does).
+    // Joints move the body frame in order, rotating about their anchors (as mj_kinematics does);
+    // each joint's anchor and axis are taken before its own motion.
     for (uint32_t ji : ix.bodyJoints[bi]) {
       const Joint& j = doc.joints[ji];
-      const std::vector<double>* q = key->jointQpos(j.id);
+      if (frames) (*frames)[ji] = {p.apply(j.pos), normalize(p.applyDir(j.axis))};
+      const std::vector<double>* q = key ? key->jointQpos(j.id) : nullptr;
       if (!q) continue;
       const std::vector<double>& v = *q;
       auto aboutAnchor = [&](const Quat& r) { return Pose{j.pos, {}} * Pose{{}, r} * Pose{-j.pos, {}}; };
@@ -118,6 +121,19 @@ void jointWorldFrame(const Document& doc, const std::vector<Pose>& poses, const 
   Pose bp = bodyPoseFrom(doc, poses, j.body);
   if (anchor) *anchor = bp.apply(j.pos);
   if (axis) *axis = normalize(bp.applyDir(j.axis));
+}
+
+void jointWorldFrame(const Document& doc, const std::vector<JointFrame>& frames, const Joint& j, Vec3* anchor, Vec3* axis) {
+  const DocIndex& ix = doc.index();
+  auto it = ix.loc.find(j.id);
+  if (it == ix.loc.end() || it->second.kind != Kind::Joint || it->second.index >= frames.size()) {
+    if (anchor) *anchor = j.pos;
+    if (axis) *axis = j.axis;
+    return;
+  }
+  const JointFrame& f = frames[it->second.index];
+  if (anchor) *anchor = f.anchor;
+  if (axis) *axis = f.axis;
 }
 
 // ----- mass accumulation -----

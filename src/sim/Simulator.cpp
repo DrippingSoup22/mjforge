@@ -128,9 +128,21 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
   }
   const mjModel* o = model_.get();
   const mjModel* n = src.get();
+  // The state follows the elements by ID: a reparented limb keeps the counts but reorders the
+  // joints. Any joint or actuator that is new, gone or of another type restarts the simulation.
   bool same = o->nq == n->nq && o->nv == n->nv && o->na == n->na && o->nu == n->nu && o->nbody == n->nbody &&
-              o->njnt == n->njnt && o->nmocap == n->nmocap;
-  for (int j = 0; same && j < n->njnt; ++j) same = o->jnt_type[j] == n->jnt_type[j];
+              o->njnt == n->njnt && o->nmocap == n->nmocap && map.joints.size() == size_t(n->njnt) &&
+              map_.joints.size() == size_t(o->njnt) && map.actuators.size() == size_t(n->nu) &&
+              map_.actuators.size() == size_t(o->nu);
+  std::vector<int> oldJoint(size_t(n->njnt), -1), oldAct(size_t(n->nu), -1);
+  for (int j = 0; same && j < n->njnt; ++j) {
+    oldJoint[size_t(j)] = indexOf(map_.joints, map.joints[size_t(j)]);
+    same = oldJoint[size_t(j)] >= 0 && o->jnt_type[oldJoint[size_t(j)]] == n->jnt_type[j];
+  }
+  for (int i = 0; same && i < n->nu; ++i) {
+    oldAct[size_t(i)] = indexOf(map_.actuators, map.actuators[size_t(i)]);
+    same = oldAct[size_t(i)] >= 0 && o->actuator_actnum[oldAct[size_t(i)]] == n->actuator_actnum[i];
+  }
   if (!same) {
     bool p = paused_;
     start(src, map);
@@ -148,11 +160,25 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
   if (!nm || !d) return false;
   // Keep the dynamic state; mocap bodies take their (possibly edited) positions from the new model.
   const mjData* od = data_.get();
-  mju_copy(d->qpos, od->qpos, n->nq);
-  mju_copy(d->qvel, od->qvel, n->nv);
-  mju_copy(d->act, od->act, n->na);
-  mju_copy(d->ctrl, od->ctrl, n->nu);
-  mju_copy(d->qacc_warmstart, od->qacc_warmstart, n->nv);
+  bool reordered = false;
+  for (int j = 0; j < n->njnt; ++j) {
+    int oj = oldJoint[size_t(j)];
+    reordered |= oj != j;
+    int nq = n->jnt_type[j] == mjJNT_FREE ? 7 : n->jnt_type[j] == mjJNT_BALL ? 4 : 1;
+    int nv = n->jnt_type[j] == mjJNT_FREE ? 6 : n->jnt_type[j] == mjJNT_BALL ? 3 : 1;
+    mju_copy(d->qpos + n->jnt_qposadr[j], od->qpos + o->jnt_qposadr[oj], nq);
+    mju_copy(d->qvel + n->jnt_dofadr[j], od->qvel + o->jnt_dofadr[oj], nv);
+    mju_copy(d->qacc_warmstart + n->jnt_dofadr[j], od->qacc_warmstart + o->jnt_dofadr[oj], nv);
+  }
+  for (int i = 0; i < n->nu; ++i) {
+    int oi = oldAct[size_t(i)];
+    reordered |= oi != i;
+    d->ctrl[i] = od->ctrl[oi];
+    if (n->actuator_actnum[i] > 0)
+      mju_copy(d->act + n->actuator_actadr[i], od->act + o->actuator_actadr[oi], n->actuator_actnum[i]);
+  }
+  // Delayed controls: the buffer layout follows the actuators, so it is kept for the same order.
+  if (!reordered && o->nhistory == n->nhistory && n->nhistory > 0) mju_copy(d->history, od->history, n->nhistory);
   d->time = od->time;
   model_ = std::move(nm);
   data_ = std::move(d);
@@ -205,9 +231,17 @@ void Simulator::prepare() {
                effectiveJointInertia(m, ref.get(), j) > 0) {
       // Torque motor: hold / track positions with the stiffest PD that stays stable when the
       // control is computed explicitly once per step (omega * dt = 0.15, damping ratio 0.8).
-      double inertia = effectiveJointInertia(m, ref.get(), j) / (gear * gear);
+      // Sized on the smallest inertia the joint can see: every other joint (and a floating base)
+      // free to move, 1 / (J M^-1 J'). The locked-chain inertia is several times larger on arms
+      // with heavy end links, and a PD sized on it chatters.
+      double free = m->nv > 0 ? actuatorSpaceInertia(m, ref.get(), i) : 0;
+      double inertia = free > 0 ? std::min(free, effectiveJointInertia(m, ref.get(), j) / (gear * gear))
+                                : effectiveJointInertia(m, ref.get(), j) / (gear * gear);
       double w = 0.15 / dt;
       a.kind = ActuatorDrive::Motor;
+      a.qadr = m->jnt_qposadr[j];
+      a.dofadr = m->jnt_dofadr[j];
+      a.gear = gear;
       a.gain = m->actuator_gainprm[i * mjNGAIN];
       a.kp = inertia * w * w;
       a.kd = 2.0 * 0.8 * inertia * w;
@@ -266,6 +300,14 @@ void Simulator::reset() {
     mj_forward(m, d);
   } catch (const std::exception&) {
   }
+  // Delayed actuators read old controls from their history: fill it with the holding control, or
+  // the first `delay` seconds would drive them towards zero.
+  for (int i = 0; i < m->nu && size_t(i) < drives_.size(); ++i) {
+    int nsample = m->actuator_history[2 * i];
+    if (nsample <= 0 || m->actuator_historyadr[i] < 0) continue;
+    std::vector<mjtNum> values(size_t(nsample), drives_[i].holdCtrl);
+    mj_initCtrlHistory(m, d, i, nullptr, values.data());
+  }
   history_.clear();
   lastSampleT_ = -1;
   accum_ = 0;
@@ -276,6 +318,7 @@ void Simulator::reset() {
   divergeJoint_ = -1;
   sizing_ = {};
   perturbBody_ = -1;
+  prevQvel_.assign(size_t(m->nv), 0.0);
   for (int w = 0; w < mjNWARNING; ++w) d->warning[w].number = 0;
 }
 
@@ -283,7 +326,11 @@ double Simulator::pdControl(int i, double target) const {
   const ActuatorDrive& a = drives_[i];
   const mjData* d = data_.get();
   target = clampv(target, a.targetLo, a.targetHi);
-  double f = a.kp * (target - d->actuator_length[i]) - a.kd * d->actuator_velocity[i];
+  // actuator_length / velocity are from the previous step; for joints read the current state
+  // (a one-step-late PD loses half its stability margin).
+  double length = a.qadr >= 0 ? a.gear * d->qpos[a.qadr] : d->actuator_length[i];
+  double velocity = a.dofadr >= 0 ? a.gear * d->qvel[a.dofadr] : d->actuator_velocity[i];
+  double f = a.kp * (target - length) - a.kd * velocity;
   return f / a.gain;
 }
 
@@ -386,6 +433,7 @@ void Simulator::advance(double wallDt, double budget) {
     return;
   }
   const double dt = model_->opt.timestep;
+  const double realDt = wallDt;     // the real-time factor compares with the true frame time
   wallDt = std::min(wallDt, 0.05);  // after a stall, slow down instead of jumping ahead
   accum_ += wallDt * speed;
   auto t0 = std::chrono::steady_clock::now();
@@ -401,7 +449,7 @@ void Simulator::advance(double wallDt, double budget) {
       break;
     }
   }
-  double inst = wallDt > 0 ? simulated / wallDt : 0;
+  double inst = realDt > 0 ? simulated / realDt : 0;
   rtf_ = rtf_ <= 0 ? inst : 0.9 * rtf_ + 0.1 * inst;
 }
 
@@ -458,7 +506,28 @@ void Simulator::afterStep(double tBefore) {
     diverged_ = true;
     paused_ = true;
     divergeTime_ = tBefore;
-    int dof = warn >= 0 ? d->warning[warn].lastinfo : bad;
+    // MuJoCo reports the first bad index, which on a floating robot is always the free root, and
+    // its auto-reset zeroes the state. Blame the fastest degree of freedom just before the blow-up.
+    int dof = -1;
+    double fastest = -1;
+    for (int i = 0; i < m->nv; ++i) {
+      double before = size_t(i) < prevQvel_.size() && std::isfinite(prevQvel_[i]) ? std::fabs(prevQvel_[i]) : 0;
+      double now = std::isfinite(d->qvel[i]) ? std::fabs(d->qvel[i]) : 0;
+      double v = std::max(before, now);
+      if (v > fastest) {
+        fastest = v;
+        dof = i;
+      }
+    }
+    if (fastest <= 0) {  // blew up in the first step: fall back to MuJoCo's index
+      dof = warn >= 0 ? d->warning[warn].lastinfo : bad;
+      if (warn == mjWARN_BADQPOS) {  // positions report a qpos address, not a dof
+        int adr = dof;
+        dof = -1;
+        for (int j = 0; j < m->njnt; ++j)
+          if (m->jnt_qposadr[j] <= adr) dof = m->jnt_dofadr[j];
+      }
+    }
     divergeJoint_ = dof >= 0 && dof < m->nv ? m->dof_jntid[dof] : -1;
     divergeReason_ = warn == mjWARN_BADQPOS   ? "the positions became invalid"
                      : warn == mjWARN_BADQVEL ? "the velocities exploded"
@@ -466,6 +535,7 @@ void Simulator::afterStep(double tBefore) {
     for (int w = 0; w < mjNWARNING; ++w) d->warning[w].number = 0;
     return;
   }
+  prevQvel_.assign(d->qvel, d->qvel + m->nv);
   sizing_.peakContacts = std::max(sizing_.peakContacts, int(d->ncon));
   sizing_.peakConstraints = std::max(sizing_.peakConstraints, int(d->nefc));
   if (pairs_.size() < 4000 || (++stepCounter_ % 8) == 0)
@@ -575,7 +645,7 @@ int Simulator::countBroadphase() const {
     }
     if (!separated) ++n;
   }
-  return n;
+  return n + int(m->npair);  // MuJoCo Warp lists every explicit contact pair as a candidate
 }
 
 }  // namespace mjf

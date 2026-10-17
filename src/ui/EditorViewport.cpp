@@ -78,7 +78,7 @@ double bodyScale(const Document& doc, const std::vector<Pose>& poses, Id body) {
 // ------------------------------------------------------------------------------------ scene
 
 void Editor::buildScene(std::vector<DrawItem>& items) {
-  poses_ = computeBodyPoses(doc_, poseKey());
+  poses_ = computeBodyPoses(doc_, poseKey(), &jointFrames_);
   if (sim_.active()) applySimPoses();
   const DocIndex& ix = doc_.index();
   std::unordered_set<Id> selected(sel_.ids.begin(), sel_.ids.end());
@@ -186,7 +186,7 @@ void Editor::buildOverlays() {
     bool hov = vp_.hoverId == j.id;
     if (!vp_.showJoints && !sel) continue;
     Vec3 anchor, axis;
-    jointWorldFrame(doc_, poses_, j, &anchor, &axis);
+    jointWorldFrame(doc_, jointFrames_, j, &anchor, &axis);
     double L = bodyScale(doc_, poses_, j.body) * 0.9;
     Color c = actuated.count(j.id) ? Color{1.0f, 0.55f, 0.18f, 1} : Color{0.55f, 0.72f, 0.95f, 1};
     if (sel) c = {1.0f, 0.85f, 0.35f, 1};
@@ -362,7 +362,7 @@ Id Editor::pick(const Ray& ray, double* tHit) {
       const Body* b = doc_.body(j.body);
       if (!b || j.hidden || b->hidden) continue;
       Vec3 a;
-      jointWorldFrame(doc_, poses_, j, &a, nullptr);
+      jointWorldFrame(doc_, jointFrames_, j, &a, nullptr);
       double depth = 0;
       double d = screenDist(a, &depth);
       if (d < bestScreen) {
@@ -556,8 +556,11 @@ void Editor::drawGizmo() {
   vp_.gizmoUsing = using_;
 
   if (using_ && !gizmoDrag_.active) {
-    // Drag start: record undo and the starting poses of everything that moves together.
-    checkpoint(gizmoOp_ == GizmoOp::Translate ? "Move" : gizmoOp_ == GizmoOp::Rotate ? "Rotate" : "Resize");
+    // Drag start: remember the document for undo (recorded once something actually moves, so a
+    // click on a handle does not mark the project modified) and the starting poses of everything
+    // that moves together.
+    gizmoDrag_.before = doc_;
+    gizmoDrag_.recorded = false;
     gizmoDrag_.active = true;
     gizmoDrag_.primaryStart = world;
     gizmoDrag_.starts.clear();
@@ -572,8 +575,16 @@ void Editor::drawGizmo() {
       if (!covered) gizmoDrag_.starts.push_back({s, elementWorldPose(doc_, poses_, s)});
     }
   }
-  if (!using_ && gizmoDrag_.active) gizmoDrag_.active = false;
+  if (!using_ && gizmoDrag_.active) {
+    gizmoDrag_.active = false;
+    gizmoDrag_.before = Document();
+  }
   if (!changed || !using_) return;
+  if (!gizmoDrag_.recorded) {
+    history_.push(gizmoDrag_.before, gizmoOp_ == GizmoOp::Translate ? "Move" : gizmoOp_ == GizmoOp::Rotate ? "Rotate" : "Resize");
+    activeEditId_ = 0;
+    gizmoDrag_.recorded = true;
+  }
 
   // Decompose the manipulated matrix.
   Vec3 cols[3];

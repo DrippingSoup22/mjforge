@@ -42,6 +42,7 @@ double Editor::jointDisplayOffset(Id joint) const {
 void Editor::poseEdited() {
   syncKeyframeControls(doc_, doc_.keyframes[0]);
   doc_.touch();
+  markDirty();  // every frame of a drag: compile, preview and autosave must see the latest pose
 }
 
 namespace {
@@ -95,8 +96,10 @@ void Editor::drawPoseGizmo() {
       int dominant = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2);
       style.Colors[ImGuizmo::DIRECTION_Z] = dominant == 2 ? zColor : style.Colors[dominant];
       ImGuizmo::SetGizmoSizeClipSpace(0.1f * (1.0f - 0.18f * float(ring++ % 3)));
-      Vec3 anchor = bw.apply(j.pos);
-      Vec3 axis = normalize(rotate(bw.quat, j.axis), {0, 0, 1});
+      // The joint's own frame: earlier joints of the body move it, later ones do not.
+      Vec3 anchor, axis;
+      jointWorldFrame(doc_, jointFrames_, j, &anchor, &axis);
+      axis = normalize(axis, {0, 0, 1});
       Quat frame = frameFromZ(axis);
       Mat4 m = Mat4::fromPose({anchor, frame});
       bool hinge = j.type == JointType::Hinge;
@@ -224,9 +227,12 @@ void Editor::drawPosePanel() {
       if (sel) ImGui::PushStyleColor(ImGuiCol_Text, pal::v4(pal::kAccent));
       ImGui::SetNextItemWidth(150 * s);
       bool changed = ImGui::SliderFloat("##v", &f, flo, fhi, hinge ? "%.1f deg" : "%.3f m");
-      bool activated = ImGui::IsItemActivated();
+      if (ImGui::IsItemActivated()) poseSliderRecorded_ = false;
       if (sel) ImGui::PopStyleColor();
-      if (activated) checkpoint("Pose");
+      if (changed && !poseSliderRecorded_) {  // undo step on the first real change, not on a click
+        checkpoint("Pose");
+        poseSliderRecorded_ = true;
+      }
       if (changed) {
         setKeyJointQpos(startKeyframe(doc_), j.id, {clampToRange(j, hinge ? deg2rad(f) : f)});
         key = &doc_.keyframes[0];

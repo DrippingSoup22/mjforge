@@ -17,7 +17,7 @@ namespace mjf {
 namespace {
 
 bool isMjcfPath(const std::string& path) {
-  std::string ext = fs::path(path).extension().string();
+  std::string ext = fs::u8path(path).extension().u8string();
   std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
   return ext == ".xml" || ext == ".mjcf";
 }
@@ -30,7 +30,7 @@ bool Editor::loadAnyFile(const std::string& path, Document& out, std::vector<std
   if (isMjcfPath(path)) {
     ImportReport rep;
     if (!importMjcfFile(path, out, &err, &rep)) {
-      notify("MuJoCo could not load " + fs::path(path).filename().string() + ": " + err, pal::kError, 8);
+      notify("MuJoCo could not load " + fs::u8path(path).filename().u8string() + ": " + err, pal::kError, 8);
       return false;
     }
     if (notes) *notes = rep.notes;
@@ -66,7 +66,7 @@ void Editor::beginImport(const std::string& path) {
   importPath_ = path;
   importNotes_ = notes;
   showImport_ = true;
-  lastDir_ = fs::path(path).parent_path().string();
+  lastDir_ = fs::u8path(path).parent_path().u8string();
 }
 
 void Editor::drawImportModal() {
@@ -82,7 +82,7 @@ void Editor::drawImportModal() {
     return;
   }
   DocSummary s = summarize(*importDoc_);
-  ImGui::Text("From %s", fs::path(importPath_).filename().string().c_str());
+  ImGui::Text("From %s", fs::u8path(importPath_).filename().u8string().c_str());
   ImGui::Separator();
 
   std::string models;

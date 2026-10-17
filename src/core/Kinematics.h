@@ -7,10 +7,18 @@
 
 namespace mjf {
 
+// World anchor and axis of a joint, as MuJoCo computes them: in the body frame moved by the
+// body's earlier joints only (a later joint of the same body does not turn an earlier one's axis).
+struct JointFrame {
+  Vec3 anchor;
+  Vec3 axis{0, 0, 1};
+};
+
 // World poses of all bodies, indexed like doc.bodies.
 std::vector<Pose> computeBodyPoses(const Document& doc);
 // ... with the joints at the positions of a keyframe (joints without a value stay at reference).
-std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key);
+// `joints` (optional) receives every joint's frame, indexed like doc.joints.
+std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key, std::vector<JointFrame>* joints = nullptr);
 // World pose of a single body (walks up the parents).
 Pose bodyWorldPose(const Document& doc, Id body);
 // World pose of any spatial element (body, geom, joint, site, camera, light).
@@ -20,8 +28,10 @@ Pose elementWorldPose(const Document& doc, const std::vector<Pose>& bodyPoses, I
 Pose elementLocalPose(const Document& doc, Id id);
 void setElementLocalPose(Document& doc, Id id, const Pose& local);
 
-// World-space joint anchor and axis.
+// World-space joint anchor and axis from body poses: exact for the reference configuration and for
+// bodies with a single joint. With a keyframe use the frames computeBodyPoses returns.
 void jointWorldFrame(const Document& doc, const std::vector<Pose>& bodyPoses, const Joint& j, Vec3* anchor, Vec3* axis);
+void jointWorldFrame(const Document& doc, const std::vector<JointFrame>& frames, const Joint& j, Vec3* anchor, Vec3* axis);
 
 // Accumulates point masses / rigid bodies and yields total mass, COM and inertia about the COM.
 class MassAccumulator {

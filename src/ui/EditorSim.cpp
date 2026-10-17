@@ -153,12 +153,17 @@ void Editor::launchSimulation() {
 void Editor::stopSimulation() {
   simWanted_ = false;
   simDrag_.active = false;
-  if (sim_.active() && sim_.sizing().peakContacts + sim_.sizing().peakBroadphase > 0) lastSizing_ = sim_.sizing();
+  if (sim_.active() && sim_.sizing().peakContacts + sim_.sizing().peakBroadphase > 0) {
+    lastSizing_ = sim_.sizing();
+    lastSizingRevision_ = editRevision_;
+  }
   sim_.stop();
 }
 
 std::string Editor::mjwarpLoader(const std::string& xmlFile, bool* measured) const {
-  WarpSizing ws = sim_.active() ? sim_.sizing() : lastSizing_;
+  // Measured sizes belong to the model that was simulated: any edit (or another document) since
+  // then falls back to the estimate.
+  WarpSizing ws = sim_.active() ? sim_.sizing() : lastSizingRevision_ == editRevision_ ? lastSizing_ : WarpSizing{};
   bool fromSim = ws.peakContacts + ws.peakBroadphase > 0;
   if (measured) *measured = fromSim;
   return mjwarpLoaderScript(doc_, xmlFile, fromSim ? &ws : nullptr);

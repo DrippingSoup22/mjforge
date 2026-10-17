@@ -294,7 +294,7 @@ void Editor::inspectMesh(Geom& g) {
   props::info("Size", "%.3g x %.3g x %.3g m", ext.x, ext.y, ext.z);
   props::info("Triangles", "%zu  (%zu vertices)", ma->faceCount(), ma->vertexCount());
   if (!ma->source.empty()) {
-    props::info("File", "%s", fs::path(ma->source).filename().string().c_str());
+    props::info("File", "%s", fs::u8path(ma->source).filename().u8string().c_str());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", ma->source.c_str());
   }
   int users = 0;
