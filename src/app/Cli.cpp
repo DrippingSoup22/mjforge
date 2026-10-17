@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "analysis/Analysis.h"
 #include "core/MjcfWriter.h"
 #include "core/ProjectIO.h"
 #include "core/Templates.h"
@@ -116,6 +117,21 @@ int runHeadless(const CliOptions& cli) {
                   int(r.model->nsensor), int(r.model->nq), int(r.model->nv));
       for (const auto& w : r.warnings) std::printf("WARN   %s\n", w.c_str());
     }
+    AnalysisReport rep = analyzeModel(doc, &r, true);
+    for (const Issue& is : rep.issues) {
+      std::printf("%-7s [%s] %s\n", severityName(is.severity), areaName(is.area), is.title.c_str());
+      if (!is.detail.empty()) {
+        std::string d = is.detail;
+        for (size_t pos = 0; (pos = d.find('\n', pos)) != std::string::npos; pos += 9) d.replace(pos, 1, "\n        ");
+        std::printf("        %s\n", d.c_str());
+      }
+      if (is.fix) std::printf("        fix available in the editor: %s\n", is.fixLabel.c_str());
+      if (is.severity == Severity::Error) rc = 1;
+    }
+    std::printf("Summary: %d errors, %d warnings, %d info, %d tips. %d legs, %d contact pairs, %d MJWarp broadphase "
+                "pairs at rest.\n",
+                rep.counts[0], rep.counts[1], rep.counts[2], rep.counts[3], rep.legCount, rep.collisionPairs,
+                rep.broadphaseAtRest);
   }
   if (!cli.exportPath.empty()) {
     if (!writeTextFile(cli.exportPath, xml, &err)) {

@@ -32,6 +32,24 @@ namespace {
 
 void glfwErrorCallback(int code, const char* desc) { std::fprintf(stderr, "GLFW error %d: %s\n", code, desc); }
 
+// Set by any window/input callback: the next loop iteration must render.
+bool g_inputEvent = true;
+void markEvent() { g_inputEvent = true; }
+void installEventTrackers(GLFWwindow* w) {
+  // Installed before ImGui's backend, which chains to these.
+  glfwSetCursorPosCallback(w, [](GLFWwindow*, double, double) { markEvent(); });
+  glfwSetMouseButtonCallback(w, [](GLFWwindow*, int, int, int) { markEvent(); });
+  glfwSetScrollCallback(w, [](GLFWwindow*, double, double) { markEvent(); });
+  glfwSetKeyCallback(w, [](GLFWwindow*, int, int, int, int) { markEvent(); });
+  glfwSetCharCallback(w, [](GLFWwindow*, unsigned int) { markEvent(); });
+  glfwSetWindowFocusCallback(w, [](GLFWwindow*, int) { markEvent(); });
+  glfwSetCursorEnterCallback(w, [](GLFWwindow*, int) { markEvent(); });
+  glfwSetWindowSizeCallback(w, [](GLFWwindow*, int, int) { markEvent(); });
+  glfwSetFramebufferSizeCallback(w, [](GLFWwindow*, int, int) { markEvent(); });
+  glfwSetWindowRefreshCallback(w, [](GLFWwindow*) { markEvent(); });
+  glfwSetDropCallback(w, [](GLFWwindow*, int, const char**) { markEvent(); });
+}
+
 std::string configDir() {
   namespace fs = std::filesystem;
   fs::path base;
@@ -100,6 +118,7 @@ bool App::init(const CliOptions& cli) {
   }
   applyTheme(scale_);
   setupFonts(scale_);
+  installEventTrackers(window_);
   ImGui_ImplGlfw_InitForOpenGL(window_, true);
   ImGui_ImplOpenGL3_Init("#version 330 core");
 
@@ -141,17 +160,25 @@ bool App::saveScreenshot(const std::string& path) {
 int App::run(const CliOptions& cli) {
   if (!init(cli)) return 1;
   int frame = 0;
-  int busyFrames = 3;  // keep rendering a few frames after input so ImGui settles
+  const bool trace = std::getenv("MJFORGE_TRACE") != nullptr;
+  double lastTime = glfwGetTime();
+  int busyFrames = 3;  // frames to render after the last event so ImGui settles (hover, trickled input)
   while (!glfwWindowShouldClose(window_)) {
     bool continuous = editor_->wantsContinuousRendering() || !cli.screenshot.empty();
     if (continuous || busyFrames > 0) {
       glfwPollEvents();
     } else {
-      glfwWaitEventsTimeout(0.25);  // idle: near-zero CPU, still refreshes validation results
+      // Idle: sleep until input arrives or a worker wakes us (glfwPostEmptyEvent). No rendering.
+      glfwWaitEventsTimeout(2.0);
+    }
+    if (g_inputEvent) {
+      g_inputEvent = false;
+      busyFrames = 4;
+    } else if (!continuous && busyFrames == 0) {
+      if (!editor_->hasPendingWork()) continue;
       busyFrames = 2;
     }
     if (busyFrames > 0) --busyFrames;
-    if (ImGui::GetIO().MouseDelta.x != 0 || ImGui::GetIO().MouseDelta.y != 0) busyFrames = 3;
     if (glfwGetWindowAttrib(window_, GLFW_ICONIFIED)) {
       glfwWaitEventsTimeout(0.1);
       continue;
@@ -172,6 +199,11 @@ int App::run(const CliOptions& cli) {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     ++frame;
+    if (trace) {
+      double t = glfwGetTime();
+      std::fprintf(stderr, "frame %d  %.1f ms\n", frame, (t - lastTime) * 1000);
+      lastTime = t;
+    }
     if (!cli.screenshot.empty() && frame >= cli.frames) {
       saveScreenshot(cli.screenshot);
       break;

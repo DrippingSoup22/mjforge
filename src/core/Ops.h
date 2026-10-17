@@ -47,6 +47,20 @@ bool moveSibling(Document& doc, Id element, int direction);
 // reference copied elements are duplicated as well. Returns the new top-level IDs.
 std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3& worldOffset);
 
+// ----- placement & collision presets -----
+// Moves a top-level body so its lowest geom rests `clearance` above z = floorZ.
+void placeOnFloor(Document& doc, Id root, double floorZ = 0.0, double clearance = 0.002);
+// Geoms at the bottom of a model (within `tolerance` of its lowest point), e.g. the feet.
+std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance = -1);
+// Collision bitmask presets for a model subtree (MuJoCo: collide if (c1 & a2) || (c2 & a1)).
+enum class CollisionPreset {
+  AllCollide,       // contype = conaffinity = 1 everywhere (MuJoCo default)
+  NoSelfCollision,  // model geoms: contype 2, conaffinity 1 -> touch the world, not each other
+  FeetOnly,         // like NoSelfCollision for the feet; all other model geoms collide with nothing
+};
+// Returns the number of geoms changed.
+int applyCollisionPreset(Document& doc, Id root, CollisionPreset preset);
+
 // Names: "left_leg" <-> "right_leg", "l_hip" <-> "r_hip", "hip_L" <-> "hip_R", ...
 std::string mirrorName(const std::string& name, bool* changed = nullptr);
 // Mirrors a body subtree across the plane through the parent's origin with the given normal

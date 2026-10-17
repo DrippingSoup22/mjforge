@@ -154,6 +154,7 @@ void BackgroundCompiler::loop() {
         hasResult_ = true;
       }
     }
+    if (onResult_) onResult_();
   }
 }
 

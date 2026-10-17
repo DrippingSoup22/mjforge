@@ -6,7 +6,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "core/Geometry.h"
 #include "core/Kinematics.h"
+
+#include <cmath>
 
 namespace mjf {
 
@@ -516,6 +519,62 @@ std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3&
   }
   doc.touch();
   return r.tops;
+}
+
+void placeOnFloor(Document& doc, Id root, double floorZ, double clearance) {
+  if (root == kWorldId || !doc.body(root)) return;
+  auto poses = computeBodyPoses(doc);
+  double minZ = subtreeMinZ(doc, poses, root);
+  if (std::isfinite(minZ)) {
+    doc.body(root)->pos.z += floorZ + clearance - minZ;
+    doc.touch();
+  }
+}
+
+std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance) {
+  std::vector<Id> out;
+  auto poses = computeBodyPoses(doc);
+  Aabb box = subtreeAabb(doc, poses, root);
+  if (!box.valid()) return out;
+  if (tolerance < 0) tolerance = std::max(0.004, 0.02 * (box.hi.z - box.lo.z));
+  for (Id b : doc.subtree(root)) {
+    int bi = doc.bodyIndex(b);
+    for (uint32_t gi : doc.index().bodyGeoms[bi]) {
+      const Geom& g = doc.geoms[gi];
+      if (g.type == GeomType::Plane) continue;
+      Aabb gb = primitiveWorldAabb(g.type, g.size, poses[bi] * Pose{g.pos, g.quat});
+      if (gb.lo.z <= box.lo.z + tolerance) out.push_back(g.id);
+    }
+  }
+  return out;
+}
+
+int applyCollisionPreset(Document& doc, Id root, CollisionPreset preset) {
+  std::vector<Id> feet = preset == CollisionPreset::FeetOnly ? lowestGeoms(doc, root) : std::vector<Id>{};
+  int changed = 0;
+  for (Id b : doc.subtree(root)) {
+    int bi = doc.bodyIndex(b);
+    for (uint32_t gi : doc.index().bodyGeoms[bi]) {
+      Geom& g = doc.geoms[gi];
+      int ct = 1, ca = 1;
+      switch (preset) {
+        case CollisionPreset::AllCollide: ct = 1; ca = 1; break;
+        case CollisionPreset::NoSelfCollision: ct = 2; ca = 1; break;
+        case CollisionPreset::FeetOnly: {
+          bool foot = std::find(feet.begin(), feet.end(), g.id) != feet.end();
+          ct = foot ? 2 : 0;
+          ca = foot ? 1 : 0;
+          break;
+        }
+      }
+      if (g.contype != ct || g.conaffinity != ca) {
+        g.contype = ct;
+        g.conaffinity = ca;
+        ++changed;
+      }
+    }
+  }
+  return changed;
 }
 
 std::string mirrorName(const std::string& name, bool* changed) {

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "analysis/Analysis.h"
 #include "app/Cli.h"
 #include "core/Document.h"
 #include "core/History.h"
@@ -69,6 +70,8 @@ class Editor {
   void applyCli(const CliOptions& cli);
   void frame();
   bool wantsContinuousRendering() const;
+  // True when something changed without user input (e.g. a validation result arrived).
+  bool hasPendingWork();
   bool quitRequested() const { return quit_; }
   bool confirmQuit();
 
@@ -115,6 +118,7 @@ class Editor {
   Id targetBody() const;
 
   const CompileResult& compiled() const { return compiled_; }
+  const AnalysisReport& report() const { return report_; }
   bool compileValid() const { return compiled_.ok && compiledRevision_ == editRevision_; }
 
  private:
@@ -135,6 +139,8 @@ class Editor {
   void drawAboutWindow();
   void handleShortcuts();
   void drawAddMenuItems(Id contextBody);
+  void drawToolsMenu();
+  std::vector<Id> selectedModelRoots() const;
   void drawElementContextMenu(Id id);
 
   // inspector sections
@@ -182,6 +188,7 @@ class Editor {
   bool quit_ = false;
   bool layoutBuilt_ = false;
   int focusInspector_ = 0;
+  int frameCount_ = 0;
   std::vector<std::string> pendingFocus_;  // windows to bring to front after the layout settles
     // frames until the Inspector tab is brought to front
 
@@ -217,6 +224,12 @@ class Editor {
   uint64_t compiledRevision_ = 0;
   uint64_t requestedRevision_ = 0;
   double compileDueTime_ = 0;
+  AnalysisReport report_;
+  uint64_t reportRevision_ = 0;
+  bool reportHasCompile_ = false;
+  bool issueFilter_[4] = {true, true, true, true};
+  void runAnalysis();
+  void drawStrength(Id joint);
   std::string xmlPreview_;
   uint64_t xmlPreviewRevision_ = 0;
 

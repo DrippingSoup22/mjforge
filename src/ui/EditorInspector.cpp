@@ -414,6 +414,7 @@ void Editor::inspectJoint(Joint& j) {
   }
   props::end();
 
+  drawStrength(j.id);
   // Actuators driving this joint.
   ImGui::Spacing();
   ImGui::SeparatorText("Actuators driving this joint");
@@ -663,6 +664,7 @@ void Editor::inspectActuator(Actuator& a) {
     if (props::integer("Group", &a.group, 0, O(D("general.group"), nullptr, 0.1, 0, 30))) applyToSelected<Actuator>([&](Actuator& o) { o.group = a.group; });
   }
   props::end();
+  if (jt) drawStrength(jt->id);
 }
 
 // ------------------------------------------------------------------------------------ sensor

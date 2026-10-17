@@ -9,13 +9,6 @@ namespace mjf {
 
 namespace {
 
-// Lifts a creature so its lowest point rests just above z = 0.
-void placeOnFloor(Document& doc, Id root, double clearance = 0.002) {
-  auto poses = computeBodyPoses(doc);
-  double minZ = subtreeMinZ(doc, poses, root);
-  if (std::isfinite(minZ)) doc.body(root)->pos.z += clearance - minZ;
-}
-
 Id limbGeom(Document& doc, Id body, const Vec3& a, const Vec3& b, double radius, const Color& c, const std::string& name) {
   Id g = addGeom(doc, body, GeomType::Capsule, {radius, 0.1, 0}, {}, name);
   setGeomFromTo(*doc.geom(g), a, b);
@@ -170,9 +163,9 @@ Id addHexapod(Document& doc, const Vec3& pos, const std::string& name) {
     limbGeom(doc, tibia, {0, 0, 0}, {0.16, 0, 0}, 0.014, kLimb, t + "_tibia_geom");
     Id foot = addGeom(doc, tibia, GeomType::Sphere, {0.02, 0, 0}, {{0.16, 0, 0}, {}}, t + "_foot");
     doc.geom(foot)->rgba = kFoot;
-    servo(doc, yaw, 8, 6);
-    servo(doc, lift, 8, 6);
-    servo(doc, knee, 8, 6);
+    servo(doc, yaw, 15, 6);
+    servo(doc, lift, 30, 8);
+    servo(doc, knee, 30, 8);
   }
   placeOnFloor(doc, torso);
   return torso;

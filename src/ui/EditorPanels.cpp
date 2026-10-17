@@ -185,50 +185,178 @@ void Editor::drawSensorsPanel() {
 
 void Editor::drawIssuesPanel() {
   bool upToDate = compiledRevision_ == editRevision_;
-  std::string title = "Issues###Issues";
-  if (upToDate && !compiled_.ok) title = "Issues (1)###Issues";
-  if (!ImGui::Begin(title.c_str())) {
+  int nerr = report_.counts[int(Severity::Error)] + ((upToDate && !compiled_.ok) ? 1 : 0);
+  int nwarn = report_.counts[int(Severity::Warning)];
+  char title[64];
+  if (nerr + nwarn > 0) std::snprintf(title, sizeof title, "Issues (%d)###Issues", nerr + nwarn);
+  else std::snprintf(title, sizeof title, "Issues###Issues");
+  if (!ImGui::Begin(title)) {
     ImGui::End();
     return;
   }
-  if (!upToDate) {
-    ImGui::TextDisabled("Checking the model with MuJoCo...");
-  } else if (!compiled_.ok) {
+  // Filter toggles.
+  const Icon icons[4] = {Icon::Error, Icon::Warning, Icon::Info, Icon::Info};
+  const ImU32 cols[4] = {pal::kError, pal::kWarning, pal::kInfo, pal::kTeal};
+  const char* names[4] = {"Errors", "Warnings", "Info", "Tips"};
+  for (int i = 0; i < 4; ++i) {
+    if (i) ImGui::SameLine();
+    int n = report_.counts[i] + (i == 0 ? ((upToDate && !compiled_.ok) ? 1 : 0) : 0);
+    char lbl[48];
+    std::snprintf(lbl, sizeof lbl, "%s %d##f%d", names[i], n, i);
+    ImGui::PushStyleColor(ImGuiCol_Button, issueFilter_[i] ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive) : ImVec4(0, 0, 0, 0));
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float h = ImGui::GetFrameHeight();
+    ImGui::SetCursorScreenPos(ImVec2(p.x + h * 0.9f, p.y));
+    if (ImGui::Button(lbl)) issueFilter_[i] = !issueFilter_[i];
+    ImGui::PopStyleColor();
+    drawIcon(ImGui::GetWindowDrawList(), ImVec2(p.x + h * 0.45f, p.y + h * 0.5f), h * 0.6f, icons[i], cols[i]);
+  }
+  ImGui::SameLine(0, 20);
+  if (upToDate && compiled_.ok) {
+    const mjModel* m = compiled_.model.get();
+    ImGui::TextDisabled("MuJoCo %s: %d bodies, %d DoF, %d actuators, %.3g kg.  %d legs detected.  %d contact pairs (%d self), "
+                        "%d MJWarp broadphase pairs at rest.",
+                        mj_versionString(), int(m->nbody) - 1, int(m->nv), int(m->nu), m->body_subtreemass[0],
+                        report_.legCount, report_.collisionPairs, report_.selfCollisionPairs, report_.broadphaseAtRest);
+  } else if (!upToDate) {
+    ImGui::TextDisabled("Checking with MuJoCo...");
+  }
+  ImGui::Separator();
+  ImGui::BeginChild("##issues");
+  if (upToDate && !compiled_.ok) {
     iconInline(Icon::Error, pal::kError);
     ImGui::SameLine();
     ImGui::TextColored(pal::v4(pal::kError), "MuJoCo cannot compile this model");
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextUnformatted(compiled_.error.c_str());
-    ImGui::PopTextWrapPos();
-  } else {
+    ImGui::Indent(ImGui::GetTextLineHeight() + 8);
+    std::string hint = explainCompileError(compiled_.error);
+    if (!hint.empty()) ImGui::TextWrapped("%s", hint.c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text, pal::v4(pal::kTextDim));
+    ImGui::TextWrapped("%s", compiled_.error.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Unindent(ImGui::GetTextLineHeight() + 8);
+    ImGui::Separator();
+  }
+  int shown = 0;
+  for (size_t idx = 0; idx < report_.issues.size(); ++idx) {
+    const Issue& is = report_.issues[idx];
+    int sv = int(is.severity);
+    if (!issueFilter_[sv]) continue;
+    ++shown;
+    ImGui::PushID(int(idx));
+    iconInline(icons[sv], cols[sv]);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(is.title.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("  %s", areaName(is.area));
+    if (is.fix) {
+      ImGui::SameLine();
+      float w = ImGui::CalcTextSize(is.fixLabel.c_str()).x + ImGui::GetStyle().FramePadding.x * 2;
+      float x = ImGui::GetWindowContentRegionMax().x - w;
+      if (ImGui::GetCursorPosX() < x) ImGui::SetCursorPosX(x);
+      ImGui::PushStyleColor(ImGuiCol_Button, pal::v4(pal::kAccentDim));
+      if (ImGui::SmallButton(is.fixLabel.c_str())) {
+        checkpoint(is.fixLabel.c_str());
+        auto fix = is.fix;  // the report is rebuilt after the change
+        fix(doc_);
+        doc_.touch();
+        markDirty();
+        notify("Applied: " + is.fixLabel, pal::kOk, 2.5);
+        ImGui::PopStyleColor();
+        ImGui::PopID();
+        break;
+      }
+      ImGui::PopStyleColor();
+    }
+    ImGui::Indent(ImGui::GetTextLineHeight() + 8);
+    if (!is.detail.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, pal::v4(pal::kTextDim));
+      ImGui::TextWrapped("%s", is.detail.c_str());
+      ImGui::PopStyleColor();
+    }
+    if (!is.elements.empty()) {
+      int n = 0;
+      for (Id id : is.elements) {
+        if (!doc_.exists(id)) continue;
+        if (n++ > 0) ImGui::SameLine();
+        if (n > 8) {
+          ImGui::TextDisabled("+%zu more", is.elements.size() - 8);
+          break;
+        }
+        std::string nm = doc_.nameOf(id);
+        std::string lbl = std::string(kindName(doc_.kindOf(id))) + ": " + (nm.empty() ? "(unnamed)" : nm);
+        ImGui::PushID(int(id));
+        if (ImGui::SmallButton(lbl.c_str())) {
+          sel_.set(id);
+          focusSelection();
+        }
+        ImGui::PopID();
+      }
+    }
+    ImGui::Unindent(ImGui::GetTextLineHeight() + 8);
+    ImGui::Spacing();
+    ImGui::PopID();
+  }
+  if (shown == 0 && (compiled_.ok || !upToDate)) {
     iconInline(Icon::Ok, pal::kOk);
     ImGui::SameLine();
-    const mjModel* m = compiled_.model.get();
-    ImGui::Text("Compiles in MuJoCo %s: %d bodies, %d DoF (nq %d), %d actuators, %d sensor values, total mass %.3g kg",
-                mj_versionString(), int(m->nbody) - 1, int(m->nv), int(m->nq), int(m->nu), int(m->nsensordata),
-                m->body_subtreemass[0]);
-    for (const std::string& w : compiled_.warnings) {
-      iconInline(Icon::Warning, pal::kWarning);
-      ImGui::SameLine();
-      ImGui::TextWrapped("%s", w.c_str());
-    }
-    int pen = 0;
-    double worst = 0;
-    for (const InitialContact& c : compiled_.initialContacts)
-      if (c.dist < -1e-4) {
-        ++pen;
-        worst = std::min(worst, c.dist);
-      }
-    if (pen > 0) {
-      iconInline(Icon::Warning, pal::kWarning);
-      ImGui::SameLine();
-      ImGui::TextWrapped("%d contact(s) already penetrating at the start pose (deepest %.1f mm). Overlapping geoms of "
-                         "different bodies push each other apart violently when the simulation starts. They are "
-                         "marked with red crosses in the viewport.",
-                         pen, -worst * 1000);
-    }
+    ImGui::TextDisabled("No issues to show.");
   }
+  ImGui::EndChild();
   ImGui::End();
+}
+
+void Editor::drawStrength(Id jointId) {
+  const JointReport* r = report_.joint(jointId);
+  if (!r) return;
+  ImGui::Spacing();
+  ImGui::SeparatorText("Physics check");
+  const char* tu = r->angular ? "N*m" : "N";
+  double need = r->required();
+  if (!r->actuated) {
+    ImGui::TextDisabled("Passive joint: no actuator. Load to lift its subtree: %.3g %s.", r->liftLoad, tu);
+  } else {
+    // Capacity vs need bar.
+    ImGui::Text("Actuator capacity");
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
+    if (r->unbounded) ImGui::TextColored(pal::v4(pal::kWarning), "unbounded");
+    else ImGui::Text("%.3g %s", r->capacity, tu);
+    ImGui::Text("Needed (estimate)");
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.45f);
+    ImGui::Text("%.3g %s", need, tu);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Lift: %.3g %s to raise the %.3g kg subtree against gravity (worst case).\n"
+                        "Support: %.3g %s to carry the body while walking (legs only; ~half the feet on the ground).",
+                        r->liftLoad, tu, r->movedMass, r->supportLoad, tu);
+    }
+    if (need > 0 && !r->unbounded) {
+      double ratio = r->capacity / need;
+      float w = ImGui::GetContentRegionAvail().x, h = ImGui::GetTextLineHeight() * 0.7f;
+      ImVec2 p = ImGui::GetCursorScreenPos();
+      ImDrawList* dl = ImGui::GetWindowDrawList();
+      float fill = float(std::min(ratio / 3.0, 1.0));
+      ImU32 c = ratio < 0.25 ? pal::kError : ratio < 1.0 ? pal::kWarning : pal::kOk;
+      dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32(255, 255, 255, 20), 3);
+      dl->AddRectFilled(p, ImVec2(p.x + w * fill, p.y + h), c, 3);
+      float one = p.x + w / 3.0f;
+      dl->AddLine(ImVec2(one, p.y - 2), ImVec2(one, p.y + h + 2), IM_COL32(230, 230, 240, 200), 2);
+      ImGui::Dummy(ImVec2(w, h + 2));
+      if (ratio < 0.001) ImGui::TextColored(pal::v4(c), "under 0.1%% of the estimated need");
+      else if (ratio < 1.0) ImGui::TextColored(pal::v4(c), "%.0f%% of the estimated need", ratio * 100);
+      else ImGui::TextColored(pal::v4(c), "%.1fx the estimated need", ratio);
+    }
+    if (r->holdLoad > 0 && !r->unbounded && r->capacity < r->holdLoad)
+      ImGui::TextColored(pal::v4(pal::kError), "Saturates: cannot even hold the body at rest");
+    else if (r->sag > 0 && r->stiffness > 0)
+      ImGui::TextDisabled("Servo sag under body weight: %.2f %s", r->angular ? rad2deg(r->sag) : r->sag * 100, r->angular ? "deg" : "cm");
+  }
+  if (r->stiffness > 0) {
+    ImU32 c = r->omegaDt > 2 ? pal::kError : r->omegaDt > 0.6 ? pal::kWarning : pal::kOk;
+    ImGui::TextColored(pal::v4(c), "Stiffness margin: w*dt = %.2f", r->omegaDt);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Natural frequency times timestep. Below ~0.5 is comfortable; above 2 explicit integration "
+                        "diverges. Raise armature or lower kp if it is high.");
+  }
+  ImGui::TextDisabled("Moves %.3g kg, effective inertia %.3g %s", r->movedMass, r->inertia, r->angular ? "kg*m^2" : "kg");
 }
 
 // ------------------------------------------------------------------------------------ MJCF

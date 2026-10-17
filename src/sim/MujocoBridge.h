@@ -3,6 +3,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <functional>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -66,6 +67,8 @@ class BackgroundCompiler {
   BackgroundCompiler& operator=(const BackgroundCompiler&) = delete;
 
   void request(std::string xml, ExportMap map, uint64_t revision);
+  // Called from the worker thread whenever a result becomes available (e.g. to wake the UI).
+  void setResultCallback(std::function<void()> cb) { onResult_ = std::move(cb); }
   // Returns true and fills `out` when a result newer than the last poll is available.
   bool poll(CompileResult& out);
   bool busy() const;
@@ -84,6 +87,7 @@ class BackgroundCompiler {
   ExportMap jobMap_;
   uint64_t jobRevision_ = 0;
   CompileResult result_;
+  std::function<void()> onResult_;
 };
 
 }  // namespace mjf

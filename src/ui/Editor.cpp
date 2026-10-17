@@ -23,6 +23,7 @@ namespace fs = std::filesystem;
 namespace mjf {
 
 static double nowSeconds() { return glfwGetTime(); }
+static std::string quoteName(const std::string& s) { return "'" + s + "'"; }
 
 // ------------------------------------------------------------------------------------ Selection
 
@@ -56,6 +57,7 @@ void Editor::init(GLFWwindow* window, float scale, const std::string& configDir)
   scale_ = scale;
   configDir_ = configDir;
   if (!renderer_.init()) std::fprintf(stderr, "Renderer initialization failed\n");
+  compiler_.setResultCallback([] { glfwPostEmptyEvent(); });
   dbg_.init();
   propCtx_.change = [this] { change(); };
   props::setContext(&propCtx_);
@@ -98,7 +100,15 @@ void Editor::applyCli(const CliOptions& cli) {
 }
 
 bool Editor::wantsContinuousRendering() const {
-  return vp_.gizmoUsing || vp_.dragButton >= 0 || compiler_.busy() || !toasts_.empty() || fileDialog_.isOpen();
+  return vp_.gizmoUsing || vp_.dragButton >= 0 || compiler_.busy() || requestedRevision_ != editRevision_ ||
+         compiledRevision_ != requestedRevision_ || !toasts_.empty() || fileDialog_.isOpen();
+}
+
+bool Editor::hasPendingWork() {
+  // A finished compile, a scheduled compile that is due, or a pending window focus request.
+  if (requestedRevision_ != editRevision_) return true;
+  if (compiledRevision_ != requestedRevision_ && !compiler_.busy()) return true;
+  return !pendingFocus_.empty() || focusInspector_ > 0;
 }
 
 bool Editor::confirmQuit() {
@@ -340,6 +350,7 @@ void Editor::scheduleCompile() {
   std::string xml = writeMjcf(doc_, {}, &map);
   compiler_.request(std::move(xml), std::move(map), editRevision_);
   requestedRevision_ = editRevision_;
+  runAnalysis();  // immediate feedback; refined when the compile result arrives
 }
 
 void Editor::pollCompile() {
@@ -347,7 +358,15 @@ void Editor::pollCompile() {
   if (compiler_.poll(r)) {
     compiledRevision_ = r.revision;
     compiled_ = std::move(r);
+    if (compiledRevision_ == editRevision_) runAnalysis();
   }
+}
+
+void Editor::runAnalysis() {
+  bool valid = compiledRevision_ == editRevision_;
+  report_ = analyzeModel(doc_, &compiled_, valid);
+  reportRevision_ = editRevision_;
+  reportHasCompile_ = valid;
 }
 
 // ------------------------------------------------------------------------------------ frame
@@ -373,6 +392,7 @@ void Editor::buildDefaultLayout(unsigned int dockId) {
 }
 
 void Editor::frame() {
+  ++frameCount_;
   pollCompile();
   scheduleCompile();
   handleShortcuts();
@@ -389,7 +409,7 @@ void Editor::frame() {
   drawScenePanel();
   drawInspector();
   if (focusInspector_ > 0 && --focusInspector_ == 0) ImGui::SetWindowFocus("Inspector");
-  else if (focusInspector_ == 0 && !pendingFocus_.empty()) {
+  else if (focusInspector_ == 0 && frameCount_ > 3 && !pendingFocus_.empty()) {
     // One window per frame: tab selection only follows the last focused window of a frame.
     ImGui::SetWindowFocus(pendingFocus_.front().c_str());
     pendingFocus_.erase(pendingFocus_.begin());
@@ -544,6 +564,10 @@ void Editor::drawMenuBar() {
     }
     ImGui::EndMenu();
   }
+  if (ImGui::BeginMenu("Tools")) {
+    drawToolsMenu();
+    ImGui::EndMenu();
+  }
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Grid", nullptr, &vp_.showGrid);
     ImGui::MenuItem("Shadows", nullptr, &vp_.showShadows);
@@ -651,18 +675,23 @@ void Editor::drawToolbar() {
 
     // Validation status on the right.
     bool upToDate = compiledRevision_ == editRevision_;
-    const char* status;
+    std::string statusStr;
     ImU32 col;
     Icon icon;
-    if (!upToDate) { status = "Checking..."; col = pal::kTextDim; icon = Icon::Info; }
-    else if (compiled_.ok) { status = "Compiles in MuJoCo"; col = pal::kOk; icon = Icon::Ok; }
-    else { status = "MuJoCo error"; col = pal::kError; icon = Icon::Error; }
+    int nerr = report_.counts[int(Severity::Error)] + ((upToDate && !compiled_.ok) ? 1 : 0);
+    int nwarn = report_.counts[int(Severity::Warning)];
+    if (!upToDate) { statusStr = "Checking..."; col = pal::kTextDim; icon = Icon::Info; }
+    else if (nerr > 0) { statusStr = std::to_string(nerr) + (nerr == 1 ? " error" : " errors"); col = pal::kError; icon = Icon::Error; }
+    else if (nwarn > 0) { statusStr = "Compiles, " + std::to_string(nwarn) + (nwarn == 1 ? " warning" : " warnings"); col = pal::kWarning; icon = Icon::Warning; }
+    else { statusStr = "Compiles in MuJoCo"; col = pal::kOk; icon = Icon::Ok; }
+    const char* status = statusStr.c_str();
     float w = ImGui::CalcTextSize(status).x + ImGui::GetFrameHeight() + 20 * scale_;
     ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - w);
     iconInline(icon, col);
     ImGui::SameLine();
     ImGui::TextColored(pal::v4(col), "%s", status);
-    if (ImGui::IsItemHovered() && !compiled_.ok && upToDate) ImGui::SetTooltip("%s", compiled_.error.c_str());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", !compiled_.ok && upToDate ? compiled_.error.c_str() : "Click to open the Issues panel");
+    if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Issues");
   }
   ImGui::End();
 }
@@ -766,6 +795,93 @@ void Editor::handleShortcuts() {
   if (pressed(ImGuiKey_Keypad3)) { vp_.cam.azimuth = 90; vp_.cam.elevation = 0; }
   if (pressed(ImGuiKey_Keypad7)) { vp_.cam.elevation = 89; }
   if (pressed(ImGuiKey_Keypad5)) vp_.cam.ortho = !vp_.cam.ortho;
+}
+
+// ------------------------------------------------------------------------------------ tools
+
+std::vector<Id> Editor::selectedModelRoots() const {
+  std::vector<Id> roots;
+  for (Id id : sel_.ids) {
+    Id b = doc_.kindOf(id) == Kind::Body ? id : doc_.ownerBody(id);
+    if (b == kWorldId || b == kNoId) continue;
+    Id r = doc_.rootOf(b);
+    if (r != kWorldId && std::find(roots.begin(), roots.end(), r) == roots.end()) roots.push_back(r);
+  }
+  if (roots.empty())
+    for (const Body& b : doc_.bodies)
+      if (b.id != kWorldId && b.parent == kWorldId && b.role == Role::Model) roots.push_back(b.id);
+  return roots;
+}
+
+void Editor::drawToolsMenu() {
+  std::vector<Id> roots = selectedModelRoots();
+  std::string target = roots.size() == 1 ? quoteName(doc_.nameOf(roots[0])) : std::to_string(roots.size()) + " models";
+  ImGui::TextDisabled("Applies to: %s (select a model to target it)", target.c_str());
+  ImGui::Separator();
+  if (ImGui::BeginMenu("Collisions", !roots.empty())) {
+    auto preset = [&](const char* label, const char* tip, CollisionPreset p) {
+      if (ImGui::MenuItem(label)) {
+        checkpoint(label);
+        int n = 0;
+        for (Id r : roots) n += applyCollisionPreset(doc_, r, p);
+        notify(std::string(label) + ": " + std::to_string(n) + " geoms changed", pal::kOk, 3);
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
+    };
+    preset("Disable self-collisions (keep world contacts)",
+           "Model geoms get contype=2, conaffinity=1: they collide with the environment (contype/conaffinity 1) but "
+           "not with each other. Fewer contact pairs = faster MJWarp training.",
+           CollisionPreset::NoSelfCollision);
+    preset("Only the feet touch the world",
+           "The lowest geoms of each model keep contacts with the environment; every other model geom gets "
+           "contype=conaffinity=0. The cheapest setup for locomotion on open terrain.",
+           CollisionPreset::FeetOnly);
+    preset("Everything collides (MuJoCo default)", "contype = conaffinity = 1 for all model geoms.",
+           CollisionPreset::AllCollide);
+    ImGui::EndMenu();
+  }
+  std::vector<Id> bodies;
+  for (Id id : sel_.ids) if (doc_.kindOf(id) == Kind::Body && id != kWorldId) bodies.push_back(id);
+  if (ImGui::MenuItem("Exclude contacts between selected bodies", nullptr, false, bodies.size() >= 2)) {
+    checkpoint("Exclude contacts");
+    int n = 0;
+    for (size_t i = 0; i < bodies.size(); ++i)
+      for (size_t k = i + 1; k < bodies.size(); ++k, ++n) addExclude(doc_, bodies[i], bodies[k]);
+    notify("Added " + std::to_string(n) + " contact exclusion(s)", pal::kOk, 2);
+  }
+  if (ImGui::MenuItem("Place models on the floor", nullptr, false, !roots.empty())) {
+    checkpoint("Place on floor");
+    for (Id r : roots) placeOnFloor(doc_, r);
+  }
+  ImGui::Separator();
+  if (ImGui::BeginMenu("Add sensors", !roots.empty())) {
+    if (ImGui::MenuItem("IMU at the model root (accelerometer, gyro, orientation)")) {
+      checkpoint("Add IMU");
+      for (Id r : roots) {
+        Id s = addSite(doc_, r, {}, doc_.nameOf(r) + "_imu");
+        addSensor(doc_, SensorType::Accelerometer, s);
+        addSensor(doc_, SensorType::Gyro, s);
+        addSensor(doc_, SensorType::FrameQuat, s, doc_.nameOf(r) + "_orientation");
+      }
+    }
+    if (ImGui::MenuItem("Foot touch sensors (sites on the lowest geoms)")) {
+      checkpoint("Add foot sensors");
+      int n = 0;
+      for (Id r : roots)
+        for (Id g : lowestGeoms(doc_, r)) {
+          const Geom* gg = doc_.geom(g);
+          Id s = addSite(doc_, gg->body, {gg->pos, gg->quat}, gg->name + "_touch_site");
+          Site* site = doc_.site(s);
+          site->type = gg->type == GeomType::Plane ? GeomType::Sphere : gg->type;
+          site->size = gg->size * 1.15;
+          site->rgba = {0.2f, 0.9f, 0.5f, 0.3f};
+          addSensor(doc_, SensorType::Touch, s, gg->name + "_touch");
+          ++n;
+        }
+      notify("Added " + std::to_string(n) + " touch sensors", pal::kOk, 2);
+    }
+    ImGui::EndMenu();
+  }
 }
 
 // ------------------------------------------------------------------------------------ actions
