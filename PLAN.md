@@ -184,9 +184,11 @@ headless settle).
 - [x] Keyframes (per-joint storage, start pose, capture from simulation)
 - [ ] Pose mode (edit keyframes in the viewport)
 - [ ] Mesh assets (STL/OBJ via MuJoCo) with convex-hull preview
-- [ ] Preferences, keyboard shortcut overlay, user guide
-- [ ] Unit tests (export → MuJoCo compile, JSON round trip, import round trip),
-      `tools/check_mjwarp.py`, GitHub Actions CI
+- [x] Keyboard & mouse help (F1), README with screenshots, user guide (docs/USER_GUIDE.md)
+- [ ] Preferences window
+- [x] Unit/integration tests (export → MuJoCo compile, JSON and MJCF round trips, analysis,
+      simulator, generators, merge), `tools/check_mjwarp.py`, example projects verified in MJWarp,
+      GitHub Actions CI (build, tests, headless validation, MJWarp CPU check)
 
 ## 5. Testing strategy
 

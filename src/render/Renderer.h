@@ -30,6 +30,7 @@ struct DrawItem {
   Color edgeColor;
   // Custom mesh (height fields): unit mesh scaled per axis by `size`.
   const Mesh* mesh = nullptr;
+  bool heightTint = false;  // shade by height with contour lines (height fields)
   Vec3 localOffset;  // set by the renderer for camera-following infinite planes
 };
 

@@ -57,6 +57,8 @@ uniform float uCheckerDensity;
 uniform int uEdges;
 uniform vec4 uEdgeColor;
 uniform int uHighlight;
+uniform int uHeightTint;
+uniform float uHeightMax;
 uniform int uShadows;
 uniform sampler2DShadow uShadowMap;
 uniform float uShadowTexel;
@@ -92,6 +94,17 @@ void main() {
       float line = (1.0 - min(min(g.x, g.y), 1.0)) * (1.0 - blur);
       base = mix(base, uEdgeColor.rgb, line * 0.75);
     }
+  }
+  if (uHeightTint == 1) {
+    // Height fields: darker valleys, contour lines and a 0.5 m grid make the relief readable.
+    float h = clamp(vLocal.z / max(uHeightMax, 1e-6), 0.0, 1.0);
+    base *= mix(0.55, 1.2, h);
+    float c = h * 8.0;
+    float gc = abs(fract(c - 0.5) - 0.5) / max(fwidth(c), 1e-6);
+    base = mix(base, base * 0.6, (1.0 - min(gc, 1.0)) * 0.5);
+    vec2 q = vLocal.xy * 2.0;
+    vec2 gg = abs(fract(q - 0.5) - 0.5) / max(fwidth(q), vec2(1e-6));
+    base = mix(base, vec3(0.92), (1.0 - min(min(gg.x, gg.y), 1.0)) * 0.22);
   }
   float sh = uShadows == 1 ? shadowFactor(N, L) : 1.0;
   float diff = max(dot(N, L), 0.0);
@@ -256,6 +269,8 @@ void Renderer::drawItem(Shader& sh, const DrawItem& it, bool depthOnly) {
     sh.set("uShininess", it.shininess);
     sh.set("uEmission", it.emission);
     sh.set("uChecker", it.checker ? 1 : 0);
+    sh.set("uHeightTint", it.heightTint ? 1 : 0);
+    sh.set("uHeightMax", float(it.size.z));
     sh.set("uChecker2", it.checker2);
     sh.set("uCheckerDensity", it.checkerDensity);
     sh.set("uEdges", it.checkerEdges ? 1 : 0);

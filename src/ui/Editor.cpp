@@ -102,6 +102,8 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a.rfind("import:", 0) == 0) beginImport(a.substr(7));
     else if (a.rfind("gen:", 0) == 0) addGeneratedEnvironment(a.substr(4));
     else if (a == "addmodel") addModelRoot();
+    else if (a == "notoasts") toasts_.clear();
+    else if (a == "shortcuts") showShortcuts_ = true;
     else if (a.rfind("export:", 0) == 0) exportTo(a.substr(7), ExportOptions::Scope::All, false);
     else if (a == "limbtool") limbTool_ = true;
     else if (a.rfind("sim:", 0) == 0) {
@@ -211,7 +213,7 @@ void Editor::newDocument(const std::string& templateId) {
   modified_ = false;
   ++editRevision_;
   compileDueTime_ = 0;
-  frameAll();
+  frameModels();
   setTitle();
 }
 
@@ -229,7 +231,7 @@ bool Editor::openPath(const std::string& path) {
   modified_ = false;
   ++editRevision_;
   compileDueTime_ = 0;
-  frameAll();
+  frameModels();
   if (!editorState.empty()) applyEditorState(editorState);
   lastDir_ = fs::path(path).parent_path().string();
   addRecent(path);
@@ -521,6 +523,7 @@ void Editor::frame() {
   drawImportModal();
   drawArrayModal();
   drawAboutWindow();
+  drawShortcutsWindow();
   if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
   drawToasts();
 
@@ -667,6 +670,7 @@ void Editor::drawMenuBar() {
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Help")) {
+    if (ImGui::MenuItem("Keyboard & mouse", "F1")) showShortcuts_ = true;
     if (ImGui::MenuItem("About MJForge")) showAbout_ = true;
     ImGui::MenuItem("ImGui demo (developer)", nullptr, &showDemo_);
     ImGui::EndMenu();
@@ -833,6 +837,7 @@ void Editor::drawToasts() {
 
 void Editor::drawAboutWindow() {
   if (!showAbout_) return;
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
   ImGui::SetNextWindowSize(ImVec2(520 * scale_, 0), ImGuiCond_Appearing);
   if (ImGui::Begin("About MJForge", &showAbout_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("MJForge %s", MJFORGE_VERSION);
@@ -845,6 +850,50 @@ void Editor::drawAboutWindow() {
     ImGui::TextDisabled("Mouse: right-drag orbit, middle-drag or Shift+right-drag pan, wheel zoom, left-click select.");
     ImGui::TextDisabled("Keys: W/E/R move/rotate/resize, F frame, Ctrl+D duplicate, Del delete, Ctrl+Z undo.");
     ImGui::TextDisabled("Simulation: Space play/pause, Shift+Space stop, Ctrl+R reset, drag a body to push it.");
+  }
+  ImGui::End();
+}
+
+void Editor::drawShortcutsWindow() {
+  if (!showShortcuts_) return;
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(560 * scale_, 0), ImGuiCond_Appearing);
+  if (ImGui::Begin("Keyboard & mouse", &showShortcuts_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
+    auto table = [&](const char* id, std::initializer_list<std::pair<const char*, const char*>> rows) {
+      if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) return;
+      for (const auto& [k, v] : rows) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextColored(pal::v4(pal::kAccent), "%s", k);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(v);
+      }
+      ImGui::EndTable();
+    };
+    ImGui::SeparatorText("Mouse");
+    table("##mouse", {{"Left click", "select (Shift: add, Ctrl: toggle, Alt: geoms instead of bodies)"},
+                      {"Double click", "frame the clicked element"},
+                      {"Right drag / click", "orbit / context menu"},
+                      {"Middle drag, Shift+right drag", "pan"},
+                      {"Wheel", "zoom toward the cursor"},
+                      {"Left drag (simulating)", "push the body under the cursor"}});
+    ImGui::SeparatorText("Editing");
+    table("##edit", {{"Q  W  E  R", "select, move, rotate, resize"},
+                     {"Tab", "gizmo in world / local frame (hold Ctrl to invert snapping)"},
+                     {"G", "add-limb tool (Esc leaves it)"},
+                     {"Ctrl+D  Ctrl+M  Del", "duplicate, mirror left/right, delete"},
+                     {"Ctrl+Z  Ctrl+Y", "undo, redo"},
+                     {"F2", "rename (outliner)"}});
+    ImGui::SeparatorText("View");
+    table("##view", {{"F  Home", "frame selection, frame everything"},
+                     {"Numpad 1 3 7 5", "front, side, top, orthographic"},
+                     {"X  J  C  L", "x-ray, joints, centers of mass, names"}});
+    ImGui::SeparatorText("Simulation");
+    table("##sim", {{"Space  Shift+Space", "play / pause, stop"},
+                    {"Ctrl+R  Right arrow", "reset, single step while paused"}});
+    ImGui::SeparatorText("Files");
+    table("##files", {{"Ctrl+O  Ctrl+S  Ctrl+Shift+S", "open (project or MJCF), save, save as"},
+                      {"Ctrl+I  Ctrl+E  Ctrl+Q", "import into scene, export MJCF, quit"}});
   }
   ImGui::End();
 }
@@ -865,6 +914,7 @@ void Editor::handleShortcuts() {
   if (ctrl && pressed(ImGuiKey_M)) { mirrorSelection(1); return; }
   if (ctrl && pressed(ImGuiKey_R)) { resetSimulation(); return; }
   if (ctrl) return;
+  if (pressed(ImGuiKey_F1)) showShortcuts_ = !showShortcuts_;
   // Single-key shortcuts only when the mouse is not over a text field.
   if (pressed(ImGuiKey_Delete) || (pressed(ImGuiKey_Backspace) && !io.WantCaptureKeyboard)) deleteSelection();
   if (pressed(ImGuiKey_Escape)) {
@@ -1061,6 +1111,16 @@ void Editor::focusSelection() {
   }
   if (!box.valid()) return;
   vp_.cam.frame(box.center(), std::max(0.1, length(box.extent()) * 0.5));
+}
+
+void Editor::frameModels() {
+  // Documents open framed on their creatures; terrains can be much larger (Home frames all).
+  Aabb box = modelsBounds(doc_);
+  if (!box.valid()) {
+    frameAll();
+    return;
+  }
+  vp_.cam.frame(box.center(), std::max(0.4, length(box.extent()) * 0.5));
 }
 
 void Editor::frameAll() {

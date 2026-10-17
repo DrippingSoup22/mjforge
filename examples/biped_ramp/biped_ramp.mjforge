@@ -1,0 +1,3366 @@
+{
+ "actuators": [
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.8,
+    0.8
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -40.0,
+    40.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 17,
+   "inheritrange": 0.0,
+   "kp": 60.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "biped_waist_yaw_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 11,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.6,
+    0.6
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -60.0,
+    60.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 29,
+   "inheritrange": 0.0,
+   "kp": 80.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "left_hip_yaw_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 19,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.5,
+    0.5
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -80.0,
+    80.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 30,
+   "inheritrange": 0.0,
+   "kp": 120.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "left_hip_roll_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 20,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -1.6,
+    0.6
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -100.0,
+    100.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 31,
+   "inheritrange": 0.0,
+   "kp": 150.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "left_hip_pitch_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 21,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    0.0,
+    2.2
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -100.0,
+    100.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 32,
+   "inheritrange": 0.0,
+   "kp": 150.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "left_knee_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 24,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.8,
+    0.8
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -60.0,
+    60.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 33,
+   "inheritrange": 0.0,
+   "kp": 200.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "left_ankle_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 27,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.6,
+    0.6
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -60.0,
+    60.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 45,
+   "inheritrange": 0.0,
+   "kp": 80.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "right_hip_yaw_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 40,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.5,
+    0.5
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -80.0,
+    80.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 46,
+   "inheritrange": 0.0,
+   "kp": 120.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "right_hip_roll_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 41,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -1.6,
+    0.6
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -100.0,
+    100.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 47,
+   "inheritrange": 0.0,
+   "kp": 150.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "right_hip_pitch_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 42,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    0.0,
+    2.2
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -100.0,
+    100.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 48,
+   "inheritrange": 0.0,
+   "kp": 150.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "right_knee_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 43,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  },
+  {
+   "actearly": false,
+   "actlimited": false,
+   "actrange": [
+    0.0,
+    0.0
+   ],
+   "adhesionGain": 1.0,
+   "area": 1.0,
+   "biasprm": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "biastype": "none",
+   "cranklength": 0.0,
+   "ctrllimited": true,
+   "ctrlrange": [
+    -0.8,
+    0.8
+   ],
+   "cylBias": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "cylTimeconst": 1.0,
+   "dampratio": 1.0,
+   "diameter": 0.0,
+   "dynprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "dyntype": "none",
+   "forcelimited": true,
+   "forcerange": [
+    -60.0,
+    60.0
+   ],
+   "fpmax": 1.3,
+   "fvmax": 1.2,
+   "gainprm": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "gaintype": "fixed",
+   "gear": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "group": 0,
+   "id": 49,
+   "inheritrange": 0.0,
+   "kp": 200.0,
+   "kv": 0.0,
+   "lengthrange": [
+    0.0,
+    0.0
+   ],
+   "lmax": 1.6,
+   "lmin": 0.5,
+   "muscleForce": -1.0,
+   "muscleRange": [
+    0.75,
+    1.05
+   ],
+   "muscleScale": 200.0,
+   "muscleTimeconst": [
+    0.01,
+    0.04
+   ],
+   "name": "right_ankle_pos",
+   "refsite": 0,
+   "slidersite": 0,
+   "target": 44,
+   "tausmooth": 0.0,
+   "timeconst": 0.0,
+   "trn": "joint",
+   "type": "position",
+   "vmax": 1.5
+  }
+ ],
+ "bodies": [
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 1,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "world",
+   "parent": 0,
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "environment"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 7,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "biped",
+   "parent": 1,
+   "pos": [
+    0.0,
+    0.0,
+    0.7720000000000001
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 10,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "biped_torso",
+   "parent": 7,
+   "pos": [
+    0.0,
+    0.0,
+    0.1
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 18,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "left_thigh",
+   "parent": 7,
+   "pos": [
+    0.0,
+    0.09,
+    -0.05
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 23,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "left_shin",
+   "parent": 18,
+   "pos": [
+    0.0,
+    0.0,
+    -0.34
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 26,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "left_foot",
+   "parent": 23,
+   "pos": [
+    0.0,
+    0.0,
+    -0.33
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 34,
+   "ipos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "right_thigh",
+   "parent": 7,
+   "pos": [
+    0.0,
+    -0.09,
+    -0.05
+   ],
+   "quat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 35,
+   "ipos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "right_shin",
+   "parent": 34,
+   "pos": [
+    0.0,
+    -0.0,
+    -0.34
+   ],
+   "quat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [],
+   "generator": "",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 36,
+   "ipos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "right_foot",
+   "parent": 35,
+   "pos": [
+    0.0,
+    -0.0,
+    -0.33
+   ],
+   "quat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "role": "model"
+  },
+  {
+   "diaginertia": [
+    0.001,
+    0.001,
+    0.001
+   ],
+   "expanded": true,
+   "genParams": [
+    2.0,
+    1.5,
+    8.0,
+    1.0,
+    1.0
+   ],
+   "generator": "ramp",
+   "gravcomp": 0.0,
+   "hasInertial": false,
+   "hidden": false,
+   "id": 50,
+   "ipos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "iquat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "locked": false,
+   "mass": 1.0,
+   "mocap": false,
+   "name": "ramp",
+   "parent": 1,
+   "pos": [
+    0.4,
+    0.0,
+    0.0
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "role": "environment"
+  }
+ ],
+ "cameras": [],
+ "compiler": {
+  "autolimits": true,
+  "balanceinertia": false,
+  "boundinertia": 0.0,
+  "boundmass": 0.0,
+  "inertiafromgeom": "auto",
+  "settotalmass": -1.0
+ },
+ "excludes": [],
+ "format": "mjforge",
+ "generator": "MJForge 0.1.0",
+ "geoms": [
+  {
+   "body": 1,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 5,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 4,
+   "name": "floor",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.0,
+    0.0,
+    0.05
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "plane"
+  },
+  {
+   "body": 7,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 9,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "biped_pelvis",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.9200000166893005,
+    0.550000011920929,
+    0.20000000298023224,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.08,
+    0.13,
+    0.05
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  },
+  {
+   "body": 10,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 12,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "biped_chest",
+   "pos": [
+    0.0,
+    0.0,
+    0.16
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.9200000166893005,
+    0.550000011920929,
+    0.20000000298023224,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.09,
+    0.13999999999999999,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "capsule"
+  },
+  {
+   "body": 10,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 13,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "biped_head",
+   "pos": [
+    0.0,
+    0.0,
+    0.47
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.30000001192092896,
+    0.33000001311302185,
+    0.3799999952316284,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.08,
+    0.0,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "sphere"
+  },
+  {
+   "body": 18,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 22,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "left_thigh_geom",
+   "pos": [
+    0.0,
+    0.0,
+    -0.16
+   ],
+   "priority": 0,
+   "quat": [
+    6.123233995736766e-17,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "rgba": [
+    0.30000001192092896,
+    0.33000001311302185,
+    0.3799999952316284,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.05,
+    0.16,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "capsule"
+  },
+  {
+   "body": 23,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 25,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "left_shin_geom",
+   "pos": [
+    0.0,
+    0.0,
+    -0.15
+   ],
+   "priority": 0,
+   "quat": [
+    6.123233995736766e-17,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "rgba": [
+    0.30000001192092896,
+    0.33000001311302185,
+    0.3799999952316284,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.04,
+    0.15,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "capsule"
+  },
+  {
+   "body": 26,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 28,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "left_sole",
+   "pos": [
+    0.03,
+    0.0,
+    -0.03
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.11999999731779099,
+    0.11999999731779099,
+    0.12999999523162842,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.1,
+    0.045,
+    0.02
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  },
+  {
+   "body": 34,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 37,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "right_thigh_geom",
+   "pos": [
+    0.0,
+    -0.0,
+    -0.16
+   ],
+   "priority": 0,
+   "quat": [
+    6.123233995736766e-17,
+    -0.0,
+    1.0,
+    -0.0
+   ],
+   "rgba": [
+    0.30000001192092896,
+    0.33000001311302185,
+    0.3799999952316284,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.05,
+    0.16,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "capsule"
+  },
+  {
+   "body": 35,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 38,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "right_shin_geom",
+   "pos": [
+    0.0,
+    -0.0,
+    -0.15
+   ],
+   "priority": 0,
+   "quat": [
+    6.123233995736766e-17,
+    -0.0,
+    1.0,
+    -0.0
+   ],
+   "rgba": [
+    0.30000001192092896,
+    0.33000001311302185,
+    0.3799999952316284,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.04,
+    0.15,
+    0.0
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "capsule"
+  },
+  {
+   "body": 36,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 39,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "right_sole",
+   "pos": [
+    0.03,
+    -0.0,
+    -0.03
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    -0.0,
+    0.0,
+    -0.0
+   ],
+   "rgba": [
+    0.11999999731779099,
+    0.11999999731779099,
+    0.12999999523162842,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.1,
+    0.045,
+    0.02
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  },
+  {
+   "body": 50,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 51,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "ramp_slope",
+   "pos": [
+    0.993747396265572,
+    0.0,
+    0.11441639924152618
+   ],
+   "priority": 0,
+   "quat": [
+    0.9975640502598243,
+    -0.0,
+    -0.06975647374412532,
+    -0.0
+   ],
+   "rgba": [
+    0.6200000047683716,
+    0.6399999856948853,
+    0.6700000166893005,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    1.0,
+    0.75,
+    0.025
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  },
+  {
+   "body": 50,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 52,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "ramp_top",
+   "pos": [
+    2.4805361374831407,
+    0.0,
+    0.13917310096006544
+   ],
+   "priority": 0,
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.6200000047683716,
+    0.6399999856948853,
+    0.6700000166893005,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    0.5,
+    0.75,
+    0.13917310096006544
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  },
+  {
+   "body": 50,
+   "conaffinity": 1,
+   "condim": 3,
+   "contype": 1,
+   "density": 1000.0,
+   "friction": [
+    1.0,
+    0.005,
+    0.0001
+   ],
+   "gap": 0.0,
+   "group": 0,
+   "hfield": 0,
+   "hidden": false,
+   "id": 53,
+   "locked": false,
+   "margin": 0.0,
+   "mass": -1.0,
+   "material": 0,
+   "name": "ramp_slope_down",
+   "pos": [
+    3.9673248787007096,
+    0.0,
+    0.11441639924152618
+   ],
+   "priority": 0,
+   "quat": [
+    0.9975640502598243,
+    0.0,
+    0.06975647374412532,
+    0.0
+   ],
+   "rgba": [
+    0.6200000047683716,
+    0.6399999856948853,
+    0.6700000166893005,
+    1.0
+   ],
+   "shellinertia": false,
+   "size": [
+    1.0,
+    0.75,
+    0.025
+   ],
+   "solimp": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solmix": 1.0,
+   "solref": [
+    0.02,
+    1.0
+   ],
+   "type": "box"
+  }
+ ],
+ "hfields": [],
+ "joints": [
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.0,
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "body": 7,
+   "damping": 0.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 8,
+   "limited": false,
+   "margin": 0.0,
+   "name": "biped_root",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    0.0,
+    0.0
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "free"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "body": 10,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 11,
+   "limited": true,
+   "margin": 0.0,
+   "name": "biped_waist_yaw",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    -0.8,
+    0.8
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "body": 18,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 19,
+   "limited": true,
+   "margin": 0.0,
+   "name": "left_hip_yaw",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    -0.6,
+    0.6
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "body": 18,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 20,
+   "limited": true,
+   "margin": 0.0,
+   "name": "left_hip_roll",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    -0.5,
+    0.5
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "body": 18,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 21,
+   "limited": true,
+   "margin": 0.0,
+   "name": "left_hip_pitch",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    -1.6,
+    0.6
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "body": 23,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 24,
+   "limited": true,
+   "margin": 0.0,
+   "name": "left_knee",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    0.0,
+    2.2
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.01,
+   "axis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "body": 26,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 27,
+   "limited": true,
+   "margin": 0.0,
+   "name": "left_ankle",
+   "pos": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "range": [
+    -0.8,
+    0.8
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    -0.0,
+    0.0,
+    -1.0
+   ],
+   "body": 34,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 40,
+   "limited": true,
+   "margin": 0.0,
+   "name": "right_hip_yaw",
+   "pos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "range": [
+    -0.6,
+    0.6
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    -1.0,
+    0.0,
+    -0.0
+   ],
+   "body": 34,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 41,
+   "limited": true,
+   "margin": 0.0,
+   "name": "right_hip_roll",
+   "pos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "range": [
+    -0.5,
+    0.5
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    -0.0,
+    1.0,
+    -0.0
+   ],
+   "body": 34,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 42,
+   "limited": true,
+   "margin": 0.0,
+   "name": "right_hip_pitch",
+   "pos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "range": [
+    -1.6,
+    0.6
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.02,
+   "axis": [
+    -0.0,
+    1.0,
+    -0.0
+   ],
+   "body": 35,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 43,
+   "limited": true,
+   "margin": 0.0,
+   "name": "right_knee",
+   "pos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "range": [
+    0.0,
+    2.2
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  },
+  {
+   "actuatorfrclimited": false,
+   "actuatorfrcrange": [
+    0.0,
+    0.0
+   ],
+   "actuatorgravcomp": false,
+   "armature": 0.01,
+   "axis": [
+    -0.0,
+    1.0,
+    -0.0
+   ],
+   "body": 36,
+   "damping": 1.0,
+   "frictionloss": 0.0,
+   "group": 0,
+   "hidden": false,
+   "id": 44,
+   "limited": true,
+   "margin": 0.0,
+   "name": "right_ankle",
+   "pos": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "range": [
+    -0.8,
+    0.8
+   ],
+   "ref": 0.0,
+   "solimpfriction": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solimplimit": [
+    0.9,
+    0.95,
+    0.001,
+    0.5,
+    2.0
+   ],
+   "solreffriction": [
+    0.02,
+    1.0
+   ],
+   "solreflimit": [
+    0.02,
+    1.0
+   ],
+   "springref": 0.0,
+   "stiffness": 0.0,
+   "type": "hinge"
+  }
+ ],
+ "keyframes": [],
+ "lights": [
+  {
+   "active": true,
+   "ambient": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "attenuation": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "body": 1,
+   "castshadow": true,
+   "cutoff": 45.0,
+   "diffuse": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "dir": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "exponent": 10.0,
+   "hidden": false,
+   "id": 6,
+   "mode": "fixed",
+   "name": "sun",
+   "pos": [
+    0.0,
+    0.0,
+    3.5
+   ],
+   "specular": [
+    0.3,
+    0.3,
+    0.3
+   ],
+   "target": 0,
+   "type": "directional"
+  }
+ ],
+ "materials": [
+  {
+   "emission": 0.0,
+   "id": 4,
+   "name": "groundplane",
+   "reflectance": 0.2,
+   "rgba": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "shininess": 0.5,
+   "specular": 0.5,
+   "texrepeat": [
+    5.0,
+    5.0
+   ],
+   "texture": 3,
+   "texuniform": true
+  }
+ ],
+ "modelName": "biped_ramp",
+ "nextId": 54,
+ "option": {
+  "ccd_iterations": 35,
+  "cone": "elliptic",
+  "density": 0.0,
+  "flag_actuation": true,
+  "flag_autoreset": true,
+  "flag_clampctrl": true,
+  "flag_constraint": true,
+  "flag_contact": true,
+  "flag_damper": true,
+  "flag_energy": false,
+  "flag_equality": true,
+  "flag_eulerdamp": true,
+  "flag_filterparent": true,
+  "flag_frictionloss": true,
+  "flag_fwdinv": false,
+  "flag_gravity": true,
+  "flag_invdiscrete": false,
+  "flag_island": true,
+  "flag_limit": true,
+  "flag_midphase": true,
+  "flag_multiccd": true,
+  "flag_nativeccd": true,
+  "flag_override": false,
+  "flag_refsafe": true,
+  "flag_sensor": true,
+  "flag_sleep": false,
+  "flag_spring": true,
+  "flag_warmstart": true,
+  "gravity": [
+   0.0,
+   0.0,
+   -9.81
+  ],
+  "impratio": 10.0,
+  "integrator": "implicitfast",
+  "iterations": 100,
+  "jacobian": "auto",
+  "ls_iterations": 50,
+  "ls_tolerance": 0.01,
+  "magnetic": [
+   0.0,
+   -0.5,
+   0.0
+  ],
+  "noslip_iterations": 0,
+  "solver": "Newton",
+  "timestep": 0.002,
+  "tolerance": 1e-08,
+  "viscosity": 0.0,
+  "wind": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "sensors": [
+  {
+   "cutoff": 0.0,
+   "id": 15,
+   "name": "biped_imu_accelerometer",
+   "noise": 0.0,
+   "obj": 14,
+   "objtype": "site",
+   "ref": 0,
+   "reftype": "site",
+   "type": "accelerometer"
+  },
+  {
+   "cutoff": 0.0,
+   "id": 16,
+   "name": "biped_imu_gyro",
+   "noise": 0.0,
+   "obj": 14,
+   "objtype": "site",
+   "ref": 0,
+   "reftype": "site",
+   "type": "gyro"
+  }
+ ],
+ "sites": [
+  {
+   "body": 10,
+   "group": 0,
+   "hidden": false,
+   "id": 14,
+   "material": 0,
+   "name": "biped_imu",
+   "pos": [
+    0.0,
+    0.0,
+    0.2
+   ],
+   "quat": [
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rgba": [
+    0.949999988079071,
+    0.75,
+    0.10000000149011612,
+    1.0
+   ],
+   "size": [
+    0.01,
+    0.01,
+    0.01
+   ],
+   "type": "sphere"
+  }
+ ],
+ "textures": [
+  {
+   "builtin": "gradient",
+   "file": "",
+   "height": 3072,
+   "id": 2,
+   "mark": "none",
+   "markrgb": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "name": "skybox",
+   "random": 0.01,
+   "rgb1": [
+    0.3,
+    0.5,
+    0.7
+   ],
+   "rgb2": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "type": "skybox",
+   "width": 512
+  },
+  {
+   "builtin": "checker",
+   "file": "",
+   "height": 300,
+   "id": 3,
+   "mark": "edge",
+   "markrgb": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "name": "groundplane",
+   "random": 0.01,
+   "rgb1": [
+    0.2,
+    0.3,
+    0.4
+   ],
+   "rgb2": [
+    0.1,
+    0.2,
+    0.3
+   ],
+   "type": "2d",
+   "width": 300
+  }
+ ],
+ "version": 1,
+ "visual": {
+  "azimuth": 120.0,
+  "elevation": -20.0,
+  "haze": [
+   0.15000000596046448,
+   0.25,
+   0.3499999940395355,
+   1.0
+  ],
+  "headlightAmbient": [
+   0.3,
+   0.3,
+   0.3
+  ],
+  "headlightDiffuse": [
+   0.6,
+   0.6,
+   0.6
+  ],
+  "headlightSpecular": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "offheight": 480,
+  "offwidth": 640,
+  "shadowsize": 4096
+ }
+}

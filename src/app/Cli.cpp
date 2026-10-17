@@ -12,6 +12,7 @@
 #include "core/Templates.h"
 #include "sim/MjcfImport.h"
 #include "sim/MujocoBridge.h"
+#include "sim/WarpLoader.h"
 
 namespace mjf {
 
@@ -24,6 +25,7 @@ const char* cliUsage() {
          "  --export <out.xml>     Export the project to MJCF and exit\n"
          "  --scope <s>            Export scope: all | models | environment (default all)\n"
          "  --angle <u>            Angle unit in the MJCF: radian | degree (default radian)\n"
+         "  --loader               With --export: also write <name>_mjwarp.py (MuJoCo Warp loader)\n"
          "  --validate             Compile with MuJoCo, print a report and exit (non-zero on errors)\n"
          "  --save <out.mjforge>   Save the project (with --template, or to convert an MJCF file)\n"
          "\n"
@@ -50,6 +52,7 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
     const char* v = nullptr;
     if (a == "-h" || a == "--help") o.help = true;
     else if (a == "--validate") o.validate = true;
+    else if (a == "--loader") o.loader = true;
     else if (a == "--export") { if (!(v = need(i, "--export"))) return false; o.exportPath = v; }
     else if (a == "--save") { if (!(v = need(i, "--save"))) return false; o.savePath = v; }
     else if (a == "--scope") { if (!(v = need(i, "--scope"))) return false; o.scope = v; }
@@ -149,6 +152,17 @@ int runHeadless(const CliOptions& cli) {
       return 1;
     }
     std::printf("Wrote %s\n", cli.exportPath.c_str());
+    if (cli.loader) {
+      std::string path = cli.exportPath, file = path.substr(path.find_last_of("/\\") + 1);
+      std::string stem = file.substr(0, file.find_last_of('.'));
+      std::string dir = path.substr(0, path.size() - file.size());
+      std::string py = dir + stem + "_mjwarp.py";
+      if (!writeTextFile(py, mjwarpLoaderScript(doc, file, nullptr), &err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+      }
+      std::printf("Wrote %s\n", py.c_str());
+    }
   }
   return rc;
 }

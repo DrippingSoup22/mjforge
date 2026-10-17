@@ -13,6 +13,7 @@ struct CliOptions {
   std::string scope = "all";  // all | models | environment
   std::string angle = "radian";
   bool validate = false;      // headless: compile + analysis report
+  bool loader = false;        // --export also writes the MJWarp loader script
   bool help = false;
   // GUI testing helpers
   std::string screenshot;     // save a PNG after `frames` frames and exit

@@ -117,6 +117,7 @@ void Editor::buildScene(std::vector<DrawItem>& items) {
         it.shape = Shape::Custom;
         it.mesh = &entry.second;
         it.size = {hf->size.x, hf->size.y, hf->size.z};
+        it.heightTint = true;
       } else {
         it.shape = shapeOf(g.type);
       }

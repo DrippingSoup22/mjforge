@@ -109,6 +109,7 @@ class Editor {
   void mirrorSelection(int axis);
   void focusSelection();
   void frameAll();
+  void frameModels();
   void notify(const std::string& text, unsigned int color = 0, double seconds = 3.5);
 
   // Creation helpers used by menus and context menus.
@@ -162,6 +163,7 @@ class Editor {
   void drawImportModal();
   void drawToasts();
   void drawAboutWindow();
+  void drawShortcutsWindow();
   void handleShortcuts();
   void drawAddMenuItems(Id contextBody);
   void drawToolsMenu();
@@ -314,6 +316,7 @@ class Editor {
   // dialogs
   FileDialog fileDialog_;
   bool showAbout_ = false;
+  bool showShortcuts_ = false;
   bool showDemo_ = false;
   bool showExport_ = false;
   int exportScope_ = 0;
