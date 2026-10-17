@@ -314,6 +314,7 @@ void Editor::buildOverlays() {
     buildSimOverlays();
     return;
   }
+  buildLimbPreview();
   // Penetrating contacts at the reference pose (from the last MuJoCo compile).
   if (vp_.showContacts && compileValid()) {
     for (const InitialContact& c : compiled_.initialContacts) {
@@ -422,8 +423,13 @@ void Editor::viewportInput() {
   Ray ray = vp_.cam.ray(m.x - vp_.x, m.y - vp_.y, vp_.w, vp_.h);
 
   // Hover.
+  bool limbMode = limbTool_ && !sim_.active();
   if (vp_.hovered && vp_.dragButton < 0 && !overGizmo) vp_.hoverId = pick(ray);
   else if (!vp_.hovered) vp_.hoverId = kNoId;
+  if (limbMode) {
+    if (vp_.hovered && vp_.dragButton < 0) limbToolInput(ray, false);
+    else if (!vp_.hovered) limbHover_ = {};
+  }
 
   // Zoom towards the point under the cursor.
   if (vp_.hovered && io.MouseWheel != 0) {
@@ -468,7 +474,9 @@ void Editor::viewportInput() {
         sim_.clearPerturb();
         simDrag_.active = false;
       }
-      if (b == 0 && !vp_.dragMoved && inside) {
+      if (b == 0 && !vp_.dragMoved && inside && limbMode) {
+        limbToolInput(ray, true);
+      } else if (b == 0 && !vp_.dragMoved && inside) {
         Id hit = pick(ray);
         if (hit) select(hit, io.KeyShift, io.KeyCtrl);
         else if (!io.KeyShift && !io.KeyCtrl) sel_.clear();
@@ -500,6 +508,7 @@ void Editor::drawGizmo() {
   if (gizmoOp_ == GizmoOp::Scale && k != Kind::Geom && k != Kind::Site) return;
   // While simulating only static things (environment) can be moved; the rest follows the physics.
   if (sim_.active() && movesInSimulation(id)) return;
+  if (limbTool_) return;  // clicks belong to the limb tool
 
   Pose world = elementWorldPose(doc_, poses_, id);
   Vec3 scale{1, 1, 1};
@@ -693,6 +702,7 @@ void Editor::drawViewportOverlayUI() {
   ImGui::PopStyleVar();
 
   if (sim_.active()) drawSimBadge();
+  else drawLimbToolPanel();
 
   // Hover name and hints (bottom left).
   std::string hint;

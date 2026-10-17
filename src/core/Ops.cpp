@@ -549,6 +549,92 @@ std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3&
   return r.tops;
 }
 
+std::vector<Id> arrayDuplicate(Document& doc, Id element, int copies, const Pose& step) {
+  std::vector<Id> out;
+  Kind k = doc.kindOf(element);
+  if (element == kWorldId || copies <= 0 ||
+      !(k == Kind::Body || k == Kind::Geom || k == Kind::Site || k == Kind::Camera || k == Kind::Light))
+    return out;
+  Pose local = elementLocalPose(doc, element);
+  Pose current = local;
+  for (int i = 0; i < copies; ++i) {
+    CopyResult r = copyElements(doc, {element}, [](const std::string& n) { return n; });
+    if (r.tops.empty()) break;
+    current = step * current;
+    setElementLocalPose(doc, r.tops[0], current);
+    out.push_back(r.tops[0]);
+  }
+  doc.touch();
+  return out;
+}
+
+Id addLimb(Document& doc, Id parent, const Vec3& worldPoint, const LimbSpec& spec) {
+  if (!doc.body(parent) || spec.segments < 1) return kNoId;
+  Pose parentWorld = bodyWorldPose(doc, parent);
+  // Body frame: local -Z along the limb, local +Y along the hinge axis.
+  Vec3 dir = normalize(spec.direction, {0, 0, -1});
+  Vec3 ax = spec.axis - dir * dot(spec.axis, dir);
+  ax = normalize(ax, perpendicular(dir));
+  Vec3 zc = -dir, yc = ax, xc = cross(yc, zc);
+  Mat3 m;
+  for (int i = 0; i < 3; ++i) {
+    m(i, 0) = xc[i];
+    m(i, 1) = yc[i];
+    m(i, 2) = zc[i];
+  }
+  Pose world{worldPoint, fromMat3(m)};
+  Pose local = inverse(parentWorld) * world;
+  Id first = kNoId, body = parent;
+  double r = spec.radius;
+  auto segmentName = [&](int s) -> std::string {
+    static const char* two[] = {"upper", "lower"};
+    static const char* three[] = {"upper", "middle", "lower"};
+    if (spec.segments == 1) return spec.name;
+    if (spec.segments == 2) return spec.name + "_" + two[s];
+    if (spec.segments == 3) return spec.name + "_" + three[s];
+    return spec.name + "_seg" + std::to_string(s + 1);
+  };
+  for (int s = 0; s < spec.segments; ++s) {
+    std::string bname = segmentName(s);
+    Pose bpose = s == 0 ? local : Pose{{0, 0, -spec.length}, {}};
+    body = addBody(doc, body, bpose, bname, doc.roleOf(parent));
+    if (!first) first = body;
+    static const char* jointNames[] = {"hip", "knee", "ankle", "toe"};
+    std::string jname = spec.name + "_" + (s < 4 ? jointNames[s] : "joint" + std::to_string(s + 1));
+    Id j = addJoint(doc, body, JointType::Hinge, {}, {0, 1, 0}, jname);
+    Joint* jj = doc.joint(j);
+    jj->limited = true;
+    jj->range = {-spec.range, spec.range};
+    jj->damping = 0.5;
+    jj->armature = 0.01;
+    Id g = addGeom(doc, body, GeomType::Capsule, {r, 0.1, 0}, {}, bname + "_geom");
+    setGeomFromTo(*doc.geom(g), {0, 0, 0}, {0, 0, -spec.length});
+    doc.geom(g)->rgba = {0.30f, 0.33f, 0.38f, 1};
+    if (spec.actuators) {
+      Id a = addActuator(doc, spec.actuatorType, j);  // named after the joint: <joint>_pos / _motor
+      Actuator* act = doc.actuator(a);
+      double torque = spec.maxTorque * std::pow(0.7, s);
+      act->forcelimited = true;
+      act->forcerange = {-torque, torque};
+      if (spec.actuatorType == ActuatorType::Position) {
+        act->kp = std::max(1.0, std::round(3.0 * torque));  // full torque at ~19 degrees of error
+        act->dampratio = 1.0;
+        act->ctrlrange = jj->range;
+      } else if (spec.actuatorType == ActuatorType::Motor) {
+        act->gear[0] = torque;
+        act->forcelimited = false;
+      }
+    }
+    r *= spec.taper;
+  }
+  if (spec.foot) {
+    Id f = addGeom(doc, body, GeomType::Sphere, {r * 1.25, 0, 0}, {{0, 0, -spec.length}, {}}, spec.name + "_foot");
+    doc.geom(f)->rgba = {0.12f, 0.12f, 0.13f, 1};
+  }
+  doc.touch();
+  return first;
+}
+
 void placeOnFloor(Document& doc, Id root, double floorZ, double clearance) {
   if (root == kWorldId || !doc.body(root)) return;
   auto poses = computeBodyPoses(doc);

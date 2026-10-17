@@ -47,6 +47,7 @@ struct Saver {
   void operator()(const char* k, uint32_t& v) { j[k] = v; }
   void operator()(const char* k, bool& v) { j[k] = v; }
   void operator()(const char* k, std::string& v) { j[k] = v; }
+  void operator()(const char* k, std::vector<double>& v) { j[k] = v; }
   void operator()(const char* k, Vec2& v) { j[k] = {v.x, v.y}; }
   void operator()(const char* k, Vec3& v) { j[k] = {v.x, v.y, v.z}; }
   void operator()(const char* k, Vec4& v) { j[k] = {v.x, v.y, v.z, v.w}; }
@@ -76,6 +77,7 @@ struct Loader {
   void operator()(const char* k, uint32_t& v) { get(k, v); }
   void operator()(const char* k, bool& v) { get(k, v); }
   void operator()(const char* k, std::string& v) { get(k, v); }
+  void operator()(const char* k, std::vector<double>& v) { get(k, v); }
   template <class T> void arr(const char* k, T* dst, int n) {
     auto it = j.find(k);
     if (it == j.end() || !it->is_array()) return;
@@ -108,6 +110,7 @@ template <class V> void visit(V& v, Body& b) {
   v("mocap", b.mocap); v("gravcomp", b.gravcomp); v("hasInertial", b.hasInertial); v("mass", b.mass);
   v("ipos", b.ipos); v("iquat", b.iquat); v("diaginertia", b.diaginertia); v("role", b.role);
   v("hidden", b.hidden); v("locked", b.locked); v("expanded", b.expanded);
+  v("generator", b.generator); v("genParams", b.genParams);
 }
 template <class V> void visit(V& v, Geom& g) {
   v("id", g.id); v("name", g.name); v("body", g.body); v("type", g.type); v("size", g.size);

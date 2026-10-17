@@ -47,6 +47,30 @@ bool moveSibling(Document& doc, Id element, int direction);
 // reference copied elements are duplicated as well. Returns the new top-level IDs.
 std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3& worldOffset);
 
+// Copies of an element (body with subtree, geom, site, ...): each copy is the previous one
+// transformed by `step`, a pose in the element's parent frame (translation for linear arrays,
+// rotation about the parent origin for radial arrays). Returns the new top-level IDs.
+std::vector<Id> arrayDuplicate(Document& doc, Id element, int copies, const Pose& step);
+
+// ----- limbs -----
+struct LimbSpec {
+  int segments = 2;
+  double length = 0.2;           // per segment
+  double radius = 0.025;
+  double taper = 0.85;           // radius factor per segment
+  double range = 1.0471975512;   // hinge range +-, radians (60 deg)
+  Vec3 direction{0, 0, -1};      // world direction the limb points to
+  Vec3 axis{0, 1, 0};            // world hinge axis (made orthogonal to the direction)
+  bool actuators = true;
+  ActuatorType actuatorType = ActuatorType::Position;
+  double maxTorque = 10;         // actuator strength at the first joint (later joints get less)
+  bool foot = true;              // sphere at the tip
+  std::string name = "limb";
+};
+// Attaches a chain of hinged capsule segments to `parent` at a world point. Returns the first
+// segment's body.
+Id addLimb(Document& doc, Id parent, const Vec3& worldPoint, const LimbSpec& spec);
+
 // ----- placement & collision presets -----
 // Moves a top-level body so its lowest geom rests `clearance` above z = floorZ.
 void placeOnFloor(Document& doc, Id root, double floorZ = 0.0, double clearance = 0.002);

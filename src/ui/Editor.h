@@ -11,6 +11,7 @@
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/Merge.h"
+#include "core/Ops.h"
 #include "core/MjcfWriter.h"
 #include "render/Camera.h"
 #include "render/DebugDraw.h"
@@ -120,6 +121,7 @@ class Editor {
   Id addLightTo(Id body);
   void addActuatorsFor(const std::vector<Id>& joints, ActuatorType type);
   Id addEnvironmentProp(GeomType type, bool dynamic);
+  Id addGeneratedEnvironment(const std::string& type);
   // The body new things get attached to: the selected body, or the owner of the selected element.
   Id targetBody() const;
 
@@ -197,6 +199,13 @@ class Editor {
   bool movesInSimulation(Id element) const;
   // Simulated joint position relative to the reference (0 when not simulating).
   double simJointOffset(Id joint) const;
+  // modeling tools
+  bool pickSurface(const Ray& ray, Id* geom, Vec3* point, Vec3* normal);
+  LimbSpec limbSpecAt(Id body, const Vec3& normal) const;
+  void limbToolInput(const Ray& ray, bool clicked);
+  void buildLimbPreview();
+  void drawLimbToolPanel();
+  void drawArrayModal();
 
   // outliner internals
   void outlinerBody(uint32_t bodyIndex, const std::string& filter);
@@ -279,6 +288,21 @@ class Editor {
     bool active = false;
     Vec3 planePoint, planeNormal;
   } simDrag_;
+
+  // modeling tools
+  bool limbTool_ = false;
+  LimbSpec limbSpec_ = [] { LimbSpec s; s.name = "leg"; return s; }();
+  bool limbMirror_ = true;
+  int limbDirMode_ = 0;  // 0 auto, 1 along the surface normal, 2 straight down
+  struct LimbHover {
+    bool valid = false;
+    Id body = kNoId;
+    Vec3 point, normal;
+  } limbHover_;
+  bool showArray_ = false;
+  int arrayRadial_ = 0, arrayCopies_ = 3, arrayAxis_ = 2;
+  float arrayAngle_ = 360.0f;
+  float arrayOffset_[3] = {0.2f, 0, 0};
 
   // import
   std::unique_ptr<Document> importDoc_;

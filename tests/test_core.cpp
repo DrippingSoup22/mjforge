@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <set>
 
 #include "core/Document.h"
 #include "core/Geometry.h"
@@ -299,4 +300,66 @@ TEST_CASE("compile errors are reported, not fatal") {
   CHECK_FALSE(r.error.empty());
   CompileResult r2 = compileMjcf("not xml at all");
   CHECK_FALSE(r2.ok);
+}
+
+TEST_CASE("limbs: attach a hinged leg, mirror it, analyze") {
+  Document doc;
+  addGeom(doc, kWorldId, GeomType::Plane, {0, 0, 0.05}, {}, "floor");
+  Id torso = addBody(doc, kWorldId, {{0, 0, 0.5}, {}}, "torso");
+  addJoint(doc, torso, JointType::Free, {}, {0, 0, 1}, "root");
+  addGeom(doc, torso, GeomType::Box, {0.2, 0.1, 0.05}, {}, "chest");
+  LimbSpec spec;
+  spec.name = "leg";
+  spec.direction = {0, 0, -1};
+  spec.axis = {0, 1, 0};
+  Id leg = addLimb(doc, torso, {0.15, 0.1, 0.5}, spec);
+  REQUIRE(leg);
+  CHECK(doc.body(leg)->name == "leg_upper");
+  CHECK(doc.joints.size() == 3);     // root + 2 hinges
+  CHECK(doc.actuators.size() == 2);
+  auto poses = computeBodyPoses(doc);
+  Aabb box = subtreeAabb(doc, poses, leg);
+  CHECK(box.lo.z == doctest::Approx(0.5 - 2 * 0.2 - spec.radius * spec.taper * spec.taper * 1.25).epsilon(1e-6));
+  // The hinge axis is the world Y axis.
+  Vec3 a, axis;
+  jointWorldFrame(doc, poses, *doc.joint(doc.joints[1].id), &a, &axis);
+  CHECK(std::fabs(axis.y) == doctest::Approx(1.0));
+  // Mirror to the other side: symmetric in y.
+  Id m = mirrorSubtree(doc, leg, 1);
+  REQUIRE(m);
+  poses = computeBodyPoses(doc);
+  CHECK(poses[doc.bodyIndex(m)].pos.y == doctest::Approx(-0.1));
+  CompileResult cr = compileMjcf(writeMjcf(doc));
+  INFO(cr.error);
+  CHECK(cr.ok);
+  CHECK(cr.model->nu == 4);
+}
+
+TEST_CASE("arrays: radial legs and linear geoms") {
+  Document doc;
+  Id torso = addBody(doc, kWorldId, {{0, 0, 0.5}, {}}, "torso");
+  addJoint(doc, torso, JointType::Free, {}, {0, 0, 1}, "root");
+  addGeom(doc, torso, GeomType::Sphere, {0.1, 0, 0}, {}, "core");
+  Id leg = addBody(doc, torso, {{0.15, 0, 0}, {}}, "leg");
+  Id hip = addJoint(doc, leg, JointType::Hinge, {}, {0, 1, 0}, "hip");
+  addGeom(doc, leg, GeomType::Capsule, {0.02, 0.05, 0}, {{0.05, 0, 0}, {}}, "leg_geom");
+  addActuator(doc, ActuatorType::Position, hip);
+  // Five copies around the torso's Z axis: six legs 60 degrees apart.
+  std::vector<Id> copies = arrayDuplicate(doc, leg, 5, {{}, axisAngle({0, 0, 1}, kPi / 3)});
+  REQUIRE(copies.size() == 5);
+  CHECK(doc.actuators.size() == 6);
+  auto poses = computeBodyPoses(doc);
+  Vec3 p3 = poses[doc.bodyIndex(copies[2])].pos;  // 180 degrees
+  CHECK(p3.x == doctest::Approx(-0.15));
+  CHECK(std::fabs(p3.y) < 1e-9);
+  std::set<std::string> names;
+  for (const Body& b : doc.bodies) names.insert(b.name);
+  CHECK(names.size() == doc.bodies.size());
+  CompileResult cr = compileMjcf(writeMjcf(doc));
+  CHECK(cr.ok);
+  // Linear array of a world geom.
+  Id post = addGeom(doc, kWorldId, GeomType::Cylinder, {0.05, 0.2, 0}, {{1, 0, 0.2}, {}}, "post");
+  std::vector<Id> posts = arrayDuplicate(doc, post, 3, {{0.5, 0, 0}, {}});
+  REQUIRE(posts.size() == 3);
+  CHECK(doc.geom(posts[2])->pos.x == doctest::Approx(2.5));
 }

@@ -11,6 +11,7 @@
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 
+#include "core/Generators.h"
 #include "core/Geometry.h"
 #include "core/Kinematics.h"
 #include "core/Ops.h"
@@ -99,6 +100,9 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a.rfind("focus:", 0) == 0) pendingFocus_.push_back(a.substr(6));
     else if (a == "play") startSimulation(false);
     else if (a.rfind("import:", 0) == 0) beginImport(a.substr(7));
+    else if (a.rfind("gen:", 0) == 0) addGeneratedEnvironment(a.substr(4));
+    else if (a == "addmodel") addModelRoot();
+    else if (a == "limbtool") limbTool_ = true;
     else if (a.rfind("sim:", 0) == 0) {
       // Start paused and fast-forward: deterministic screenshots of the simulation.
       cliSimSeconds_ = std::max(1e-9, std::atof(a.c_str() + 4));
@@ -503,6 +507,7 @@ void Editor::frame() {
     ImGui::EndPopup();
   }
   drawImportModal();
+  drawArrayModal();
   drawAboutWindow();
   if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
   drawToasts();
@@ -533,6 +538,13 @@ void Editor::drawAddMenuItems(Id ctxBody) {
   if (ImGui::MenuItem("Camera")) addCameraTo(body);
   if (ImGui::MenuItem("Light")) addLightTo(body);
   ImGui::Separator();
+  if (ImGui::BeginMenu("Environment")) {
+    for (const GeneratorInfo& g : generatorList()) {
+      if (ImGui::MenuItem(g.label)) addGeneratedEnvironment(g.type);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\nParameters can be changed later in the Inspector.", g.description);
+    }
+    ImGui::EndMenu();
+  }
   if (ImGui::BeginMenu("Environment prop")) {
     if (ImGui::MenuItem("Static box")) addEnvironmentProp(GeomType::Box, false);
     if (ImGui::MenuItem("Static cylinder")) addEnvironmentProp(GeomType::Cylinder, false);
@@ -581,6 +593,8 @@ void Editor::drawMenuBar() {
     if (ImGui::MenuItem("Redo", "Ctrl+Y", false, history_.canRedo())) redo();
     ImGui::Separator();
     if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, !sel_.empty())) duplicateSelection();
+    if (ImGui::MenuItem("Array...", nullptr, false, !sel_.empty())) showArray_ = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Linear or radial copies of the selected body / geom (e.g. legs around a torso).");
     if (ImGui::MenuItem("Delete", "Del", false, !sel_.empty())) deleteSelection();
     if (ImGui::BeginMenu("Mirror", !sel_.empty())) {
       if (ImGui::MenuItem("Across XZ plane (left/right)")) mirrorSelection(1);
@@ -720,6 +734,9 @@ void Editor::drawToolbar() {
     }
     ImGui::SameLine();
     if (iconButton("##addsite", Icon::Site, false, "Add a site (sensor / attachment point)")) addSiteTo(targetBody());
+    ImGui::SameLine();
+    if (iconButton("##limbtool", Icon::Limb, limbTool_, "Add limb tool (G): click a body to grow a jointed limb"))
+      limbTool_ = !limbTool_;
     sep();
     if (iconButton("##mirror", Icon::Mirror, false, "Mirror selected body left/right (Ctrl+M)")) mirrorSelection(1);
     sep();
@@ -755,15 +772,15 @@ void Editor::drawStatusBar() {
     if (ImGui::BeginMenuBar()) {
       int dofs = 0, nbody = int(doc_.bodies.size()) - 1;
       for (const Body& b : doc_.bodies) dofs += doc_.bodyDofs(b.id);
-      double mass = 0;
-      if (compiled_.ok && compiled_.model) mass = compiled_.model->body_subtreemass[0];
+      // Mass of the models only: static environment bodies have a mass in MuJoCo but it never matters.
+      double mass = report_.modelMass;
       ImGui::TextDisabled("%s", path_.empty() ? "unsaved project" : path_.c_str());
       ImGui::SameLine(0, 24);
       ImGui::Text("%d bodies  %zu geoms  %d DoF  %zu actuators  %zu sensors", nbody, doc_.geoms.size(), dofs,
                   doc_.actuators.size(), doc_.sensors.size());
       if (mass > 0) {
         ImGui::SameLine(0, 24);
-        ImGui::Text("mass %.3g kg", mass);
+        ImGui::Text("model mass %.3g kg", mass);
       }
       if (compiled_.ok && compiledRevision_ == editRevision_) {
         ImGui::SameLine(0, 24);
@@ -838,10 +855,14 @@ void Editor::handleShortcuts() {
   if (ctrl) return;
   // Single-key shortcuts only when the mouse is not over a text field.
   if (pressed(ImGuiKey_Delete) || (pressed(ImGuiKey_Backspace) && !io.WantCaptureKeyboard)) deleteSelection();
-  if (pressed(ImGuiKey_Escape)) sel_.clear();
+  if (pressed(ImGuiKey_Escape)) {
+    if (limbTool_) limbTool_ = false;
+    else sel_.clear();
+  }
   if (io.WantCaptureKeyboard && !vp_.hovered) return;
   if (pressed(ImGuiKey_Space)) shift ? stopSimulation() : toggleSimulation();
   if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) && sim_.active() && sim_.paused()) stepSimulation();
+  if (pressed(ImGuiKey_G)) limbTool_ = !limbTool_;
   if (pressed(ImGuiKey_Q)) gizmoOp_ = GizmoOp::Select;
   if (pressed(ImGuiKey_W)) gizmoOp_ = GizmoOp::Translate;
   if (pressed(ImGuiKey_E)) gizmoOp_ = GizmoOp::Rotate;
@@ -1169,6 +1190,19 @@ void Editor::addActuatorsFor(const std::vector<Id>& joints, ActuatorType type) {
   }
   if (!made.empty()) sel_.ids = made;
   notify("Added " + std::to_string(made.size()) + " " + toXml(type) + " actuator(s)", pal::kOk, 2);
+}
+
+Id Editor::addGeneratedEnvironment(const std::string& type) {
+  checkpoint("Add environment");
+  // In front of the models (+X is "forward" for the templates), or at the view center.
+  Vec3 origin = groundPointUnderCamera(vp_.cam);
+  Aabb models = modelsBounds(doc_);
+  bool centered = type == "rough" || type == "waves" || type == "arena" || type == "obstacles";
+  if (models.valid()) origin = centered ? Vec3{models.center().x, models.center().y, 0}
+                                        : Vec3{models.hi.x + 0.4, models.center().y, 0};
+  Id b = addGenerated(doc_, type, origin);
+  if (b) sel_.set(b);
+  return b;
 }
 
 Id Editor::addEnvironmentProp(GeomType type, bool dynamic) {

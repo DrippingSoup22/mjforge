@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
+#include "core/Generators.h"
 #include "core/Geometry.h"
 #include "core/Kinematics.h"
 #include "core/Ops.h"
@@ -130,6 +131,45 @@ void Editor::inspectBody(Body& b) {
   nameHeader(*this, b.id, Icon::Body, pal::kBody, "Body", b.name);
   auto poses = computeBodyPoses(doc_);
   if (!props::begin("##body")) return;
+  if (const GeneratorInfo* gi = findGenerator(b.generator)) {
+    std::string title = std::string("Generator: ") + gi->label;
+    if (props::section(title.c_str())) {
+      bool regen = false;
+      b.genParams.resize(gi->params.size());
+      for (size_t i = 0; i < gi->params.size(); ++i) {
+        const GenParam& p = gi->params[i];
+        if (p.integer) {
+          int v = int(std::lround(b.genParams[i]));
+          if (props::integer(p.label, &v, int(p.def), O(p.tip, p.unit, p.speed, p.min, p.max))) {
+            b.genParams[i] = v;
+            regen = true;
+          }
+        } else if (props::real(p.label, &b.genParams[i], p.def, O(p.tip, p.unit, p.speed, p.min, p.max, "%.4g"))) {
+          regen = true;
+        }
+      }
+      if (regen) regenerate(doc_, b.id);
+      props::end();
+      for (size_t i = 0; i < gi->params.size(); ++i)
+        if (std::string(gi->params[i].key) == "seed") {
+          if (ImGui::Button("New random seed")) {
+            checkpoint("New seed");
+            b.genParams[i] = double((int(b.genParams[i]) * 7919 + 17) % 100000);
+            regenerate(doc_, b.id);
+          }
+          ImGui::SameLine();
+        }
+      if (ImGui::Button("Bake")) {
+        checkpoint("Bake generator");
+        b.generator.clear();
+        b.genParams.clear();
+        notify("The generated geometry is now ordinary geoms you can edit one by one", pal::kTextDim, 3);
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Detach the generator: keep the geoms as they are and edit them individually.");
+      if (!props::begin("##body2")) return;
+    }
+  }
   if (props::section("Transform (relative to parent)")) {
     if (props::vec3("Position", &b.pos, {}, O(D("body.pos"), "m", 0.005))) applyToSelected<Body>([&](Body& o) { o.pos = b.pos; });
     if (props::orientation("Orientation", &b.quat, "Euler angles XYZ (intrinsic, MuJoCo's default sequence), shown in degrees. Stored and exported as a quaternion."))
@@ -145,6 +185,8 @@ void Editor::inspectBody(Body& b) {
     }
   }
   if (props::section("Mass & inertia")) {
+    if (!movesInSimulation(b.id))
+      props::info("Static", "%s", "welded to the world: its mass has no effect on the simulation");
     MassProps mp = bodyMassProps(doc_, poses, b.id);
     MassProps st = subtreeMassProps(doc_, poses, b.id);
     props::info("Body mass", "%.4g kg", mp.mass);

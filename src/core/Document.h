@@ -58,6 +58,8 @@ struct Body {
   bool hidden = false;
   bool locked = false;
   bool expanded = true;     // outliner state
+  std::string generator;          // procedural environment piece (see Generators.h), "" if none
+  std::vector<double> genParams;  // its parameters
 };
 
 struct Geom {
