@@ -67,13 +67,21 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
     else if (a == "--action") { if (!(v = need(i, "--action"))) return false; o.actions.push_back(v); }
     else if (a == "--size") {
       if (!(v = need(i, "--size"))) return false;
-      if (std::sscanf(v, "%dx%d", &o.width, &o.height) != 2) { error = "Bad --size, expected WxH"; return false; }
+      if (std::sscanf(v, "%dx%d", &o.width, &o.height) != 2 || o.width < 64 || o.height < 64 || o.width > 16384 ||
+          o.height > 16384) {
+        error = "Bad --size, expected WxH between 64 and 16384";
+        return false;
+      }
     } else if (!a.empty() && a[0] == '-') {
       error = "Unknown option: " + a;
       return false;
     } else {
       o.input = a;
     }
+  }
+  if (o.angle != "radian" && o.angle != "degree") {
+    error = "Bad --angle: " + o.angle + " (radian or degree)";
+    return false;
   }
   if (o.scope != "all" && o.scope != "models" && o.scope != "environment" && o.scope != "split") {
     error = "Bad --scope: " + o.scope;
