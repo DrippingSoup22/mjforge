@@ -10,6 +10,7 @@
 #include <map>
 #include <unordered_map>
 
+#include "core/Kinematics.h"
 #include "sim/MujocoBridge.h"
 
 namespace fs = std::filesystem;
@@ -96,6 +97,14 @@ std::string validUtf8(const std::string& s) {
 std::string objName(const mjModel* m, mjtObj type, int id) {
   const char* n = mj_id2name(m, type, id);
   return n ? validUtf8(n) : "";
+}
+
+// Whether compiled values differ from the authored ones: MuJoCo scales the contents of a scaled
+// <frame> at compile time while the spec keeps what was written.
+bool scaledOnCompile(const double* authored, const mjtNum* compiled, int n) {
+  for (int k = 0; k < n; ++k)
+    if (std::fabs(authored[k] - compiled[k]) > 1e-9 * std::max(1.0, std::fabs(authored[k]))) return true;
+  return false;
 }
 
 std::string specString(const mjString* s) {
@@ -208,6 +217,7 @@ class Builder {
     equalities();
     keyframes();
     roles();
+    matchMasses();
     unsupported();
     doc_.touch();
   }
@@ -317,7 +327,13 @@ class Builder {
       if (x.builtin == TextureBuiltin::None) {
         auto absolutePath = [&](const std::string& file) {
           fs::path p = fs::u8path(file);
-          if (p.is_relative()) p = fs::u8path(baseDir_) / specString(spec_->compiler.texturedir) / p;
+          if (p.is_relative()) {
+            // Relative to the file that defined the texture: an attached model may sit in another folder.
+            const mjSpec* origin = mjs_getOriginSpec(t->element);
+            const mjsCompiler* comp = mjs_getCompiler(t->element);
+            std::string dir = origin ? specString(origin->modelfiledir) : "";
+            p = fs::u8path(dir.empty() ? baseDir_ : dir) / specString((comp ? *comp : spec_->compiler).texturedir) / p;
+          }
           std::error_code ec;
           fs::path abs = fs::absolute(p, ec);  // exports can be written anywhere
           return (ec ? p : abs).lexically_normal().u8string();
@@ -327,6 +343,9 @@ class Builder {
         std::string file = specString(t->file);
         if (!file.empty()) {
           x.file = absolutePath(file);
+          std::error_code ec;
+          if (!fs::is_regular_file(fs::u8path(x.file), ec))
+            note("Texture '" + x.name + "': image " + x.file + " not found; it exports as a flat color until the file exists");
           x.gridsize[0] = std::max(1, t->gridsize[0]);
           x.gridsize[1] = std::max(1, t->gridsize[1]);
           size_t n = 0;
@@ -411,7 +430,7 @@ class Builder {
       x.mocap = m_->body_mocapid[b] >= 0;
       x.gravcomp = m_->body_gravcomp[b];
       x.sleep = sleep[b];
-      if (explicitInertial[b] && m_->body_mass[b] > 0) {
+      if (explicitInertial[b]) {  // zero mass included: legal on bodies that don't move
         x.hasInertial = true;
         x.mass = m_->body_mass[b];
         x.ipos = v3(m_->body_ipos + 3 * b);
@@ -619,7 +638,7 @@ class Builder {
       if (id < na) specs[id] = mjs_asActuator(el);
     });
     actIds_.assign(na, kNoId);
-    int skipped = 0, nonlinear = 0, plugins = 0;
+    int skipped = 0, nonlinear = 0, plugins = 0, scaled = 0;
     for (int i = 0; i < na; ++i) {
       const mjsActuator* s = specs[i];
       if (m_->actuator_plugin[i] >= 0) {  // e.g. the PID plugin: its force law cannot be represented
@@ -741,13 +760,55 @@ class Builder {
           }
           break;
       }
+      // A scaled frame around the target scales the gains at compile time: take MuJoCo's.
+      if (s->type != mjACTUATOR_MUSCLE && scaledOnCompile(g, m_->actuator_gainprm + mjNGAIN * i, 1)) {
+        compiledGains(x, i);
+        ++scaled;
+      }
       actIds_[i] = x.id;
       doc_.actuators.push_back(x);
     }
+    if (scaled) note(std::to_string(scaled) + " actuator(s) take MuJoCo's gains, scaled by a frame around their target");
     if (skipped)
       note(std::to_string(skipped) + " actuator(s) of types the editor does not support (DC motor, PID, orientation) were not imported");
     if (nonlinear) note(std::to_string(nonlinear) + " nonlinear actuator damping term(s) were dropped (linear terms kept)");
     if (plugins) note(std::to_string(plugins) + " plugin actuator(s) (such as the PID plugin) were not imported");
+  }
+
+  // The actuator's compiled parameters (frame scaling and damping ratios already applied).
+  void compiledGains(Actuator& x, int i) const {
+    const mjtNum* g = m_->actuator_gainprm + mjNGAIN * i;
+    const mjtNum* b = m_->actuator_biasprm + mjNBIAS * i;
+    const mjtNum* d = m_->actuator_dynprm + mjNDYN * i;
+    switch (x.type) {
+      case ActuatorType::Position:
+      case ActuatorType::IntVelocity:
+        x.kp = g[0];
+        x.kv = 0.0 - b[2];
+        x.dampratio = 0;
+        if (x.timeconst > 0) x.timeconst = d[0];
+        return;
+      case ActuatorType::Velocity: x.kv = g[0]; return;
+      case ActuatorType::Damper: x.kv = 0.0 - g[2]; return;
+      case ActuatorType::Cylinder:
+        x.area = g[0];
+        x.diameter = 0;
+        x.cylBias = {b[0], b[1], b[2]};
+        x.cylTimeconst = d[0];
+        return;
+      case ActuatorType::Adhesion: x.adhesionGain = g[0]; return;
+      default:
+        x.type = ActuatorType::General;
+        x.dyntype = DynType(std::min<int>(m_->actuator_dyntype[i], int(DynType::Muscle)));
+        x.gaintype = GainType(std::min<int>(m_->actuator_gaintype[i], int(GainType::Muscle)));
+        x.biastype = BiasType(std::min<int>(m_->actuator_biastype[i], int(BiasType::Muscle)));
+        for (int k = 0; k < 10; ++k) {
+          x.dynprm[k] = d[k];
+          x.gainprm[k] = g[k];
+          x.biasprm[k] = b[k];
+        }
+        return;
+    }
   }
 
   static bool generalFrom(Actuator& x, const mjsActuator* s) {
@@ -927,8 +988,11 @@ class Builder {
         if (m_->tendon_stiffnesspoly[mjNPOLY * i + k] != 0 || m_->tendon_dampingpoly[mjNPOLY * i + k] != 0) ++nonlinear;
       x.frictionloss = m_->tendon_frictionloss[i];
       x.armature = m_->tendon_armature[i];
-      // The authored spring length (-1: measured at the reference pose), not the compiled one.
+      // The authored spring length (-1: measured at the reference pose), not the compiled one, unless
+      // a scaled frame changed it.
       x.springlength = specs[i] ? Vec2{specs[i]->springlength[0], specs[i]->springlength[1]} : v2(m_->tendon_lengthspring + 2 * i);
+      if (specs[i] && x.springlength.x >= 0 && scaledOnCompile(specs[i]->springlength, m_->tendon_lengthspring + 2 * i, 1))
+        x.springlength = v2(m_->tendon_lengthspring + 2 * i);
       x.margin = m_->tendon_margin[i];
       x.solreflimit = v2(m_->tendon_solref_lim + mjNREF * i);
       x.solimplimit = v5(m_->tendon_solimp_lim + mjNIMP * i);
@@ -971,12 +1035,12 @@ class Builder {
     forEachSpec(spec_, mjOBJ_EQUALITY, [&](mjsElement* el, int id) {
       if (id < m_->neq) specs[id] = mjs_asEquality(el);
     });
-    int skipped = 0;
+    int flex = 0, missing = 0;
     for (int i = 0; i < m_->neq; ++i) {
       const mjsEquality* s = specs[i];
       int type = m_->eq_type[i];
       if (!s || type > mjEQ_TENDON) {  // flex constraints are not supported
-        ++skipped;
+        ++flex;
         continue;
       }
       Equality x;
@@ -985,18 +1049,21 @@ class Builder {
       x.type = EqualityType(type);
       int o1 = m_->eq_obj1id[i], o2 = m_->eq_obj2id[i];
       int ot = m_->eq_objtype[i];
-      auto obj = [&](int id) -> Id {
+      auto obj = [&](int id, bool first) -> Id {
         if (id < 0) return kNoId;
         switch (x.type) {
           case EqualityType::Connect:
-          case EqualityType::Weld: return ot == mjOBJ_SITE ? objectId(mjOBJ_SITE, id) : (id == 0 ? kNoId : objectId(mjOBJ_BODY, id));
+          case EqualityType::Weld:
+            if (ot == mjOBJ_SITE) return objectId(mjOBJ_SITE, id);
+            if (id == 0) return first ? kWorldId : kNoId;  // an empty body2 means the world
+            return objectId(mjOBJ_BODY, id);
           case EqualityType::Joint: return objectId(mjOBJ_JOINT, id);
           case EqualityType::Tendon: return objectId(mjOBJ_TENDON, id);
         }
         return kNoId;
       };
-      x.obj1 = obj(o1);
-      x.obj2 = obj(o2);
+      x.obj1 = obj(o1, true);
+      x.obj2 = obj(o2, false);
       // Authored values (the compiled data holds derived ones, e.g. the weld pose from qpos0).
       const double* d = s->data;
       switch (x.type) {
@@ -1011,16 +1078,33 @@ class Builder {
         case EqualityType::Joint:
         case EqualityType::Tendon: x.polycoef = Vec5{{d[0], d[1], d[2], d[3], d[4]}}; break;
       }
+      // Scaled frames: the compiled anchors and couplings are the real ones.
+      const mjtNum* cd = m_->eq_data + mjNEQDATA * i;
+      switch (x.type) {
+        case EqualityType::Connect:
+          if (scaledOnCompile(d, cd, 3)) x.anchor = v3(cd);
+          break;
+        case EqualityType::Weld:
+          if (scaledOnCompile(d, cd, 3)) x.anchor = v3(cd);
+          if (x.relpose && scaledOnCompile(d + 3, cd + 3, 3)) x.relpos = v3(cd + 3);
+          if (scaledOnCompile(d + 10, cd + 10, 1)) x.torquescale = cd[10];
+          break;
+        case EqualityType::Joint:
+        case EqualityType::Tendon:
+          if (scaledOnCompile(d, cd, 5)) x.polycoef = Vec5{{cd[0], cd[1], cd[2], cd[3], cd[4]}};
+          break;
+      }
       x.active = m_->eq_active0[i];
       x.solref = v2(m_->eq_solref + mjNREF * i);
       x.solimp = v5(m_->eq_solimp + mjNIMP * i);
       if (!x.obj1) {
-        ++skipped;
+        ++missing;
         continue;
       }
       doc_.equalities.push_back(x);
     }
-    if (skipped) note(std::to_string(skipped) + " equality constraint(s) of unsupported types (flex) were not imported");
+    if (flex) note(std::to_string(flex) + " flex equality constraint(s) were not imported (flex objects are not supported)");
+    if (missing) note(std::to_string(missing) + " equality constraint(s) on objects that were not imported were dropped");
   }
 
   void excludes() {
@@ -1059,6 +1143,22 @@ class Builder {
         if (!actIds_[i] || m_->actuator_ctrlnum[i] != 1) continue;
         double c = m_->key_ctrl[k * m_->nu + m_->actuator_ctrladr[i]];
         if (c != 0) x.ctrl.push_back({actIds_[i], c});
+        if (m_->actuator_actnum[i] == 1) {
+          double a = m_->key_act[k * m_->na + m_->actuator_actadr[i]];
+          if (a != 0) x.act.push_back({actIds_[i], a});
+        }
+      }
+      for (int b = 1; b < m_->nbody; ++b) {
+        int mid = m_->body_mocapid[b];
+        if (mid < 0) continue;
+        const mjtNum* p = m_->key_mpos + 3 * (size_t(k) * m_->nmocap + mid);
+        const mjtNum* q = m_->key_mquat + 4 * (size_t(k) * m_->nmocap + mid);
+        Pose pose{v3(p), normalize(q4(q))};
+        const Body* body = doc_.body(bodyIds_[b]);
+        if (!body) continue;
+        const Quat& bq = body->quat;
+        double same = std::fabs(pose.quat.w * bq.w + pose.quat.x * bq.x + pose.quat.y * bq.y + pose.quat.z * bq.z);
+        if (length(pose.pos - body->pos) > 1e-12 || same < 1 - 1e-12) x.mocap.push_back({bodyIds_[b], pose});
       }
       doc_.keyframes.push_back(std::move(x));
     }
@@ -1075,6 +1175,63 @@ class Builder {
       if (m_->body_parentid[b] != 0) continue;
       if (Body* x = doc_.body(bodyIds_[b])) x->role = moving[b] && m_->body_mocapid[b] < 0 ? Role::Model : Role::Environment;
     }
+  }
+
+  // Every body gets MuJoCo's mass: settotalmass (deprecated in MuJoCo 3.16) is baked into the
+  // authored masses, and bodies whose geoms would not give MuJoCo's values (a scaled frame,
+  // inertiagrouprange, ...) keep the compiled inertia as an explicit inertial.
+  void matchMasses() {
+    std::vector<Pose> poses = computeBodyPoses(doc_);
+    auto inferred = [&](int b) {
+      const Body* x = doc_.body(bodyIds_[b]);
+      return x && !x->hasInertial ? x : nullptr;
+    };
+    if (doc_.compiler.settotalmass > 0) {
+      double compiled = 0, authored = 0;
+      for (int b = 1; b < m_->nbody; ++b)
+        if (const Body* x = inferred(b)) {
+          compiled += m_->body_mass[b];
+          authored += bodyMassProps(doc_, poses, x->id).mass;
+        }
+      double s = authored > 0 && compiled > 0 ? compiled / authored : 1.0;
+      for (Geom& g : doc_.geoms) {
+        const Body* x = doc_.body(g.body);
+        if (!x || x->hasInertial) continue;
+        if (g.mass >= 0) g.mass *= s;
+        else g.density *= s;
+      }
+      doc_.compiler.boundmass *= s;
+      doc_.compiler.boundinertia *= s;
+      doc_.compiler.settotalmass = -1;
+      note("compiler settotalmass (deprecated in MuJoCo 3.16) was baked into the masses and densities");
+    }
+    int kept = 0;
+    for (int b = 1; b < m_->nbody; ++b) {
+      Body* x = doc_.body(bodyIds_[b]);
+      if (!x || x->hasInertial) continue;
+      MassProps est = bodyMassProps(doc_, poses, x->id);
+      Vec3 ipos = v3(m_->body_ipos + 3 * b), diag = v3(m_->body_inertia + 3 * b);
+      Quat iquat = q4(m_->body_iquat + 4 * b);
+      double m = m_->body_mass[b];
+      Pose ip = poses[size_t(doc_.bodyIndex(x->id))] * Pose{ipos, iquat};
+      Mat3 R = toMat3(ip.quat);
+      Mat3 I = R * Mat3::diag(diag) * R.transposed();
+      double scale = std::max({diag.x + diag.y + diag.z, std::fabs(est.inertia(0, 0) + est.inertia(1, 1) + est.inertia(2, 2)), 1e-12});
+      bool same = std::fabs(est.mass - m) <= 1e-6 * std::max(m, 1e-12) &&
+                  (m <= 0 || length(est.com - ip.pos) <= 1e-6 * (1 + length(ip.pos)));
+      for (int r = 0; r < 3 && same; ++r)
+        for (int c = 0; c < 3 && same; ++c) same = std::fabs(est.inertia(r, c) - I(r, c)) <= 1e-6 * scale;
+      if (same) continue;
+      x->hasInertial = true;
+      x->mass = m;
+      x->ipos = ipos;
+      x->iquat = iquat;
+      x->diaginertia = diag;
+      ++kept;
+    }
+    if (kept)
+      note(std::to_string(kept) + " bodies keep MuJoCo's compiled mass and inertia: their geoms alone would weigh "
+           "differently (a scaled frame, inertiagrouprange or another compiler setting)");
   }
 
   void unsupported() {

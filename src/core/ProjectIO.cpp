@@ -440,13 +440,18 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
     json o;
     o["name"] = k.name;
     o["time"] = k.time;
-    json q = json::array(), v = json::array(), c = json::array();
+    json q = json::array(), v = json::array(), c = json::array(), a = json::array(), mo = json::array();
     for (const auto& [id, vals] : k.qpos) q.push_back({id, vals});
     for (const auto& [id, vals] : k.qvel) v.push_back({id, vals});
     for (const auto& [id, val] : k.ctrl) c.push_back({id, val});
+    for (const auto& [id, val] : k.act) a.push_back({id, val});
+    for (const auto& [id, p] : k.mocap)
+      mo.push_back({id, std::vector<double>{p.pos.x, p.pos.y, p.pos.z, p.quat.w, p.quat.x, p.quat.y, p.quat.z}});
     o["qpos"] = q;
     o["qvel"] = v;
     o["ctrl"] = c;
+    if (!a.empty()) o["act"] = a;
+    if (!mo.empty()) o["mocap"] = mo;
     keys.push_back(o);
   }
   root["keyframes"] = keys;
@@ -553,6 +558,11 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         pairs("qpos", k.qpos);
         pairs("qvel", k.qvel);
         pairs("ctrl", k.ctrl);
+        pairs("act", k.act);
+        std::vector<std::pair<Id, std::vector<double>>> mocap;
+        pairs("mocap", mocap);
+        for (const auto& [id, v] : mocap)
+          if (v.size() == 7) k.mocap.push_back({id, Pose{{v[0], v[1], v[2]}, normalize(Quat{v[3], v[4], v[5], v[6]})}});
         doc.keyframes.push_back(std::move(k));
       }
     }

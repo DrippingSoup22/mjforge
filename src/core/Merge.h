@@ -13,7 +13,8 @@ struct MergeOptions {
   bool models = true;               // top-level bodies with role Model, with their actuators/sensors
   bool environment = true;          // world geoms/sites/lights/cameras, environment bodies, skybox
   bool replaceEnvironment = false;  // remove the destination's environment first
-  bool settings = false;            // take simulation/compiler/visual settings from the source
+  bool settings = false;            // take the simulation and visual settings from the source (the
+                                    // compiler's mass settings stay: imported bodies keep their masses)
   Vec3 modelOffset;                 // added to the positions of imported model roots (world frame)
 };
 

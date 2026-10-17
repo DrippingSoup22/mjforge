@@ -448,6 +448,8 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
     drop(k.qpos);
     drop(k.qvel);
     drop(k.ctrl);
+    drop(k.act);
+    drop(k.mocap);
   }
   doc.touch();
 }
@@ -718,6 +720,8 @@ CopyResult copyElements(Document& doc, const std::vector<Id>& ids, const RenameF
     copyEntries(k.qpos);
     copyEntries(k.qvel);
     copyEntries(k.ctrl);
+    copyEntries(k.act);
+    copyEntries(k.mocap);
   }
   doc.touch();
   return r;
@@ -733,13 +737,16 @@ std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3&
       Body* b = doc.body(top);
       Pose parentWorld = bodyWorldPose(doc, b->parent);
       b->pos += rotate(conj(parentWorld.quat), worldOffset);
-      // Free bodies: keyframe positions are world positions, shift them too.
+      // Free and mocap bodies: keyframe positions are world positions, shift them too.
       for (const Joint& j : doc.joints)
         if (j.body == top && j.type == JointType::Free)
           for (Keyframe& key : doc.keyframes)
             for (auto& [jid, q] : key.qpos)
               if (jid == j.id && q.size() == 7)
                 for (int i = 0; i < 3; ++i) q[i] += worldOffset[i];
+      for (Keyframe& key : doc.keyframes)
+        for (auto& [bid, p] : key.mocap)
+          if (bid == top) p.pos += worldOffset;
     } else {
       Id owner = doc.ownerBody(top);
       Pose ownerWorld = bodyWorldPose(doc, owner);
@@ -778,6 +785,9 @@ std::vector<Id> arrayDuplicate(Document& doc, Id element, int copies, const Pose
                 Pose p = delta * Pose{{q[0], q[1], q[2]}, normalize(Quat{q[3], q[4], q[5], q[6]})};
                 q = {p.pos.x, p.pos.y, p.pos.z, p.quat.w, p.quat.x, p.quat.y, p.quat.z};
               }
+      for (Keyframe& key : doc.keyframes)
+        for (auto& [bid, p] : key.mocap)
+          if (bid == r.tops[0]) p = delta * p;
     }
   }
   doc.touch();
@@ -976,19 +986,30 @@ void setKeyJointQpos(Keyframe& key, Id joint, std::vector<double> qpos) {
 }
 
 void syncKeyframeControls(const Document& doc, Keyframe& key) {
+  auto set = [](std::vector<std::pair<Id, double>>& v, Id id, double x) {
+    for (auto& e : v)
+      if (e.first == id) {
+        e.second = x;
+        return;
+      }
+    v.emplace_back(id, x);
+  };
   for (const Actuator& a : doc.actuators) {
-    if (a.type != ActuatorType::Position || a.trn != TrnType::Joint) continue;
+    bool intvel = a.type == ActuatorType::IntVelocity;
+    if ((a.type != ActuatorType::Position && !intvel) || a.trn != TrnType::Joint) continue;
     const Joint* j = doc.joint(a.target);
     if (!j || (j->type != JointType::Hinge && j->type != JointType::Slide)) continue;
-    double c = a.gear[0] * keyJointValue(&key, *j);
-    if (a.ctrllimited && a.ctrlrange.y > a.ctrlrange.x) c = std::clamp(c, a.ctrlrange.x, a.ctrlrange.y);
-    bool found = false;
-    for (auto& e : key.ctrl)
-      if (e.first == a.id) {
-        e.second = c;
-        found = true;
-      }
-    if (!found) key.ctrl.emplace_back(a.id, c);
+    double target = a.gear[0] * keyJointValue(&key, *j);
+    if (intvel) {
+      // The activation is the target position; the control (a speed) rests at zero.
+      if (a.actlimited && a.actrange.y > a.actrange.x) target = std::clamp(target, a.actrange.x, a.actrange.y);
+      set(key.act, a.id, target);
+      set(key.ctrl, a.id, 0.0);
+      continue;
+    }
+    if (a.ctrllimited && a.ctrlrange.y > a.ctrlrange.x) target = std::clamp(target, a.ctrlrange.x, a.ctrlrange.y);
+    set(key.ctrl, a.id, target);
+    if (actuatorHasActivation(a)) set(key.act, a.id, target);  // a filtered target starts settled
   }
 }
 
@@ -1264,6 +1285,9 @@ Id mirrorSubtree(Document& doc, Id body, int axis) {
         q = {p.x, p.y, p.z, m.w, m.x, m.y, m.z};
       }
     }
+  for (Keyframe& key : doc.keyframes)
+    for (auto& [bid, p] : key.mocap)
+      if (newIds.count(bid)) p = {M(p.pos), Mq(p.quat)};
   doc.touch();
   return r.tops.front();
 }

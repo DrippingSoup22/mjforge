@@ -1121,9 +1121,10 @@ void Editor::inspectEquality(Equality& e) {
           props::element("Site 1", &e.obj1, listDisplay(doc_, doc_.sites), false, D(k1.c_str()));
           props::element("Site 2", &e.obj2, listDisplay(doc_, doc_.sites), false, D(k2.c_str()));
         } else {
-          std::vector<std::pair<Id, std::string>> bodies;
+          std::vector<std::pair<Id, std::string>> bodies, bodies1{{kWorldId, "world"}};
           for (const Body& b : doc_.bodies) if (b.id != kWorldId) bodies.push_back({b.id, doc_.displayName(b.id)});
-          props::element("Body 1", &e.obj1, bodies, false, D(k1.c_str()));
+          bodies1.insert(bodies1.end(), bodies.begin(), bodies.end());
+          props::element("Body 1", &e.obj1, bodies1, false, D(k1.c_str()));
           props::element("Body 2", &e.obj2, bodies, true, "Leave empty (none) for the world.");
           std::string ka = std::string(key) + "anchor";
           props::vec3(e.type == EqualityType::Connect ? "Anchor (body 1)" : "Anchor (body 2)", &e.anchor, {},

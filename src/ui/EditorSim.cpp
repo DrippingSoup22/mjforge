@@ -218,10 +218,19 @@ void Editor::captureKeyframe() {
     const mjtNum* q = d->qpos + m->jnt_qposadr[j];
     k.qpos.push_back({map.joints[j], std::vector<double>(q, q + nq)});
   }
-  // Position servos aim at the captured pose.
-  for (int i = 0; i < m->nu && i < int(map.actuators.size()); ++i)
-    if (sim_.drive(i).kind == ActuatorDrive::Position && doc_.actuator(map.actuators[i]))
-      k.ctrl.push_back({map.actuators[i], d->actuator_length[i]});
+  // Position servos aim at the captured pose; filters and integrators keep their state.
+  for (int i = 0; i < m->nu && i < int(map.actuators.size()); ++i) {
+    if (!doc_.actuator(map.actuators[i])) continue;
+    if (sim_.drive(i).kind == ActuatorDrive::Position) k.ctrl.push_back({map.actuators[i], d->actuator_length[i]});
+    if (m->actuator_actnum[i] == 1) k.act.push_back({map.actuators[i], d->act[m->actuator_actadr[i]]});
+  }
+  for (int b = 1; b < m->nbody && b < int(map.bodies.size()); ++b) {
+    int mid = m->body_mocapid[b];
+    if (mid < 0 || !doc_.body(map.bodies[b])) continue;
+    const mjtNum* p = d->mocap_pos + 3 * mid;
+    const mjtNum* q = d->mocap_quat + 4 * mid;
+    k.mocap.push_back({map.bodies[b], Pose{{p[0], p[1], p[2]}, normalize(Quat{q[0], q[1], q[2], q[3]})}});
+  }
   checkpoint("Save keyframe");
   doc_.keyframes.insert(doc_.keyframes.begin(), k);
   notify("Saved '" + k.name + "' as the start pose (Scene panel lists keyframes)", pal::kOk, 4);

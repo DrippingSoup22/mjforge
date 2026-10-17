@@ -6,25 +6,41 @@
 #include <unordered_set>
 
 #include "core/Kinematics.h"
+#include "core/MjcfWriter.h"
 #include "core/Ops.h"
+#include "sim/MujocoBridge.h"
 
 namespace mjf {
 
 namespace {
 
-bool isFloor(const Geom& g) { return g.body == kWorldId && g.type == GeomType::Plane; }
+// A floor: an upward-facing plane of the world (walls and ceilings are not).
+bool isFloor(const Geom& g) { return g.body == kWorldId && g.type == GeomType::Plane && rotate(g.quat, {0, 0, 1}).z > 0.999; }
+
+bool sameTexture(const Texture& a, const Texture& b) {
+  return a.type == b.type && a.builtin == b.builtin && a.rgb1 == b.rgb1 && a.rgb2 == b.rgb2 && a.mark == b.mark &&
+         a.markrgb == b.markrgb && a.width == b.width && a.height == b.height && a.file == b.file &&
+         a.random == b.random && a.gridsize[0] == b.gridsize[0] && a.gridsize[1] == b.gridsize[1] &&
+         a.gridlayout == b.gridlayout && a.hflip == b.hflip && a.vflip == b.vflip;
+}
 
 bool sameMaterial(const Material& a, const Material& b, const Document& da, const Document& db) {
   const Texture* ta = da.texture(a.texture);
   const Texture* tb = db.texture(b.texture);
-  bool texSame = (!ta && !tb) || (ta && tb && ta->name == tb->name);
+  bool texSame = (!ta && !tb) || (ta && tb && sameTexture(*ta, *tb));
   return a.rgba == b.rgba && a.texrepeat == b.texrepeat && a.texuniform == b.texuniform && a.emission == b.emission &&
          a.specular == b.specular && a.shininess == b.shininess && a.reflectance == b.reflectance && texSame;
 }
 
-bool sameTexture(const Texture& a, const Texture& b) {
-  return a.type == b.type && a.builtin == b.builtin && a.rgb1 == b.rgb1 && a.rgb2 == b.rgb2 && a.mark == b.mark &&
-         a.markrgb == b.markrgb && a.width == b.width && a.height == b.height && a.file == b.file;
+template <class T>
+bool sameData(const std::shared_ptr<const std::vector<T>>& a, const std::shared_ptr<const std::vector<T>>& b) {
+  return a == b || (a && b && *a == *b);
+}
+
+// Settings that decide the mass of bodies without an explicit inertial.
+bool sameMassSettings(const CompilerSettings& a, const CompilerSettings& b) {
+  return a.inertiafromgeom == b.inertiafromgeom && a.boundmass == b.boundmass && a.boundinertia == b.boundinertia &&
+         a.settotalmass == b.settotalmass && a.balanceinertia == b.balanceinertia;
 }
 
 class Merger {
@@ -38,14 +54,18 @@ class Merger {
     copyAttached();
     copyDependents();
     copyKeyframes();
+    keepMasses();
     if (opt_.environment) copySkybox();
     if (opt_.settings) {
+      // The compiler's mass settings stay: they would re-weigh the models already here (the imported
+      // bodies keep their own masses, see keepMasses).
       dst_.option = src_.option;
-      dst_.compiler = src_.compiler;
+      dst_.compiler.autolimits = src_.compiler.autolimits;
       dst_.visual = src_.visual;
     }
     for (Id root : res_.modelRoots)
       if (Body* b = dst_.body(root)) b->pos += opt_.modelOffset;
+    offsetWorldTies();
     dst_.touch();
     return res_;
   }
@@ -55,6 +75,8 @@ class Merger {
   void removeEnvironment() {
     std::vector<Id> ids;
     for (const Geom& g : dst_.geoms) if (g.body == kWorldId) ids.push_back(g.id);
+    for (const Site& s : dst_.sites) if (s.body == kWorldId) ids.push_back(s.id);
+    for (const Camera& c : dst_.cameras) if (c.body == kWorldId) ids.push_back(c.id);
     for (const Light& l : dst_.lights) if (l.body == kWorldId) ids.push_back(l.id);
     for (const Body& b : dst_.bodies)
       if (b.id != kWorldId && b.parent == kWorldId && b.role == Role::Environment) ids.push_back(b.id);
@@ -74,16 +96,18 @@ class Merger {
     }
     for (Id top : topBodies_)
       for (Id b : src_.subtree(top)) bodies_.insert(b);
-    bool dstHasFloor = false;
-    for (const Geom& g : dst_.geoms) dstHasFloor |= isFloor(g);
+    Id dstFloor = kNoId;
+    for (const Geom& g : dst_.geoms)
+      if (isFloor(g) && !dstFloor) dstFloor = g.id;
     auto attachedSelected = [&](Id body) { return bodies_.count(body) > 0 || (body == kWorldId && opt_.environment); };
     for (const Geom& g : src_.geoms) {
-      if (!attachedSelected(g.body)) continue;
-      if (isFloor(g) && dstHasFloor) {
-        ++res_.skippedFloors;
+      if (isFloor(g) && dstFloor) {
+        // The scene has a floor already: what referred to this one (contact pairs, sensors) uses it.
+        remap_[g.id] = dstFloor;
+        if (attachedSelected(g.body)) ++res_.skippedFloors;
         continue;
       }
-      geoms_.push_back(&g);
+      if (attachedSelected(g.body)) geoms_.push_back(&g);
     }
     for (const Site& s : src_.sites) if (attachedSelected(s.body)) sites_.push_back(&s);
     for (const Camera& c : src_.cameras) if (attachedSelected(c.body)) cameras_.push_back(&c);
@@ -144,6 +168,9 @@ class Merger {
     if (Id h = map(srcId)) return h;
     const Hfield* sh = src_.hfield(srcId);
     if (!sh) return kNoId;
+    for (const Hfield& dh : dst_.hfields)
+      if (dh.nrow == sh->nrow && dh.ncol == sh->ncol && dh.size == sh->size && sameData(dh.data, sh->data))
+        return remap_[srcId] = dh.id;
     Hfield h = *sh;  // data is shared copy-on-write
     h.id = dst_.newId();
     h.name = name(Kind::Hfield, h.name);
@@ -161,7 +188,9 @@ class Merger {
     if (!sm) return kNoId;
     // The same mesh imported twice (e.g. two copies of one robot) is stored once.
     for (const MeshAsset& dm : dst_.meshes)
-      if (dm.vert == sm->vert && dm.face == sm->face) return remap_[srcId] = dm.id;
+      if (dm.inertia == sm->inertia && dm.maxhullvert == sm->maxhullvert && sameData(dm.vert, sm->vert) &&
+          sameData(dm.face, sm->face))
+        return remap_[srcId] = dm.id;
     MeshAsset m = *sm;  // vertex data is shared, never modified in place
     m.id = dst_.newId();
     m.name = name(Kind::Mesh, m.name);
@@ -230,6 +259,7 @@ class Merger {
       c.name = name(Kind::Camera, c.name);
       c.body = mapBody(sc->body);
       c.target = sc->target ? mapBody(sc->target) : kNoId;  // kept only if the target came along
+      if (!c.target && (c.mode == CameraMode::TargetBody || c.mode == CameraMode::TargetBodyCom)) c.mode = CameraMode::Fixed;
       remap_[sc->id] = c.id;
       dst_.cameras.push_back(c);
       ++res_.elements;
@@ -240,6 +270,7 @@ class Merger {
       l.name = name(Kind::Light, l.name);
       l.body = mapBody(sl->body);
       l.target = sl->target ? mapBody(sl->target) : kNoId;
+      if (!l.target && (l.mode == CameraMode::TargetBody || l.mode == CameraMode::TargetBodyCom)) l.mode = CameraMode::Fixed;
       remap_[sl->id] = l.id;
       dst_.lights.push_back(l);
       ++res_.elements;
@@ -329,45 +360,112 @@ class Merger {
       if (!ok || !e.obj1) continue;
       e.id = dst_.newId();
       e.name = name(Kind::Equality, e.name);
+      importedEqualities_.insert(e.id);
       dst_.equalities.push_back(e);
       ++res_.elements;
     }
     dst_.touch();
   }
 
-  // Keyframes are merged by name: the imported joints join the destination's keyframe of the same
-  // name (e.g. both have "home"), or a new keyframe is added.
+  // Keyframe 0 is the start state: the imported start pose joins the destination's keyframe 0
+  // whatever their names. Other keyframes join a destination keyframe of the same (non-empty)
+  // name or are added; two imported keyframes never share one.
   void copyKeyframes() {
-    for (const Keyframe& sk : src_.keyframes) {
+    std::vector<bool> taken(dst_.keyframes.size(), false);
+    auto isRoot = [&](Id body) { return std::find(res_.modelRoots.begin(), res_.modelRoots.end(), body) != res_.modelRoots.end(); };
+    for (size_t si = 0; si < src_.keyframes.size(); ++si) {
+      const Keyframe& sk = src_.keyframes[si];
       Keyframe add;
-      auto mapped = [&](const auto& from, auto& to, bool offset) {
-        for (const auto& [id, val] : from) {
-          Id m = map(id);
-          if (!m) continue;
-          to.push_back({m, val});
-          // Free joints of moved model roots: shift the keyframe position with the root.
-          if constexpr (std::is_same_v<std::decay_t<decltype(val)>, std::vector<double>>) {
-            const Joint* j = dst_.joint(m);
-            if (offset && j && j->type == JointType::Free && to.back().second.size() == 7 &&
-                std::find(res_.modelRoots.begin(), res_.modelRoots.end(), j->body) != res_.modelRoots.end())
-              for (int i = 0; i < 3; ++i) to.back().second[i] += opt_.modelOffset[i];
-          }
-        }
+      auto mapped = [&](const auto& from, auto& to) {
+        for (const auto& [id, val] : from)
+          if (Id m = map(id)) to.push_back({m, val});
       };
-      mapped(sk.qpos, add.qpos, true);
-      mapped(sk.qvel, add.qvel, false);
-      mapped(sk.ctrl, add.ctrl, false);
-      if (add.qpos.empty() && add.qvel.empty() && add.ctrl.empty()) continue;
-      Keyframe* target = nullptr;
-      for (Keyframe& dk : dst_.keyframes)
-        if (dk.name == sk.name) target = &dk;
-      if (!target) {
-        dst_.keyframes.push_back({sk.name, sk.time, {}, {}, {}});
-        target = &dst_.keyframes.back();
+      mapped(sk.qpos, add.qpos);
+      mapped(sk.qvel, add.qvel);
+      mapped(sk.ctrl, add.ctrl);
+      mapped(sk.act, add.act);
+      mapped(sk.mocap, add.mocap);
+      // Free joints and mocap bodies of moved model roots: their start poses move with the root.
+      for (auto& [id, q] : add.qpos) {
+        const Joint* j = dst_.joint(id);
+        if (j && j->type == JointType::Free && q.size() == 7 && isRoot(j->body))
+          for (int i = 0; i < 3; ++i) q[i] += opt_.modelOffset[i];
       }
-      target->qpos.insert(target->qpos.end(), add.qpos.begin(), add.qpos.end());
-      target->qvel.insert(target->qvel.end(), add.qvel.begin(), add.qvel.end());
-      target->ctrl.insert(target->ctrl.end(), add.ctrl.begin(), add.ctrl.end());
+      for (auto& [id, p] : add.mocap)
+        if (isRoot(id)) p.pos += opt_.modelOffset;
+      if (add.qpos.empty() && add.qvel.empty() && add.ctrl.empty() && add.act.empty() && add.mocap.empty()) continue;
+      int target = -1;
+      if (si == 0 && !taken.empty() && !taken[0]) target = 0;
+      for (size_t d = 0; target < 0 && !sk.name.empty() && d < dst_.keyframes.size(); ++d)
+        if (!taken[d] && dst_.keyframes[d].name == sk.name) target = int(d);
+      if (target < 0) {
+        Keyframe k;
+        k.name = sk.name;
+        k.time = sk.time;
+        for (int n = 2; !k.name.empty() && std::any_of(dst_.keyframes.begin(), dst_.keyframes.end(),
+                                                         [&](const Keyframe& x) { return x.name == k.name; });
+             ++n)
+          k.name = sk.name + "_" + std::to_string(n);
+        dst_.keyframes.push_back(std::move(k));
+        taken.push_back(false);
+        target = int(dst_.keyframes.size()) - 1;
+      }
+      taken[size_t(target)] = true;
+      Keyframe& t = dst_.keyframes[size_t(target)];
+      t.qpos.insert(t.qpos.end(), add.qpos.begin(), add.qpos.end());
+      t.qvel.insert(t.qvel.end(), add.qvel.begin(), add.qvel.end());
+      t.ctrl.insert(t.ctrl.end(), add.ctrl.begin(), add.ctrl.end());
+      t.act.insert(t.act.end(), add.act.begin(), add.act.end());
+      t.mocap.insert(t.mocap.end(), add.mocap.begin(), add.mocap.end());
+    }
+  }
+
+  // Imported bodies keep the masses they had in their own file: where the destination's compiler
+  // mass settings differ, MuJoCo's compiled inertia of the source becomes their explicit inertial.
+  void keepMasses() {
+    if (sameMassSettings(src_.compiler, dst_.compiler)) return;
+    ExportMap exported;
+    CompileResult cr = compileMjcf(writeMjcf(src_, {}, &exported));
+    cr.map = exported;
+    InertialTable table = compiledInertials(cr);
+    if (table.empty()) return;  // the source does not compile: nothing better to keep
+    for (const auto& [srcId, inertial] : table) {
+      Body* b = dst_.body(map(srcId));
+      if (!b) continue;
+      b->hasInertial = true;
+      b->mass = inertial.mass;
+      b->ipos = inertial.ipos;
+      b->iquat = inertial.iquat;
+      b->diaginertia = inertial.diaginertia;
+    }
+  }
+
+  // Constraints that hold an imported model to the world move with the model offset, so the scene
+  // is the source shifted as a whole: world anchors and world sites the model is tied to.
+  void offsetWorldTies() {
+    const Vec3& d = opt_.modelOffset;
+    if (length(d) == 0) return;
+    std::unordered_set<Id> moved;
+    for (Id root : res_.modelRoots)
+      for (Id b : dst_.subtree(root)) moved.insert(b);
+    for (Equality& e : dst_.equalities) {
+      if (!importedEqualities_.count(e.id) || (e.type != EqualityType::Weld && e.type != EqualityType::Connect)) continue;
+      if (dst_.kindOf(e.obj1) == Kind::Site) {
+        // Two sites: a world site tied to a moved model goes along.
+        Site* s1 = dst_.site(e.obj1);
+        Site* s2 = dst_.site(e.obj2);
+        if (s1 && s2 && moved.count(s1->body) && s2->body == kWorldId) s2->pos += d;
+        if (s1 && s2 && moved.count(s2->body) && s1->body == kWorldId) s1->pos += d;
+        continue;
+      }
+      bool worldSecond = e.obj2 == kNoId || e.obj2 == kWorldId;
+      if (e.type == EqualityType::Weld && moved.count(e.obj1) && worldSecond) {
+        e.anchor += d;  // a weld's anchor is in body2's frame, here the world's
+      } else if (e.obj1 == kWorldId && moved.count(e.obj2)) {
+        if (e.type == EqualityType::Connect) e.anchor += d;  // in body1's frame: the world's
+        else if (e.relpose) e.relpos += d;                   // body2's place in the world frame
+      }
+      // Other anchors are in a moved body's frame, or derived from the start pose.
     }
   }
 
@@ -390,11 +488,16 @@ class Merger {
   std::vector<const Light*> lights_;
   std::vector<const Joint*> joints_;
   std::unordered_map<Id, Id> remap_;
+  std::unordered_set<Id> importedEqualities_;
 };
 
 }  // namespace
 
 MergeResult mergeDocument(Document& dst, const Document& src, const MergeOptions& opt) {
+  if (&dst == &src) {  // the merger reads the source while it grows the destination
+    Document copy = src;
+    return Merger(dst, copy, opt).run();
+  }
   return Merger(dst, src, opt).run();
 }
 

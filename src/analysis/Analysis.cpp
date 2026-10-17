@@ -798,7 +798,9 @@ class Analyzer {
             ok = k2 == Kind::Site;
             why = "Site constraints need two sites.";
           } else {
-            ok = k1 == Kind::Body && e.obj1 != kWorldId && (e.obj2 == kNoId || k2 == Kind::Body) && e.obj1 != e.obj2;
+            // The world may be either body, but not both.
+            ok = k1 == Kind::Body && (e.obj2 == kNoId || k2 == Kind::Body) && e.obj1 != e.obj2 &&
+                 !(e.obj1 == kWorldId && (e.obj2 == kNoId || e.obj2 == kWorldId));
             why = "Pick two different bodies (the second may be left empty for the world), or two sites.";
           }
           break;

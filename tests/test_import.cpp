@@ -742,7 +742,13 @@ TEST_CASE("tendons, equality constraints and contact pairs: export, import, edit
   mergeDocument(scene, loaded, mo);
   CHECK(scene.tendons.size() == 2);
   CHECK(scene.equalities.size() == 3);
-  CHECK(scene.pairs.size() == 0);  // the floor was not imported, so the pair has no partner
+  // The scene's own floor stands in for the source's, so the foot's floor pair carries over.
+  REQUIRE(scene.pairs.size() == 1);
+  const Geom* partner = scene.geom(scene.pairs[0].geom2);
+  if (partner && partner->body != kWorldId) partner = scene.geom(scene.pairs[0].geom1);
+  REQUIRE(partner);
+  CHECK(partner->body == kWorldId);
+  CHECK(partner->type == GeomType::Plane);
   CompileResult cr4 = compileMjcf(writeMjcf(scene));
   INFO(cr4.error);
   REQUIRE(cr4.ok);

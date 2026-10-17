@@ -231,6 +231,9 @@ struct Actuator {
   Vec10 biasprm{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   bool actearly = false;
 };
+// Whether MuJoCo gives the actuator an activation state (a control filter or integrator, a muscle):
+// keyframes then hold its activation too.
+bool actuatorHasActivation(const Actuator& a);
 // MuJoCo's default kp/kv for each actuator shortcut.
 double actuatorDefaultKp(ActuatorType t);
 double actuatorDefaultKv(ActuatorType t);
@@ -404,6 +407,8 @@ struct Keyframe {
   std::vector<std::pair<Id, std::vector<double>>> qpos;  // joint -> 1 (hinge/slide), 4 (ball) or 7 (free) values
   std::vector<std::pair<Id, std::vector<double>>> qvel;  // joint -> 1, 3 or 6 values
   std::vector<std::pair<Id, double>> ctrl;               // actuator -> control
+  std::vector<std::pair<Id, double>> act;                // actuator with activation -> activation
+  std::vector<std::pair<Id, Pose>> mocap;                // mocap body -> world pose
   const std::vector<double>* jointQpos(Id joint) const {
     for (const auto& e : qpos) if (e.first == joint) return &e.second;
     return nullptr;

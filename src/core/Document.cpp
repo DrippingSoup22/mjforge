@@ -29,6 +29,17 @@ const char* kindName(Kind k) {
   }
 }
 
+bool actuatorHasActivation(const Actuator& a) {
+  switch (a.type) {
+    case ActuatorType::Position: return a.timeconst > 0;
+    case ActuatorType::IntVelocity:
+    case ActuatorType::Cylinder:
+    case ActuatorType::Muscle: return true;
+    case ActuatorType::General: return a.dyntype != DynType::None;
+    default: return false;
+  }
+}
+
 double actuatorDefaultKp(ActuatorType t) {
   switch (t) {
     case ActuatorType::Position:

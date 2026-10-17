@@ -89,6 +89,7 @@ void serialize(const XmlNode& n, std::string& out, int depth) {
 bool nearly(double a, double b) { return std::fabs(a - b) <= 1e-12 * std::max(1.0, std::fabs(b)); }
 bool nearly(const Vec2& a, const Vec2& b) { return nearly(a.x, b.x) && nearly(a.y, b.y); }
 bool nearly(const Vec3& a, const Vec3& b) { return nearly(a.x, b.x) && nearly(a.y, b.y) && nearly(a.z, b.z); }
+bool nearly(const Quat& a, const Quat& b) { return nearly(a.w, b.w) && nearly(a.x, b.x) && nearly(a.y, b.y) && nearly(a.z, b.z); }
 template <int N> bool nearly(const VecN<N>& a, const VecN<N>& b) {
   for (int i = 0; i < N; ++i) if (!nearly(a[i], b[i])) return false;
   return true;
@@ -100,8 +101,9 @@ struct SplitState {
   std::unordered_set<Id> bodies;    // bodies in the model file
   std::unordered_set<Id> written;   // elements and assets the model file defines
   std::unordered_set<std::string> files;  // asset file names already used in the shared folder
-  std::vector<const Joint*> joints;       // model joints and actuators in compiled order (they
-  std::vector<Id> actuators;              // come first in the scene: the include is at the top)
+  std::vector<const Joint*> joints;       // model joints, actuators and mocap bodies in compiled
+  std::vector<Id> actuators;              // order (they come first in the scene: the include is
+  std::vector<const Body*> mocap;         // at the top)
 };
 
 class Writer {
@@ -142,6 +144,7 @@ class Writer {
       split_->files = assetFiles_;
       split_->joints = writtenJoints_;
       split_->actuators = writtenActuators_;
+      split_->mocap = writtenMocap_;
     }
 
     std::string out;
@@ -646,7 +649,10 @@ class Writer {
     XmlNode& n = parent.add("body");
     setName(n, b.id);
     setPose(n, b.pos, b.quat);
-    if (b.mocap) n.set("mocap", "true");
+    if (b.mocap) {
+      n.set("mocap", "true");
+      writtenMocap_.push_back(&b);
+    }
     if (!nearly(b.gravcomp, 0.0)) n.set("gravcomp", num(b.gravcomp));
     if (b.sleep != SleepPolicy::Auto && doc_.isTreeRoot(b.id)) n.set("sleep", toXml(b.sleep));
     if (map_) map_->bodies.push_back(b.id);
@@ -1119,9 +1125,11 @@ class Writer {
     if (opt_.scope == ExportOptions::Scope::Environment && !opt_.includeFile.empty() && !scenePass()) return;
     std::vector<const Joint*> joints = writtenJoints_;
     std::vector<Id> actuators = writtenActuators_;
+    std::vector<const Body*> mocap = writtenMocap_;
     if (scenePass()) {  // the include comes first: the model's joints and actuators precede ours
       joints.insert(joints.begin(), split_->joints.begin(), split_->joints.end());
       actuators.insert(actuators.begin(), split_->actuators.begin(), split_->actuators.end());
+      mocap.insert(mocap.begin(), split_->mocap.begin(), split_->mocap.end());
     }
     if (joints.empty()) return;
     XmlNode n("keyframe");
@@ -1153,18 +1161,41 @@ class Writer {
           add(qvel, v);
         }
       }
+      std::string act, mpos, mquat;
+      bool anyAct = false, anyMocap = false;
       for (Id a : actuators) {
         double v = 0;
         for (const auto& e : k.ctrl) if (e.first == a) v = e.second;
         anyCtrl |= v != 0;
         add(ctrl, v);
+        // Activations of filtered and integrating actuators, in the same order.
+        const Actuator* x = doc_.actuator(a);
+        if (!x || !actuatorHasActivation(*x)) continue;
+        double s = 0;
+        for (const auto& e : k.act) if (e.first == a) s = e.second;
+        anyAct |= s != 0;
+        add(act, s);
+      }
+      // Mocap bodies: world poses, by default where the body is.
+      for (const Body* b : mocap) {
+        Pose p{b->pos, b->quat};
+        for (const auto& e : k.mocap)
+          if (e.first == b->id) p = e.second;
+        anyMocap |= !nearly(p.pos, b->pos) || !nearly(p.quat, b->quat);
+        for (double v : {p.pos.x, p.pos.y, p.pos.z}) add(mpos, v);
+        for (double v : {p.quat.w, p.quat.x, p.quat.y, p.quat.z}) add(mquat, v);
       }
       XmlNode& e = n.add("key");
       if (!k.name.empty()) e.set("name", k.name);
       if (k.time != 0) e.set("time", num(k.time));
       e.set("qpos", qpos);
       if (anyVel) e.set("qvel", qvel);
+      if (anyAct) e.set("act", act);
       if (anyCtrl) e.set("ctrl", ctrl);
+      if (anyMocap) {
+        e.set("mpos", mpos);
+        e.set("mquat", mquat);
+      }
     }
     root.children.push_back(n);
   }
@@ -1271,6 +1302,7 @@ class Writer {
 
   std::vector<const Joint*> writtenJoints_;
   std::vector<Id> writtenActuators_;
+  std::vector<const Body*> writtenMocap_;
   const Document& doc_;
   const ExportOptions& opt_;
   ExportMap* map_;
