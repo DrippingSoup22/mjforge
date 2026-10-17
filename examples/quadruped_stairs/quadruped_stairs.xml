@@ -5,6 +5,7 @@
   <visual>
     <headlight ambient="0.3 0.3 0.3" diffuse="0.6 0.6 0.6" specular="0 0 0"/>
     <global azimuth="120" elevation="-20"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
   </visual>
   <asset>
     <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
@@ -14,48 +15,48 @@
   <worldbody>
     <light name="sun" type="directional" pos="0 0 3.5" diffuse="0.6 0.6 0.6"/>
     <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
-    <body name="quadruped" pos="0 0 0.400424398">
+    <body name="quadruped" pos="0 0 0.40042439760115406">
       <freejoint name="quadruped_root"/>
       <geom name="quadruped_shell" type="ellipsoid" size="0.22 0.13 0.07" rgba="0.92 0.55 0.2 1"/>
       <site name="quadruped_imu" size="0.01" rgba="0.95 0.75 0.1 1"/>
-      <body name="FL_thigh" pos="0.17 0.1 0" quat="0.980066578 0 0.198669331 0">
+      <body name="FL_thigh" pos="0.17 0.1 0" quat="0.9800665778412416 0 0.19866933079506122 0">
         <joint name="FL_hip_roll" axis="1 0 0" range="-0.6 0.6" damping="0.5" armature="0.01"/>
         <joint name="FL_hip_pitch" axis="0 1 0" range="-1.2 1.2" damping="0.5" armature="0.01"/>
         <geom name="FL_thigh_geom" type="capsule" size="0.025 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
-        <body name="FL_calf" pos="0 0 -0.2" quat="0.921060994 0 -0.389418342 0">
+        <body name="FL_calf" pos="0 0 -0.2" quat="0.9210609940028851 0 -0.3894183423086505 0">
           <joint name="FL_knee" axis="0 1 0" range="-1.4 0.6" damping="0.5" armature="0.01"/>
           <geom name="FL_calf_geom" type="capsule" size="0.02 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
           <geom name="FL_foot" size="0.03" pos="0 0 -0.2" rgba="0.12 0.12 0.13 1" friction="1 0.02 0.01"/>
           <site name="FL_foot_site" size="0.035" pos="0 0 -0.2" rgba="0.2 0.9 0.5 0.3"/>
         </body>
       </body>
-      <body name="FR_thigh" pos="0.17 -0.1 0" quat="0.980066578 0 0.198669331 0">
+      <body name="FR_thigh" pos="0.17 -0.1 0" quat="0.9800665778412416 0 0.19866933079506122 0">
         <joint name="FR_hip_roll" axis="1 0 0" range="-0.6 0.6" damping="0.5" armature="0.01"/>
         <joint name="FR_hip_pitch" axis="0 1 0" range="-1.2 1.2" damping="0.5" armature="0.01"/>
         <geom name="FR_thigh_geom" type="capsule" size="0.025 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
-        <body name="FR_calf" pos="0 0 -0.2" quat="0.921060994 0 -0.389418342 0">
+        <body name="FR_calf" pos="0 0 -0.2" quat="0.9210609940028851 0 -0.3894183423086505 0">
           <joint name="FR_knee" axis="0 1 0" range="-1.4 0.6" damping="0.5" armature="0.01"/>
           <geom name="FR_calf_geom" type="capsule" size="0.02 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
           <geom name="FR_foot" size="0.03" pos="0 0 -0.2" rgba="0.12 0.12 0.13 1" friction="1 0.02 0.01"/>
           <site name="FR_foot_site" size="0.035" pos="0 0 -0.2" rgba="0.2 0.9 0.5 0.3"/>
         </body>
       </body>
-      <body name="RL_thigh" pos="-0.17 0.1 0" quat="0.980066578 0 0.198669331 0">
+      <body name="RL_thigh" pos="-0.17 0.1 0" quat="0.9800665778412416 0 0.19866933079506122 0">
         <joint name="RL_hip_roll" axis="1 0 0" range="-0.6 0.6" damping="0.5" armature="0.01"/>
         <joint name="RL_hip_pitch" axis="0 1 0" range="-1.2 1.2" damping="0.5" armature="0.01"/>
         <geom name="RL_thigh_geom" type="capsule" size="0.025 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
-        <body name="RL_calf" pos="0 0 -0.2" quat="0.921060994 0 -0.389418342 0">
+        <body name="RL_calf" pos="0 0 -0.2" quat="0.9210609940028851 0 -0.3894183423086505 0">
           <joint name="RL_knee" axis="0 1 0" range="-1.4 0.6" damping="0.5" armature="0.01"/>
           <geom name="RL_calf_geom" type="capsule" size="0.02 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
           <geom name="RL_foot" size="0.03" pos="0 0 -0.2" rgba="0.12 0.12 0.13 1" friction="1 0.02 0.01"/>
           <site name="RL_foot_site" size="0.035" pos="0 0 -0.2" rgba="0.2 0.9 0.5 0.3"/>
         </body>
       </body>
-      <body name="RR_thigh" pos="-0.17 -0.1 0" quat="0.980066578 0 0.198669331 0">
+      <body name="RR_thigh" pos="-0.17 -0.1 0" quat="0.9800665778412416 0 0.19866933079506122 0">
         <joint name="RR_hip_roll" axis="1 0 0" range="-0.6 0.6" damping="0.5" armature="0.01"/>
         <joint name="RR_hip_pitch" axis="0 1 0" range="-1.2 1.2" damping="0.5" armature="0.01"/>
         <geom name="RR_thigh_geom" type="capsule" size="0.025 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
-        <body name="RR_calf" pos="0 0 -0.2" quat="0.921060994 0 -0.389418342 0">
+        <body name="RR_calf" pos="0 0 -0.2" quat="0.9210609940028851 0 -0.3894183423086505 0">
           <joint name="RR_knee" axis="0 1 0" range="-1.4 0.6" damping="0.5" armature="0.01"/>
           <geom name="RR_calf_geom" type="capsule" size="0.02 0.1" pos="0 0 -0.1" quat="0 0 1 0" rgba="0.3 0.33 0.38 1"/>
           <geom name="RR_foot" size="0.03" pos="0 0 -0.2" rgba="0.12 0.12 0.13 1" friction="1 0.02 0.01"/>
@@ -65,16 +66,16 @@
     </body>
     <body name="stairs" pos="0.6 0 0">
       <geom name="stairs_step1" type="box" size="0.15 0.6 0.025" pos="0.15 0 0.025" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_step2" type="box" size="0.15 0.6 0.05" pos="0.45 0 0.05" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_step3" type="box" size="0.15 0.6 0.075" pos="0.75 0 0.075" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_step4" type="box" size="0.15 0.6 0.1" pos="1.05 0 0.1" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_step5" type="box" size="0.15 0.6 0.125" pos="1.35 0 0.125" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_step6" type="box" size="0.15 0.6 0.15" pos="1.65 0 0.15" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_top" type="box" size="0.5 0.6 0.15" pos="2.3 0 0.15" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_down1" type="box" size="0.15 0.6 0.15" pos="2.95 0 0.15" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_down2" type="box" size="0.15 0.6 0.125" pos="3.25 0 0.125" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_step2" type="box" size="0.15 0.6 0.05" pos="0.44999999999999996 0 0.05" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_step3" type="box" size="0.15 0.6 0.07500000000000001" pos="0.75 0 0.07500000000000001" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_step4" type="box" size="0.15 0.6 0.1" pos="1.0499999999999998 0 0.1" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_step5" type="box" size="0.15 0.6 0.125" pos="1.3499999999999999 0 0.125" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_step6" type="box" size="0.15 0.6 0.15000000000000002" pos="1.65 0 0.15000000000000002" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_top" type="box" size="0.5 0.6 0.15000000000000002" pos="2.3 0 0.15000000000000002" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_down1" type="box" size="0.15 0.6 0.15000000000000002" pos="2.9499999999999997 0 0.15000000000000002" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_down2" type="box" size="0.15 0.6 0.125" pos="3.2499999999999996 0 0.125" rgba="0.62 0.64 0.67 1"/>
       <geom name="stairs_down3" type="box" size="0.15 0.6 0.1" pos="3.55 0 0.1" rgba="0.62 0.64 0.67 1"/>
-      <geom name="stairs_down4" type="box" size="0.15 0.6 0.075" pos="3.85 0 0.075" rgba="0.62 0.64 0.67 1"/>
+      <geom name="stairs_down4" type="box" size="0.15 0.6 0.07500000000000001" pos="3.8499999999999996 0 0.07500000000000001" rgba="0.62 0.64 0.67 1"/>
       <geom name="stairs_down5" type="box" size="0.15 0.6 0.05" pos="4.15 0 0.05" rgba="0.62 0.64 0.67 1"/>
       <geom name="stairs_down6" type="box" size="0.15 0.6 0.025" pos="4.45 0 0.025" rgba="0.62 0.64 0.67 1"/>
     </body>

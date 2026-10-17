@@ -648,3 +648,42 @@ TEST_CASE("review: values only a damaged file can hold are repaired or reported"
   CHECK(site);
   CHECK(condim);
 }
+
+TEST_CASE("review: the examples' committed exports match what the editor exports now") {
+  // Compared as compiled models (the text could differ in the last digit across compilers).
+  int checked = 0;
+  for (const auto& entry : fs::directory_iterator(fs::path(MJF_SOURCE_DIR) / "examples")) {
+    if (!entry.is_directory()) continue;
+    std::string name = entry.path().filename().string();
+    fs::path project = entry.path() / (name + ".mjforge"), committed = entry.path() / (name + ".xml");
+    if (!fs::exists(project) || !fs::exists(committed)) continue;
+    INFO(name);
+    Document doc;
+    std::string err;
+    REQUIRE(loadProject(doc, project.string(), &err));
+    fs::path out = tmpDir("example_" + name) / (name + ".xml");
+    REQUIRE(exportMjcfFile(doc, out.string(), {}, &err));
+    ModelPtr a = loadFile(committed), b = loadFile(out);
+    CHECK(a->nbody == b->nbody);
+    CHECK(a->ngeom == b->ngeom);
+    CHECK(a->nq == b->nq);
+    CHECK(a->nu == b->nu);
+    CHECK(a->nsensor == b->nsensor);
+    CHECK(a->nkey == b->nkey);
+    CHECK(a->nhfielddata == b->nhfielddata);
+    auto same = [](const mjtNum* x, const mjtNum* y, int n) {
+      for (int i = 0; i < n; ++i)
+        if (std::fabs(x[i] - y[i]) > 1e-9 * std::max(1.0, std::fabs(x[i]))) return false;
+      return true;
+    };
+    if (a->nbody == b->nbody) {
+      CHECK(same(a->body_pos, b->body_pos, 3 * a->nbody));
+      CHECK(same(a->body_mass, b->body_mass, a->nbody));
+    }
+    if (a->ngeom == b->ngeom) CHECK(same(a->geom_size, b->geom_size, 3 * a->ngeom));
+    if (a->nu == b->nu) CHECK(same(a->actuator_gainprm, b->actuator_gainprm, mjNGAIN * a->nu));
+    if (a->nkey == b->nkey && a->nq == b->nq) CHECK(same(a->key_qpos, b->key_qpos, a->nkey * a->nq));
+    ++checked;
+  }
+  CHECK(checked >= 5);
+}

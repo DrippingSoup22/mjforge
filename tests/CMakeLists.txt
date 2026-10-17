@@ -9,6 +9,7 @@ file(GLOB MJF_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 add_executable(mjforge_tests ${MJF_TEST_SOURCES})
 target_include_directories(mjforge_tests PRIVATE ${doctest_SOURCE_DIR})
 target_link_libraries(mjforge_tests PRIVATE mjforge_core)
-target_compile_definitions(mjforge_tests PRIVATE MJF_TEST_TMP="${CMAKE_BINARY_DIR}/test_tmp")
+target_compile_definitions(mjforge_tests PRIVATE MJF_TEST_TMP="${CMAKE_BINARY_DIR}/test_tmp"
+                                                  MJF_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 mjforge_copy_mujoco_runtime(mjforge_tests)
 add_test(NAME mjforge_tests COMMAND mjforge_tests)
