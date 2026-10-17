@@ -815,6 +815,13 @@ class Writer {
       if (a.type == ActuatorType::IntVelocity || a.type == ActuatorType::General)
         writeLimited(e, "actlimited", "actrange", a.actlimited, a.actrange);
       if (!nearly(a.lengthrange, Vec2{})) e.set("lengthrange", vec(a.lengthrange));
+      if (a.delay > 0) e.set("delay", num(a.delay));
+      if (a.nsample > 0) e.set("nsample", std::to_string(a.nsample));
+      if (a.interp == 1 || a.interp == 2) e.set("interp", a.interp == 1 ? "linear" : "cubic");
+      if (a.type != ActuatorType::Adhesion) {
+        if (!nearly(a.damping, 0.0)) e.set("damping", num(a.damping));
+        if (!nearly(a.armature, 0.0)) e.set("armature", num(a.armature));
+      }
 
       const Actuator d;
       switch (a.type) {

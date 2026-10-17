@@ -188,6 +188,14 @@ struct Actuator {
   Vec2 actrange{0, 0};
   Vec2 lengthrange{0, 0};
   int group = 0;
+  // Control latency: the actuator reads its control `delay` seconds late from a history buffer of
+  // `nsample` samples (interp: 0 zero-order hold, 1 linear, 2 cubic).
+  double delay = 0;
+  int nsample = 0;
+  int interp = 0;
+  // Damping and rotor inertia added to the joint / tendon, scaled by gear^2 (not for adhesion).
+  double damping = 0;
+  double armature = 0;
   // position / intvelocity / velocity / damper
   double kp = 1.0;
   double kv = 0.0;

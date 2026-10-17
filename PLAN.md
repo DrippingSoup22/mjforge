@@ -132,9 +132,10 @@ Each milestone ends in a working, committed application.
 ### M2 — Physics authoring & validation
 - [x] Complete geom / joint / body / inertial attributes
 - [x] Actuators: motor, position, velocity, intvelocity, damper, cylinder, muscle, adhesion,
-      general, dcmotor (+ table panel, "add actuators to all joints")
+      general (+ table panel, "add actuators to all joints"); MuJoCo 3.16's dcmotor, pid and
+      orientation actuators are reported on import (MJWarp does not run them yet)
 - [x] Sensors, sites, contact excludes, scene options (timestep, integrator, solver, …)
-- [ ] Explicit contact `<pair>`s
+- [x] Explicit contact `<pair>`s (and tendons, equality constraints: see M5)
 - [x] Background MuJoCo compile; Issues panel with click-to-select and auto-fix buttons
 - [x] Physics analysis: subtree mass/COM, effective joint inertia, gravity torque vs actuator
       strength, servo sag, PD/timestep stability, mass ratios, initial penetration

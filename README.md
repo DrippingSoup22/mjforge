@@ -18,8 +18,8 @@ ready-to-run MuJoCo Warp loader.
   multi-selection editing. Meshes load from STL, OBJ or MSH files through MuJoCo itself. Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's
   documentation in the tooltips.
 - All actuator types: motor (torque), position servo (target angle), velocity, integrated velocity,
-  damper, cylinder, muscle, adhesion and general, plus friction, armature, damping, mass and
-  inertia per element.
+  damper, cylinder, muscle, adhesion and general, with control latency, plus friction, armature,
+  damping, mass and inertia per element.
 - **Tendons** (fixed joint combinations and spatial cables with wrapping and pulleys, with actuators
   and sensors on them), **equality constraints** (connect for closed loops, weld, joint and tendon
   couplings) and explicit **contact pairs**, all supported by MuJoCo Warp.
@@ -39,8 +39,9 @@ ready-to-run MuJoCo Warp loader.
   Examples: actuator strength vs. the load it carries ("a 10 kg creature whose knees can give
   2 µN·m"), servo sag, stiffness vs. timestep stability, mass ratios, start pose inside or above
   the floor, balance at rest, foot creep, servo ranges written in degrees.
-- MuJoCo Warp rules: unsupported features (PGS, noslip, PID actuators, ...), the box/mesh contact
-  margin trap, which contact pairs need MJWarp's slower convex collider, self-collision pair counts.
+- MuJoCo Warp rules: unsupported features (PGS, noslip, PID actuators, ...), features it silently
+  ignores (actuator armature, with a fix that keeps the dynamics), the box/mesh contact margin trap,
+  which contact pairs need MJWarp's slower convex collider, self-collision pair counts.
 
 ![The Issues panel explains problems and offers fixes](docs/images/analysis.jpg)
 

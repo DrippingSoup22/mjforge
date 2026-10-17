@@ -209,6 +209,8 @@ template <class V> void visit(V& v, Actuator& a) {
   v("vmax", a.vmax); v("fpmax", a.fpmax); v("fvmax", a.fvmax); v("adhesionGain", a.adhesionGain);
   v("dyntype", a.dyntype); v("gaintype", a.gaintype); v("biastype", a.biastype); v("dynprm", a.dynprm);
   v("gainprm", a.gainprm); v("biasprm", a.biasprm); v("actearly", a.actearly);
+  v("delay", a.delay); v("nsample", a.nsample); v("interp", a.interp); v("damping", a.damping);
+  v("armature", a.armature);
 }
 template <class V> void visit(V& v, Sensor& s) {
   v("id", s.id); v("name", s.name); v("type", s.type); v("obj", s.obj); v("objtype", s.objtype);

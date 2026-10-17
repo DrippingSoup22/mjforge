@@ -103,6 +103,10 @@ the ground often, primitives (capsules, spheres) are much cheaper in MuJoCo Warp
 - **Actuators.** *Motor*: the control is a torque (times the gear). *Position*: the control is the
   target angle, the actuator applies `kp * (target - angle)` with damping from `kv` or a damping
   ratio. *Velocity*: target speed. Control range limits the command, force range limits the output.
+  *Latency* delays the control like a real robot's communication and driver (training with it
+  makes policies robust to delay); the history buffer it needs is sized automatically. Actuators can
+  also add rotor inertia (armature) and damping to their joint, scaled by gear squared; MuJoCo Warp
+  3.16 ignores actuator armature, so the analysis offers to move it onto the joint.
 - **Contacts.** Friction (sliding, torsional, rolling), contact dimension, solver softness, margin,
   and the `contype`/`conaffinity` bit masks deciding which geoms collide.
 - **Scene.** Timestep, integrator (implicitfast is a good default and runs in MJWarp), solver

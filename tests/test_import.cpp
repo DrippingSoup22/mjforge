@@ -769,3 +769,93 @@ TEST_CASE("tendons, equality constraints and contact pairs: export, import, edit
   CHECK_FALSE(sim.diverged());
   CHECK(sim.drive(u).kind == ActuatorDrive::Motor);
 }
+
+TEST_CASE("actuators: latency, reflected damping and armature; multi-control actuators on import") {
+  const char* xml = R"(
+<mujoco>
+  <option timestep="0.002"/>
+  <worldbody>
+    <body name="arm" pos="0 0 1">
+      <joint name="j" axis="0 1 0" damping="0.1"/>
+      <geom type="capsule" fromto="0 0 0 0.4 0 0" size="0.03"/>
+      <body name="arm2" pos="0.4 0 0">
+        <joint name="j2" axis="0 1 0"/>
+        <geom type="capsule" fromto="0 0 0 0.3 0 0" size="0.02"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="servo" joint="j" kp="20" delay="0.01" nsample="5" interp="linear" damping="0.3" armature="0.002" gear="2"/>
+    <dcmotor name="dc" joint="j2" motorconst="0.05" resistance="2" input="pos vel"/>
+    <motor name="m2" joint="j2" ctrlrange="-1 1"/>
+  </actuator>
+  <keyframe><key name="home" ctrl="0.2 0 0 0.5"/></keyframe>
+</mujoco>)";
+  Document doc;
+  std::string err;
+  ImportReport rep;
+  REQUIRE(importMjcfString(xml, doc, &err, &rep));
+  REQUIRE(doc.actuators.size() == 2);  // the two-control DC motor is skipped and reported
+  CHECK(rep.notes.size() == 1);
+  const Actuator& servo = doc.actuators[0];
+  CHECK(servo.delay == doctest::Approx(0.01));
+  CHECK(servo.nsample == 5);
+  CHECK(servo.interp == 1);
+  CHECK(servo.damping == doctest::Approx(0.3));
+  CHECK(servo.armature == doctest::Approx(0.002));
+  // Keyframe controls follow the control addresses, not the actuator order.
+  REQUIRE(doc.keyframes.size() == 1);
+  double c0 = 0, c1 = 0;
+  for (const auto& [id, c] : doc.keyframes[0].ctrl) {
+    if (id == doc.actuators[0].id) c0 = c;
+    if (id == doc.actuators[1].id) c1 = c;
+  }
+  CHECK(c0 == doctest::Approx(0.2));
+  CHECK(c1 == doctest::Approx(0.5));
+
+  // Export keeps everything.
+  ExportMap map;
+  CompileResult cr = compileMjcf(writeMjcf(doc, {}, &map));
+  INFO(cr.error);
+  REQUIRE(cr.ok);
+  const mjModel* m = cr.model.get();
+  CHECK(m->actuator_delay[0] == doctest::Approx(0.01));
+  CHECK(m->actuator_history[0] == 5);
+  CHECK(m->actuator_history[1] == 1);
+  CHECK(m->actuator_damping[0] == doctest::Approx(0.3));
+  CHECK(m->actuator_armature[0] == doctest::Approx(0.002));
+  Document back;
+  REQUIRE(projectFromJson(back, projectToJson(doc, ""), &err, nullptr));
+  CHECK(writeMjcf(back) == writeMjcf(doc));
+
+  // MuJoCo Warp ignores actuator armature: the fix moves armature * gear^2 to the joint, which
+  // MuJoCo C simulates identically.
+  AnalysisReport ar = analyzeModel(doc, &cr, true);
+  const Issue* arm = nullptr;
+  for (const Issue& i : ar.issues) if (i.code == "mjw-actuator-armature") arm = &i;
+  REQUIRE(arm);
+  Document fixed = doc;
+  arm->fix(fixed);
+  CHECK(fixed.actuators[0].armature == 0);
+  for (const Joint& j : fixed.joints)
+    if (j.name == "j") CHECK(j.armature == doctest::Approx(0.002 * 4));
+  CompileResult cf = compileMjcf(writeMjcf(fixed));
+  REQUIRE(cf.ok);
+  auto roll = [](const mjModel* model) {
+    DataPtr d = makeData(model);
+    mj_resetDataKeyframe(model, d.get(), 0);
+    for (int i = 0; i < 300; ++i) mj_step(model, d.get());
+    return std::vector<double>(d->qpos, d->qpos + model->nq);
+  };
+  std::vector<double> qa = roll(cr.model.get()), qb = roll(cf.model.get());
+  for (size_t i = 0; i < qa.size(); ++i) CHECK(qa[i] == doctest::Approx(qb[i]).epsilon(1e-6));
+
+  // A delay without a history buffer is reported, with a fix.
+  doc.actuators[0].nsample = 0;
+  AnalysisReport ar2 = analyzeModel(doc, nullptr, false);
+  const Issue* hist = nullptr;
+  for (const Issue& i : ar2.issues) if (i.code == "delay-history") hist = &i;
+  REQUIRE(hist);
+  hist->fix(doc);
+  CHECK(doc.actuators[0].nsample == 5);
+}

@@ -697,6 +697,33 @@ void Editor::inspectActuator(Actuator& a) {
     if (a.forcelimited && props::vec2("Force range", &a.forcerange, {}, O(D("general.forcerange"), fu, 0.1)))
       applyToSelected<Actuator>([&](Actuator& o) { o.forcerange = a.forcerange; });
   }
+  if (props::section("Latency", false)) {
+    const double dt = doc_.option.timestep;
+    if (props::real("Delay", &a.delay, 0,
+                    O("Control latency: the actuator acts on the control it received this long ago, like a real robot's "
+                      "communication and driver delay. Training with it makes policies robust to latency. Needs a history "
+                      "buffer (samples), set automatically.",
+                      "s", 0.0005, 0, 10))) {
+      // MuJoCo's common case: delay = nsample * timestep.
+      int need = a.delay > 0 ? int(std::ceil(a.delay / dt - 1e-9)) : 0;
+      if (a.nsample < need) a.nsample = need;
+      double d = a.delay;
+      int ns = a.nsample;
+      applyToSelected<Actuator>([&](Actuator& o) { o.delay = d; o.nsample = std::max(o.nsample, ns); });
+    }
+    if (props::integer("History samples", &a.nsample, 0, O(D("general.nsample"), nullptr, 0.2, 0, 100000)))
+      applyToSelected<Actuator>([&](Actuator& o) { o.nsample = a.nsample; });
+    if (props::comboIndex("Interpolation", &a.interp, {"zero-order hold", "linear", "cubic"}, 0, D("general.interp")))
+      applyToSelected<Actuator>([&](Actuator& o) { o.interp = a.interp; });
+    if (a.delay > 0) props::info("", "%.1f timesteps late", a.delay / dt);
+  }
+  if (a.type != ActuatorType::Adhesion && props::section("Reflected damping & inertia", false)) {
+    if (props::real("Damping", &a.damping, 0, O(D("general.damping"), nullptr, 0.01, 0, 1e9)))
+      applyToSelected<Actuator>([&](Actuator& o) { o.damping = a.damping; });
+    if (props::real("Armature (rotor)", &a.armature, 0, O(D("general.armature"), nullptr, 0.0005, 0, 1e9)))
+      applyToSelected<Actuator>([&](Actuator& o) { o.armature = a.armature; });
+    if (a.armature > 0) props::info("", "MuJoCo Warp 3.16 ignores actuator armature: put it on the joint instead.");
+  }
   switch (a.type) {
     case ActuatorType::Position:
     case ActuatorType::IntVelocity:

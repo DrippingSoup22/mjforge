@@ -295,6 +295,15 @@ class Analyzer {
             "Pick the joint (or site/body) this actuator drives in the inspector.", {a.id});
         continue;
       }
+      if (a.delay > 0 && a.nsample <= 0) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "delay-history",
+                       fmt("Actuator %s has a delay but no history buffer", quote(a.name).c_str()),
+                       "A control delay is read from the actuator's history; it needs at least delay / timestep samples.", {a.id});
+        Id id = a.id;
+        int need = std::max(1, int(std::ceil(a.delay / doc_.option.timestep - 1e-9)));
+        i.fixLabel = fmt("Keep %d samples", need);
+        i.fix = [id, need](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = need; };
+      }
       bool servo = a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity;
       if (servo && a.kv > 0 && a.dampratio > 0) {
         Issue& i = add(Severity::Error, IssueArea::Model, "kv-dampratio",
@@ -612,7 +621,15 @@ class Analyzer {
         r.axisTilt = std::fabs(dot(a, gdir_));
         r.liftLoad = r.movedMass * gmag_ * std::max(r.axisTilt, 0.25);
       }
-      double kServo = 0, cAct = 0;
+      double kServo = 0, cAct = 0, cPassive = 0;
+      // Rotor inertia and damping that actuators add to the joint (MuJoCo scales them by gear^2).
+      for (const Actuator& act : doc_.actuators)
+        if ((act.trn == TrnType::Joint || act.trn == TrnType::JointInParent) && act.target == j.id &&
+            act.type != ActuatorType::Adhesion) {
+          double g2 = act.gear[0] * act.gear[0];
+          r.inertia += act.armature * g2;
+          cPassive += act.damping * g2;
+        }
       for (const Actuator& act : doc_.actuators) {
         if ((act.trn != TrnType::Joint && act.trn != TrnType::JointInParent) || act.target != j.id) continue;
         r.actuated = true;
@@ -635,7 +652,7 @@ class Analyzer {
       if (j.actuatorfrclimited)
         r.capacity = std::min(r.capacity, std::max(std::fabs(j.actuatorfrcrange.x), std::fabs(j.actuatorfrcrange.y)));
       r.stiffness = kServo + j.stiffness;
-      r.damping = cAct + j.damping;
+      r.damping = cAct + j.damping + cPassive;
       double dt = doc_.option.timestep;
       if (r.inertia > 0 && r.stiffness > 0) r.omegaDt = std::sqrt(r.stiffness / r.inertia) * dt;
       servoStiffness_[j.id] = kServo;
@@ -1082,6 +1099,33 @@ class Analyzer {
                      "MJWarp supports dense Jacobians only up to 60 DoF. 'auto' picks sparse above 32 DoF.");
       i.fixLabel = "Use auto";
       i.fix = [](Document& d) { d.option.jacobian = Jacobian::Auto; };
+    }
+    // Measured with mujoco-warp 3.16: actuator armature is silently ignored (trajectories differ
+    // from MuJoCo C). The joint / tendon armature it stands for gives the same dynamics.
+    std::vector<Id> withArmature;
+    for (const Actuator& a : doc_.actuators)
+      if (a.armature > 0 && a.type != ActuatorType::Adhesion &&
+          (((a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) && doc_.joint(a.target)) ||
+           (a.trn == TrnType::Tendon && doc_.tendon(a.target))))
+        withArmature.push_back(a.id);
+    if (!withArmature.empty()) {
+      Issue& i = add(Severity::Warning, IssueArea::MJWarp, "mjw-actuator-armature",
+                     fmt("MuJoCo Warp ignores the armature of %zu actuator(s)", withArmature.size()),
+                     "Actuator armature adds armature * gear^2 to the driven joint or tendon in MuJoCo, but MuJoCo Warp 3.16 "
+                     "leaves it out, so trained policies see lighter, livelier joints than the preview. Putting the same "
+                     "inertia on the joint (or tendon) works in both.",
+                     withArmature);
+      i.fixLabel = "Move it to the joints / tendons";
+      i.fix = [withArmature](Document& d) {
+        for (Id id : withArmature) {
+          Actuator* a = d.actuator(id);
+          if (!a) continue;
+          double add = a->armature * a->gear[0] * a->gear[0];
+          if (Joint* j = a->trn == TrnType::Tendon ? nullptr : d.joint(a->target)) j->armature += add;
+          else if (Tendon* t = d.tendon(a->target)) t->armature += add;
+          a->armature = 0;
+        }
+      };
     }
     if (opt.sleep && opt.solver != Solver::Newton) {
       Issue& i = add(Severity::Error, IssueArea::MJWarp, "mjw-sleep", "Sleeping requires the Newton solver in MuJoCo Warp", "");

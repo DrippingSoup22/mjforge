@@ -510,13 +510,16 @@ class Builder {
   }
 
   void actuators() {
-    std::vector<const mjsActuator*> specs(m_->nu, nullptr);
+    // MuJoCo 3.16 distinguishes actuators (nactuator) from scalar controls (nu): an actuator may
+    // take several controls. Per-actuator arrays are indexed by actuator.
+    const int na = int(m_->nactuator);
+    std::vector<const mjsActuator*> specs(na, nullptr);
     forEachSpec(spec_, mjOBJ_ACTUATOR, [&](mjsElement* el, int id) {
-      if (id < m_->nu) specs[id] = mjs_asActuator(el);
+      if (id < na) specs[id] = mjs_asActuator(el);
     });
-    actIds_.assign(m_->nu, kNoId);
-    int skipped = 0;
-    for (int i = 0; i < m_->nu; ++i) {
+    actIds_.assign(na, kNoId);
+    int skipped = 0, nonlinear = 0;
+    for (int i = 0; i < na; ++i) {
       const mjsActuator* s = specs[i];
       Actuator x;
       x.id = doc_.newId();
@@ -551,10 +554,16 @@ class Builder {
           break;
         default: ok = false; break;
       }
-      if (!ok || !x.target || !s) {
+      if (!ok || !x.target || !s || m_->actuator_ctrlnum[i] != 1) {
         ++skipped;
         continue;
       }
+      x.delay = m_->actuator_delay[i];
+      x.nsample = m_->actuator_history[2 * i];
+      x.interp = m_->actuator_history[2 * i + 1];
+      x.damping = m_->actuator_damping[i];
+      x.armature = m_->actuator_armature[i];
+      for (int k = 0; k < mjNPOLY; ++k) nonlinear += m_->actuator_dampingpoly[mjNPOLY * i + k] != 0;
       for (int k = 0; k < 6; ++k) x.gear[k] = m_->actuator_gear[6 * i + k];
       x.ctrllimited = m_->actuator_ctrllimited[i];
       x.ctrlrange = v2(m_->actuator_ctrlrange + 2 * i);
@@ -631,7 +640,8 @@ class Builder {
       doc_.actuators.push_back(x);
     }
     if (skipped)
-      note(std::to_string(skipped) + " actuator(s) with tendon transmissions or unsupported types were not imported");
+      note(std::to_string(skipped) + " actuator(s) of types the editor does not support (DC motor, PID, orientation) were not imported");
+    if (nonlinear) note(std::to_string(nonlinear) + " nonlinear actuator damping term(s) were dropped (linear terms kept)");
   }
 
   static bool generalFrom(Actuator& x, const mjsActuator* s) {
@@ -871,9 +881,10 @@ class Builder {
         for (int i = 0; i < nv; ++i) moving |= v[i] != 0;
         if (moving) x.qvel.push_back({jointIds_[j], std::vector<double>(v, v + nv)});
       }
-      for (int i = 0; i < m_->nu; ++i) {
-        double c = m_->key_ctrl[k * m_->nu + i];
-        if (c != 0 && actIds_[i]) x.ctrl.push_back({actIds_[i], c});
+      for (int i = 0; i < int(m_->nactuator); ++i) {
+        if (!actIds_[i] || m_->actuator_ctrlnum[i] != 1) continue;
+        double c = m_->key_ctrl[k * m_->nu + m_->actuator_ctrladr[i]];
+        if (c != 0) x.ctrl.push_back({actIds_[i], c});
       }
       doc_.keyframes.push_back(std::move(x));
     }
