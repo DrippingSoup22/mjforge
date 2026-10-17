@@ -15,6 +15,7 @@ struct CliOptions {
   bool validate = false;      // headless: compile + analysis report
   bool loader = false;        // --export also writes the MJWarp loader script
   bool help = false;
+  bool version = false;       // print the MJForge and MuJoCo versions and exit
   // GUI testing helpers
   std::string screenshot;     // save a PNG after `frames` frames and exit
   int frames = 8;

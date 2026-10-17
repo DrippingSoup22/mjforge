@@ -67,7 +67,15 @@ void Editor::init(GLFWwindow* window, float scale, const std::string& configDir)
   props::setContext(&propCtx_);
   loadPrefs();
   std::error_code ec;
-  if (lastDir_.empty()) lastDir_ = fs::current_path(ec).u8string();
+  if (lastDir_.empty()) {
+    // An app opened from the Finder or a desktop shortcut starts in the root folder: begin at home.
+    fs::path cwd = fs::current_path(ec);
+    const char* home = std::getenv("HOME");
+#ifdef _WIN32
+    if (!home) home = std::getenv("USERPROFILE");
+#endif
+    lastDir_ = (cwd.empty() || cwd == cwd.root_path()) && home ? std::string(home) : cwd.u8string();
+  }
   newDocument("quadruped");
   initAutosave();
 }

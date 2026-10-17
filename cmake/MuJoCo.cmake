@@ -14,6 +14,7 @@
 #   MJFORGE_MUJOCO_PLUGIN_DIR     folder of MuJoCo's plugin libraries (SDF, elasticity, ...) if found;
 #                                 copied to <executable dir>/mujoco_plugin and loaded at startup
 #   MJFORGE_MUJOCO_VERSION_FOUND  version string parsed from mujoco.h
+#   MJFORGE_MUJOCO_LICENSE_FILES  MuJoCo's license and third-party notices, shipped with the runtime
 
 set(MJFORGE_MUJOCO_VERSION "3.16.0" CACHE STRING "MuJoCo release to download if no local copy is found")
 set(MUJOCO_DIR "" CACHE PATH "MuJoCo release folder or Python 'mujoco' package folder")
@@ -111,6 +112,19 @@ math(EXPR _mj_patch "${_mj_ver_num} % 1000")
 set(MJFORGE_MUJOCO_VERSION_FOUND "${_mj_major}.${_mj_minor}.${_mj_patch}")
 if(_mj_ver_num LESS 3016000)
   message(WARNING "MJForge is developed against MuJoCo 3.16; found ${MJFORGE_MUJOCO_VERSION_FOUND}. Some features may not compile.")
+endif()
+
+# License texts to ship with the runtime: LICENSE and THIRD_PARTY_NOTICES at the top of a release
+# archive, or LICENSE and LICENSES_THIRD_PARTY.md in the Python package's dist-info.
+get_filename_component(_mj_root "${_mj_inc}" DIRECTORY)
+get_filename_component(_mj_site "${_mj_root}" DIRECTORY)
+set(_mj_distinfo "${_mj_site}/mujoco-${MJFORGE_MUJOCO_VERSION_FOUND}.dist-info")
+file(GLOB MJFORGE_MUJOCO_LICENSE_FILES
+  "${_mj_root}/LICENSE" "${_mj_root}/THIRD_PARTY_NOTICES"
+  "${_mj_distinfo}/licenses/LICENSE" "${_mj_distinfo}/licenses/LICENSES_THIRD_PARTY.md"
+  "${_mj_distinfo}/LICENSE" "${_mj_distinfo}/LICENSES_THIRD_PARTY.md")
+if(NOT MJFORGE_MUJOCO_LICENSE_FILES)
+  message(WARNING "MJForge: MuJoCo's license files were not found; an installed package would lack them.")
 endif()
 
 add_library(mujoco::mujoco SHARED IMPORTED GLOBAL)

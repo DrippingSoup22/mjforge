@@ -11,12 +11,17 @@ endif()
 
 option(MJFORGE_BUILD_TESTS "Build unit tests" ON)
 option(MJFORGE_USE_SYSTEM_GLFW "Use an installed GLFW instead of downloading it" OFF)
+option(MJFORGE_MACOS_BUNDLE "Build MJForge.app on macOS (release packages)" OFF)
+set(MJFORGE_INSTALL_BINDIR "bin" CACHE STRING
+    "Where 'cmake --install' puts the executable and the MuJoCo runtime ('.' for a self-contained folder)")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(APPLE)
   set(CMAKE_BUILD_RPATH "@loader_path")
   set(CMAKE_INSTALL_RPATH "@loader_path")
+  # Installing then copies the binaries as built: editing them would break their code signature.
+  set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 elseif(UNIX)
   set(CMAKE_BUILD_RPATH "$ORIGIN")
   set(CMAKE_INSTALL_RPATH "$ORIGIN")
@@ -132,11 +137,74 @@ if(WIN32)
   endif()
 endif()
 
+if(APPLE AND MJFORGE_MACOS_BUNDLE)
+  set(MJFORGE_MACOS_MIN "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  if(NOT MJFORGE_MACOS_MIN)
+    set(MJFORGE_MACOS_MIN "11.0")
+  endif()
+  set_target_properties(mjforge PROPERTIES
+    MACOSX_BUNDLE TRUE
+    OUTPUT_NAME MJForge
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
+    MACOSX_BUNDLE_BUNDLE_NAME MJForge
+    MACOSX_BUNDLE_GUI_IDENTIFIER io.github.drippingsoup22.mjforge
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+
 # Ship the MuJoCo runtime next to the executable.
 mjforge_copy_mujoco_runtime(mjforge)
 
-install(TARGETS mjforge RUNTIME DESTINATION bin)
-install(FILES "${MJFORGE_MUJOCO_RUNTIME_FILE}" DESTINATION "bin/${MJFORGE_MUJOCO_RUNTIME_SUBDIR}")
+# ---------------------------------------------------------------------------------------------
+# Package: `cmake --install` puts the application with the MuJoCo runtime and plugins next to it
+# (inside MJForge.app on macOS with MJFORGE_MACOS_BUNDLE), plus the examples, the guide, a quick
+# start and the licenses of everything it ships.
+# ---------------------------------------------------------------------------------------------
+if(APPLE AND MJFORGE_MACOS_BUNDLE)
+  install(TARGETS mjforge BUNDLE DESTINATION .)
+  set(_mjf_bindir "MJForge.app/Contents/MacOS")
+else()
+  install(TARGETS mjforge RUNTIME DESTINATION "${MJFORGE_INSTALL_BINDIR}")
+  set(_mjf_bindir "${MJFORGE_INSTALL_BINDIR}")
+endif()
+install(FILES "${MJFORGE_MUJOCO_RUNTIME_FILE}" DESTINATION "${_mjf_bindir}/${MJFORGE_MUJOCO_RUNTIME_SUBDIR}")
+if(MJFORGE_MUJOCO_PLUGIN_DIR)
+  install(DIRECTORY "${MJFORGE_MUJOCO_PLUGIN_DIR}/" DESTINATION "${_mjf_bindir}/mujoco_plugin")
+endif()
+if(WIN32)
+  # The Visual C++ runtime, so the package runs where it is not installed.
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${MJFORGE_INSTALL_BINDIR}")
+  include(InstallRequiredSystemLibraries)
+endif()
+install(DIRECTORY examples/ DESTINATION examples)
+install(DIRECTORY docs/ DESTINATION docs)
+install(FILES README.md DESTINATION .)
+configure_file(packaging/QUICKSTART.txt "${CMAKE_BINARY_DIR}/QUICKSTART.txt" @ONLY)
+install(FILES "${CMAKE_BINARY_DIR}/QUICKSTART.txt" DESTINATION .)
+
+# The licenses of everything the package contains, in one file.
+set(MJF_NOTICES "${CMAKE_BINARY_DIR}/THIRD_PARTY_LICENSES.txt")
+file(WRITE "${MJF_NOTICES}" "MJForge ${PROJECT_VERSION} includes the following third-party software.\n")
+function(mjforge_notice name)
+  foreach(f IN LISTS ARGN)
+    if(EXISTS "${f}")
+      get_filename_component(_file "${f}" NAME)
+      file(READ "${f}" _text)
+      file(APPEND "${MJF_NOTICES}" "\n\n${name} (${_file})\n==============================================================================\n\n${_text}")
+    endif()
+  endforeach()
+endfunction()
+mjforge_notice("MuJoCo ${MJFORGE_MUJOCO_VERSION_FOUND}" ${MJFORGE_MUJOCO_LICENSE_FILES})
+mjforge_notice("GLFW 3.4" "${glfw_SOURCE_DIR}/LICENSE.md")
+mjforge_notice("Dear ImGui" "${imgui_SOURCE_DIR}/LICENSE.txt")
+mjforge_notice("ImPlot" "${implot_SOURCE_DIR}/LICENSE")
+mjforge_notice("ImGuizmo" "${imguizmo_SOURCE_DIR}/LICENSE")
+mjforge_notice("JSON for Modern C++" "${nlohmann_json_SOURCE_DIR}/LICENSE.MIT")
+mjforge_notice("glad" "${CMAKE_SOURCE_DIR}/third_party/glad/LICENSE.txt")
+mjforge_notice("stb" "${CMAKE_SOURCE_DIR}/third_party/stb/LICENSE.txt")
+mjforge_notice("Inter font" "${CMAKE_SOURCE_DIR}/assets/fonts/LICENSE-Inter.txt")
+mjforge_notice("JetBrains Mono font" "${CMAKE_SOURCE_DIR}/assets/fonts/LICENSE-JetBrainsMono.txt")
+install(FILES "${MJF_NOTICES}" DESTINATION .)
 
 # ---------------------------------------------------------------------------------------------
 # Tests

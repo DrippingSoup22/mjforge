@@ -39,6 +39,7 @@ const char* cliUsage() {
          "  --action <name>        Run a UI action at startup (repeatable, for testing)\n"
          "  --screenshot <out.png> Render a few frames, save a screenshot and exit\n"
          "  --frames <n>           Frames to render before the screenshot (default 8)\n"
+         "  --version              Print the versions of MJForge and MuJoCo and exit\n"
          "  -h, --help             Show this help\n";
 }
 
@@ -54,6 +55,7 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
     std::string a = argv[i];
     const char* v = nullptr;
     if (a == "-h" || a == "--help") o.help = true;
+    else if (a == "--version") o.version = true;
     else if (a == "--validate") o.validate = true;
     else if (a == "--loader") o.loader = true;
     else if (a == "--export") { if (!(v = need(i, "--export"))) return false; o.exportPath = v; }

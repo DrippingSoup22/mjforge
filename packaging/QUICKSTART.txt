@@ -1,0 +1,28 @@
+MJForge @PROJECT_VERSION@ - visual editor for MuJoCo and MuJoCo Warp creatures, robots and environments
+(MuJoCo @MJFORGE_MUJOCO_VERSION_FOUND@ included)
+
+STARTING IT
+  Windows  Double-click mjforge.exe. The app is not code-signed, so Windows may say it protected
+           your PC: click "More info", then "Run anyway".
+  macOS    Open MJForge.app. The app is not notarized by Apple, so the first time macOS refuses it.
+           Either open System Settings > Privacy & Security and click "Open Anyway", or run once
+           in Terminal (then it opens normally):
+               xattr -dr com.apple.quarantine /path/to/MJForge.app
+  Linux    Run ./mjforge in this folder. It needs an X11 or XWayland desktop with OpenGL 3.3
+           (any recent Ubuntu, Fedora, Debian...).
+
+FIRST STEPS
+  The editor opens with a quadruped. File > New starts from another template; File > Open loads a
+  project (.mjforge) or an MJCF model (.xml). The examples folder has five ready-made scenes.
+  Press Space to simulate. The Issues panel explains problems and offers one-click fixes.
+  More: README.md and docs/USER_GUIDE.md.
+
+COMMAND LINE (the same program)
+  mjforge model.xml --validate                       compile with MuJoCo and print the analysis
+  mjforge project.mjforge --export out.xml --loader  write the MJCF and a MuJoCo Warp loader
+  mjforge --help                                     every option
+  On macOS the program is MJForge.app/Contents/MacOS/MJForge.
+
+Settings, window layout and autosaves are kept in %APPDATA%\mjforge (Windows),
+~/Library/Application Support/mjforge (macOS) or ~/.config/mjforge (Linux).
+The licenses of the software MJForge includes are in THIRD_PARTY_LICENSES.txt.

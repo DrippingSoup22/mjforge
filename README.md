@@ -87,6 +87,13 @@ ready-to-run MuJoCo Warp loader.
   optionally a `name_mjwarp.py` loader with measured buffer sizes. Big meshes are written as STL
   files and texture images are copied into `name_assets/`, so the export folder is self-contained.
 
+## Download
+
+Ready-to-run builds for Windows, macOS (Apple silicon) and Linux are on the
+[Releases page](https://github.com/DrippingSoup22/mjforge/releases). Unpack one anywhere and start
+`mjforge` (`MJForge.app` on macOS); MuJoCo is included. The builds are not code-signed:
+`QUICKSTART.txt` in the download explains the first start on each system.
+
 ## Building
 
 Requirements: a C++17 compiler, CMake 3.21 or newer, OpenGL 3.3, and MuJoCo 3.16. The easiest way
@@ -108,7 +115,10 @@ To use a MuJoCo release folder instead of the Python package, pass `-DMUJOCO_DIR
 
 CI builds and runs the tests on Linux, Windows (MSVC) and macOS (Apple clang). On Windows, CMake
 downloads the MuJoCo release (the Python package has no import library); on macOS it uses the
-library inside the Python package.
+library inside the Python package. `cmake --install build --prefix <folder>` gathers a runnable
+package (add `-DMJFORGE_INSTALL_BINDIR=.` for a flat folder and `-DMJFORGE_MACOS_BUNDLE=ON` for
+`MJForge.app`); pushing a `v*` tag builds and publishes the release packages
+(`.github/workflows/release.yml`).
 
 ## Using it
 
@@ -168,6 +178,7 @@ mjforge robot.xml --validate            # compile with MuJoCo and print the anal
 mjforge scene.mjforge --export scene.xml --loader  # MJCF + scene_mjwarp.py
 mjforge --template hexapod --save hexapod.mjforge
 mjforge robot.xml --save robot.mjforge  # convert MJCF to a project
+mjforge --version                       # MJForge and MuJoCo versions, plugins found
 ```
 
 ## Repository layout
@@ -199,4 +210,5 @@ The design and milestones are in [PLAN.md](PLAN.md).
 
 MuJoCo (Apache-2.0), GLFW (zlib), Dear ImGui, ImGuizmo and ImPlot (MIT), nlohmann/json (MIT),
 doctest (MIT), glad (generated loader), stb (public domain / MIT), Inter and JetBrains Mono fonts
-(SIL Open Font License, see `assets/fonts`).
+(SIL Open Font License, see `assets/fonts`). Release packages carry all of their license texts, and
+MuJoCo's notices for the software inside it, in `THIRD_PARTY_LICENSES.txt`.

@@ -1,0 +1,162 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds MJForge on Linux, Windows and macOS, runs the tests, checks that each
+# installed package runs on its own, and publishes a GitHub release with the three downloads.
+# From the Actions tab ("Run workflow"): with a tag, rebuild and re-upload that release; without
+# one, only build and check the packages of the selected branch (they stay as run artifacts).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish, e.g. v0.1.0 (empty: build the packages only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+
+jobs:
+  package:
+    name: Package for ${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          # Ubuntu 22.04 (glibc 2.35) so the build runs on most current distributions.
+          - { name: Linux, os: ubuntu-22.04, platform: linux-x86_64 }
+          - { name: Windows, os: windows-latest, platform: windows-x86_64 }
+          # MuJoCo 3.16 ships macOS libraries for Apple silicon only.
+          - { name: macOS, os: macos-latest, platform: macos-arm64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Version
+        run: |
+          ver=$(sed -n 's/^project(MJForge VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ -n "$TAG" ] && [ "v$ver" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match the version in CMakeLists.txt ($ver)"
+            exit 1
+          fi
+          echo "PKG=MJForge-$ver-${{ matrix.platform }}" >> "$GITHUB_ENV"
+
+      - name: System packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxi-dev libgl1-mesa-dev libgl1-mesa-dri xvfb
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: MuJoCo (Linux and macOS use the library inside the Python package, Windows the release zip)
+        run: python -m pip install mujoco==3.16.0
+
+      - name: Configure
+        run: |
+          args=(-DCMAKE_BUILD_TYPE=Release -DMJFORGE_INSTALL_BINDIR=.
+                -DPython3_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')")
+          case "$RUNNER_OS" in
+            Linux) args+=(-G Ninja "-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc") ;;
+            macOS) args+=(-DMJFORGE_MACOS_BUNDLE=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 -DCMAKE_OSX_ARCHITECTURES=arm64) ;;
+          esac
+          cmake -S . -B build "${args[@]}"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Unit and integration tests
+        run: |
+          dir=build/bin
+          [ -d build/bin/Release ] && dir=build/bin/Release
+          "$dir/mjforge_tests"
+
+      - name: Install into the package folder
+        run: cmake --install build --config Release --prefix "stage/$PKG"
+
+      - name: The package runs on its own
+        working-directory: stage/${{ env.PKG }}
+        run: |
+          case "$RUNNER_OS" in
+            Linux) exe=./mjforge ;;
+            Windows) exe=./mjforge.exe ;;
+            macOS) exe=./MJForge.app/Contents/MacOS/MJForge ;;
+          esac
+          version=$("$exe" --version)
+          echo "$version"
+          [[ "$version" == *"MuJoCo 3.16.0"* ]] || { echo "::error::MuJoCo runtime not found"; exit 1; }
+          [[ "$version" =~ \(([1-9][0-9]*)\ plugin ]] || { echo "::error::MuJoCo plugins not loaded"; exit 1; }
+          "$exe" --template quadruped --validate
+          for f in examples/*/*.mjforge; do "$exe" "$f" --validate > /dev/null; done
+          grep -q "Apache License" THIRD_PARTY_LICENSES.txt
+          case "$RUNNER_OS" in
+            Linux)
+              ldd ./mjforge
+              echo "Needs glibc $(objdump -T mjforge libmujoco.so.* | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 | cut -d_ -f2)"
+              xvfb-run -a -s "-screen 0 1280x800x24" ./mjforge --template hexapod --screenshot "$RUNNER_TEMP/window.png" --frames 4
+              test -s "$RUNNER_TEMP/window.png" ;;
+            macOS)
+              otool -L MJForge.app/Contents/MacOS/MJForge
+              lipo -archs MJForge.app/Contents/MacOS/MJForge
+              plutil -lint MJForge.app/Contents/Info.plist ;;
+            Windows)
+              ls *.dll
+              test -f vcruntime140.dll && test -f msvcp140.dll ;;  # runs without the Visual C++ redistributable
+          esac
+
+      - name: Archive
+        working-directory: stage
+        run: |
+          case "$RUNNER_OS" in
+            Linux) asset="$PKG.tar.gz"; tar -czf "$asset" "$PKG" ;;
+            macOS) asset="$PKG.zip"; ditto -c -k --sequesterRsrc --keepParent "$PKG" "$asset" ;;
+            Windows) asset="$PKG.zip"; 7z a -tzip "$asset" "$PKG" > /dev/null ;;
+          esac
+          ls -l "$asset"
+          echo "ASSET=stage/$asset" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: package
+    if: github.ref_type == 'tag' || inputs.tag != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          ver="${TAG#v}"
+          sed "s/@VERSION@/$ver/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "MJForge $ver" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "MJForge $ver" --notes-file "$RUNNER_TEMP/notes.md"
+          fi

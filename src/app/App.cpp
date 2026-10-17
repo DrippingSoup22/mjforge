@@ -98,8 +98,13 @@ bool App::init(const CliOptions& cli) {
     return false;
   }
 
+  // Windows and X11 measure windows in pixels, so the interface grows with the monitor's content
+  // scale. macOS measures them in points and gets Retina sharpness from the framebuffer scale,
+  // which Dear ImGui applies to the fonts by itself: scaling there too would double everything.
   float sx = 1, sy = 1;
+#ifndef __APPLE__
   glfwGetWindowContentScale(window_, &sx, &sy);
+#endif
   scale_ = std::max(1.0f, std::max(sx, sy));
 
   IMGUI_CHECKVERSION();
