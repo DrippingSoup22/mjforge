@@ -178,8 +178,19 @@ void Editor::markDirty() {
   setTitle();
 }
 
+// Undo and redo replace the document: no edit in progress may continue on the old one.
+void Editor::endEdits() {
+  activeEditId_ = 0;
+  renameId_ = kNoId;
+  gizmoDrag_.active = false;
+  gizmoDrag_.recorded = false;
+  poseDrag_ = false;
+  poseSliderRecorded_ = false;
+}
+
 void Editor::undo() {
   if (history_.undo(doc_)) {
+    endEdits();
     sel_.prune(doc_);
     ++editRevision_;
     modified_ = true;
@@ -191,6 +202,7 @@ void Editor::undo() {
 
 void Editor::redo() {
   if (history_.redo(doc_)) {
+    endEdits();
     sel_.prune(doc_);
     ++editRevision_;
     modified_ = true;
@@ -229,6 +241,7 @@ void Editor::newDocument(const std::string& templateId) {
   stopSimulation();
   removeAutosave();
   doc_ = std::move(d);
+  endEdits();
   history_.clear();
   sel_.clear();
   path_.clear();
@@ -248,6 +261,7 @@ bool Editor::openPath(const std::string& path) {
   stopSimulation();
   removeAutosave();
   doc_ = std::move(d);
+  endEdits();
   history_.clear();
   sel_.clear();
   path_ = mjcf ? std::string() : path;  // MJCF opens as a new, unsaved project
@@ -1026,6 +1040,9 @@ void Editor::handleShortcuts() {
   if (io.WantTextInput) return;
   // Dialogs and menus own the keyboard: Delete behind the export dialog must not delete.
   if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
+  // Nor while something is dragged (a gizmo, a value, a pose): an undo or delete in the middle of
+  // a drag would be edited over by what the drag captured when it started.
+  if (gizmoDrag_.active || poseDrag_ || ImGui::IsAnyItemActive()) return;
   bool ctrl = io.KeyCtrl, shift = io.KeyShift;
   auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
   if (ctrl && pressed(ImGuiKey_Z)) { shift ? redo() : undo(); return; }

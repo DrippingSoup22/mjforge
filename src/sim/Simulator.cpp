@@ -222,9 +222,12 @@ bool Simulator::update(const ModelPtr& src, const ExportMap& map) {
       remap(smp.force);
     }
   }
+  // The body being pushed is a compiled index: it follows its body (an edit may reorder them).
+  Id pushed = perturbBody_ >= 0 && size_t(perturbBody_) < map_.bodies.size() ? map_.bodies[size_t(perturbBody_)] : kNoId;
   model_ = std::move(nm);
   data_ = std::move(d);
   map_ = map;
+  perturbBody_ = pushed != kNoId ? indexOf(map_.bodies, pushed) : -1;
   baseDisableFlags_ = model_->opt.disableflags;
   try {
     mj_forward(model_.get(), data_.get());

@@ -61,6 +61,7 @@ void Editor::drawActuatorsPanel() {
 
   ImGuiTableFlags fl = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
                        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+  Id deleteAfter = kNoId;
   if (ImGui::BeginTable("##acts", 8, fl)) {
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableSetupColumn("Name", 0, 1.6f);
@@ -80,10 +81,7 @@ void Editor::drawActuatorsPanel() {
       if (ImGui::Selectable(doc_.displayName(a.id).c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
         select(a.id, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl);
       if (ImGui::BeginPopupContextItem("##ctx")) {
-        if (ImGui::MenuItem("Delete")) {
-          sel_.set(a.id);
-          deleteSelection();
-        }
+        if (ImGui::MenuItem("Delete")) deleteAfter = a.id;  // not while the loop walks the actuators
         ImGui::EndPopup();
       }
       ImGui::TableSetColumnIndex(1);
@@ -110,6 +108,10 @@ void Editor::drawActuatorsPanel() {
       ImGui::PopID();
     }
     ImGui::EndTable();
+  }
+  if (deleteAfter != kNoId) {
+    sel_.set(deleteAfter);
+    deleteSelection();
   }
   ImGui::End();
 }
@@ -142,6 +144,7 @@ void Editor::drawSensorsPanel() {
   ImGui::TextDisabled("(%d values in sensordata)", total);
   ImGuiTableFlags fl = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
                        ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+  Id deleteAfter = kNoId;
   if (ImGui::BeginTable("##sens", 5, fl)) {
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableSetupColumn("Name", 0, 1.6f);
@@ -158,10 +161,7 @@ void Editor::drawSensorsPanel() {
       if (ImGui::Selectable(doc_.displayName(s.id).c_str(), sel_.contains(s.id), ImGuiSelectableFlags_SpanAllColumns))
         select(s.id, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl);
       if (ImGui::BeginPopupContextItem("##ctx")) {
-        if (ImGui::MenuItem("Delete")) {
-          sel_.set(s.id);
-          deleteSelection();
-        }
+        if (ImGui::MenuItem("Delete")) deleteAfter = s.id;  // not while the loop walks the sensors
         ImGui::EndPopup();
       }
       ImGui::TableSetColumnIndex(1);
@@ -179,6 +179,10 @@ void Editor::drawSensorsPanel() {
       ImGui::PopID();
     }
     ImGui::EndTable();
+  }
+  if (deleteAfter != kNoId) {
+    sel_.set(deleteAfter);
+    deleteSelection();
   }
   ImGui::End();
 }

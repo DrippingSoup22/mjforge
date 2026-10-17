@@ -221,6 +221,7 @@ void Editor::drawRecoverModal() {
     if (loadProject(d, recoverPath_, &err, &state)) {
       stopSimulation();
       doc_ = std::move(d);
+      endEdits();
       history_.clear();
       sel_.clear();
       auto j = nlohmann::json::parse(state, nullptr, false);

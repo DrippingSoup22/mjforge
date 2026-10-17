@@ -232,9 +232,13 @@ class Editor {
   void drawConstraintMenu();
   void buildConstraintOverlays();
 
-  // outliner internals
+  void endEdits();
+
+  // outliner internals. The tree only draws: what its items ask for (the context menu, a drop, a
+  // rename, a visibility toggle) runs after it, so the document never changes under its loops.
   void outlinerBody(uint32_t bodyIndex, const std::string& filter);
   void outlinerLeaf(Id id, const char* name, int icon, unsigned int color);
+  void outlinerItemMenu(Id id);
   bool outlinerDragDrop(Id targetBody);
 
   // validation
@@ -388,6 +392,9 @@ class Editor {
   Id renameId_ = kNoId;
   std::string renameBuf_;
   bool focusRename_ = false;
+  unsigned int outlinerMenuPopup_ = 0;  // ImGui ID of the item context menu
+  Id outlinerMenuId_ = kNoId;
+  std::vector<std::function<void()>> outlinerLater_;
 };
 
 enum FileDialogPurpose { kPurposeOpen = 1, kPurposeSaveAs = 2, kPurposeExport = 3, kPurposeImport = 4, kPurposeMesh = 5 };

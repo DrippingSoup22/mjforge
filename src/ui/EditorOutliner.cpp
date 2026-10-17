@@ -153,11 +153,13 @@ void Editor::drawElementContextMenu(Id id) {
     if (k == Kind::Body || k == Kind::Geom) {
       bool hidden = k == Kind::Body ? doc_.body(id)->hidden : doc_.geom(id)->hidden;
       if (ImGui::MenuItem(hidden ? "Show" : "Hide")) {
+        checkpoint(hidden ? "Show" : "Hide");
         if (k == Kind::Body) doc_.body(id)->hidden = !hidden;
         else doc_.geom(id)->hidden = !hidden;
       }
       bool locked = k == Kind::Body ? doc_.body(id)->locked : doc_.geom(id)->locked;
       if (ImGui::MenuItem("Lock (not pickable in the viewport)", nullptr, locked)) {
+        checkpoint(locked ? "Unlock" : "Lock");
         if (k == Kind::Body) doc_.body(id)->locked = !locked;
         else doc_.geom(id)->locked = !locked;
       }
@@ -174,19 +176,22 @@ bool Editor::outlinerDragDrop(Id target) {
       int n = p->DataSize / int(sizeof(Id));
       const Id* ids = static_cast<const Id*>(p->Data);
       std::vector<Id> moving(ids, ids + n);
-      bool any = false;
-      for (Id id : moving) {
-        Kind k = doc_.kindOf(id);
-        if (k == Kind::Body ? canReparent(doc_, id, target) : (doc_.ownerBody(id) != target && doc_.exists(id))) {
-          if (k == Kind::Joint && target == kWorldId) continue;
-          if (!any) checkpoint("Reparent");
-          any = true;
-          if (k == Kind::Body) reparentBody(doc_, id, target, true);
-          else moveToBody(doc_, id, target, true);
+      dropped = true;
+      outlinerLater_.push_back([this, moving, target] {
+        if (!doc_.body(target)) return;
+        bool any = false;
+        for (Id id : moving) {
+          Kind k = doc_.kindOf(id);
+          if (k == Kind::Body ? canReparent(doc_, id, target) : (doc_.ownerBody(id) != target && doc_.exists(id))) {
+            if (k == Kind::Joint && target == kWorldId) continue;
+            if (!any) checkpoint("Reparent");
+            any = true;
+            if (k == Kind::Body) reparentBody(doc_, id, target, true);
+            else moveToBody(doc_, id, target, true);
+          }
         }
-      }
-      if (any) markDirty();
-      dropped = any;
+        if (any) markDirty();
+      });
     }
     ImGui::EndDragDropTarget();
   }
@@ -207,10 +212,15 @@ void Editor::outlinerLeaf(Id id, const char* name, int iconIdx, unsigned int col
     }
     if (ImGui::InputText("##rename", &renameBuf_, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
       Kind k = doc_.kindOf(id);
-      if (!renameBuf_.empty() && doc_.nameTaken(k, renameBuf_, id)) notify("Name already used: " + renameBuf_, pal::kWarning);
-      else {
-        checkpoint("Rename");
-        doc_.setName(id, renameBuf_);
+      if (!renameBuf_.empty() && doc_.nameTaken(k, renameBuf_, id)) {
+        notify("Name already used: " + renameBuf_, pal::kWarning);
+      } else {
+        std::string name = renameBuf_;
+        outlinerLater_.push_back([this, id, name] {
+          if (!doc_.exists(id)) return;
+          checkpoint("Rename");
+          doc_.setName(id, name);
+        });
       }
       renameId_ = kNoId;
     }
@@ -238,11 +248,16 @@ void Editor::outlinerLeaf(Id id, const char* name, int iconIdx, unsigned int col
     ImGui::Text("Move %s%s", name, payload.size() > 1 ? " (+ others)" : "");
     ImGui::EndDragDropSource();
   }
-  if (ImGui::BeginPopupContextItem("##ctx")) {
-    drawElementContextMenu(id);
-    ImGui::EndPopup();
-  }
+  outlinerItemMenu(id);
   ImGui::PopID();
+}
+
+void Editor::outlinerItemMenu(Id id) {
+  // Right-clicking an item opens the one context menu, drawn after the tree.
+  if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup)) {
+    outlinerMenuId_ = id;
+    ImGui::OpenPopupEx(outlinerMenuPopup_);
+  }
 }
 
 void Editor::outlinerBody(uint32_t bi, const std::string& filter) {
@@ -290,22 +305,25 @@ void Editor::outlinerBody(uint32_t bi, const std::string& filter) {
       ImGui::EndDragDropSource();
     }
     outlinerDragDrop(b.id);
-    if (ImGui::BeginPopupContextItem("##ctx")) {
-      drawElementContextMenu(b.id);
-      ImGui::EndPopup();
-    }
+    outlinerItemMenu(b.id);
     // Visibility toggle on the right edge.
     if (!isWorld) {
       ImVec2 save = ImGui::GetCursorScreenPos();
       float bs = ImGui::GetFrameHeight();
       ImGui::SetCursorScreenPos(ImVec2(mx.x - bs, mn.y));
-      Body* mb = doc_.body(b.id);
-      if (iconButton("##vis", mb->hidden ? Icon::EyeClosed : Icon::EyeOpen, false, mb->hidden ? "Show" : "Hide", bs,
-                     mb->hidden ? pal::kTextDim : IM_COL32(150, 156, 168, 160)))
-        mb->hidden = !mb->hidden;
+      if (iconButton("##vis", b.hidden ? Icon::EyeClosed : Icon::EyeOpen, false, b.hidden ? "Show" : "Hide", bs,
+                     b.hidden ? pal::kTextDim : IM_COL32(150, 156, 168, 160))) {
+        Id bid = b.id;
+        outlinerLater_.push_back([this, bid] {
+          if (Body* x = doc_.body(bid)) {
+            checkpoint(x->hidden ? "Show" : "Hide");
+            x->hidden = !x->hidden;
+          }
+        });
+      }
       ImGui::SetCursorScreenPos(save);
     }
-    if (!isWorld) doc_.body(b.id)->expanded = open;
+    if (!isWorld) doc_.bodies[bi].expanded = open;  // editor state, not an edit
   }
   if (open) {
     for (uint32_t ji : ix.bodyJoints[bi]) {
@@ -341,6 +359,8 @@ void Editor::drawOutliner() {
     ImGui::EndPopup();
   }
   ImGui::BeginChild("##tree", ImVec2(0, 0), ImGuiChildFlags_None);
+  outlinerMenuPopup_ = ImGui::GetID("##outliner_item_menu");
+  outlinerLater_.clear();
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 1));
   if (!filter.empty()) {
@@ -402,6 +422,16 @@ void Editor::drawOutliner() {
   ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, std::max(40.0f, ImGui::GetContentRegionAvail().y)));
   outlinerDragDrop(kWorldId);
   if (ImGui::IsItemClicked(0)) sel_.clear();
+  // Everything that changes the document, now that the tree's loops are done.
+  if (ImGui::BeginPopupEx(outlinerMenuPopup_,
+                          ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings)) {
+    if (doc_.exists(outlinerMenuId_)) drawElementContextMenu(outlinerMenuId_);
+    else ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+  std::vector<std::function<void()>> later = std::move(outlinerLater_);
+  outlinerLater_.clear();
+  for (const auto& f : later) f();
   ImGui::EndChild();
   ImGui::End();
 }
