@@ -558,3 +558,44 @@ TEST_CASE("review: camera image settings reach MuJoCo and come back on import") 
   REQUIRE(importMjcfString(xml, back, &err));
   CHECK(writeMjcf(back) == xml);
 }
+
+TEST_CASE("review: hostile project files are refused before they exhaust memory or the stack") {
+  std::string err;
+  auto withBodies = [](int n, bool cycle) {
+    nlohmann::json j = nlohmann::json::parse(projectToJson(Document{}));
+    for (int i = 0; i < n; ++i) {
+      Id id = Id(100 + i);
+      Id parent = i == 0 ? (cycle ? Id(100 + n - 1) : kWorldId) : Id(99 + i);
+      j["bodies"].push_back({{"id", id}, {"name", "b" + std::to_string(i)}, {"parent", parent}, {"pos", {0, 0, 0.01}}});
+    }
+    j["nextId"] = 100 + n;
+    return j;
+  };
+  // Nested far deeper than MuJoCo can read: refused (recursive code would run out of stack).
+  Document d;
+  CHECK_FALSE(projectFromJson(d, withBodies(5000, false).dump(), &err));
+  CHECK(err.find("nested") != std::string::npos);
+  // Deeper than MuJoCo's XML reader accepts (496): loads, and the analysis says why it won't compile.
+  REQUIRE(projectFromJson(d, withBodies(600, false).dump(), &err));
+  addGeom(d, d.bodies.back().id, GeomType::Sphere, {0.01, 0, 0}, {});
+  CHECK_FALSE(compileMjcf(writeMjcf(d)).ok);
+  AnalysisReport rep = analyzeModel(d, nullptr, false);
+  bool depthError = false;
+  for (const Issue& i : rep.issues) depthError |= i.code == "body-depth" && i.severity == Severity::Error;
+  CHECK(depthError);
+  // A long parent cycle is broken once, in linear time.
+  REQUIRE(projectFromJson(d, withBodies(900, true).dump(), &err));
+  CHECK(d.index().dfsOrder.size() == d.bodies.size());
+  CHECK(d.body(100)->parent == kWorldId);
+  // A height field claiming 10^10 samples is refused before anything is allocated; textures are
+  // clamped to sizes MuJoCo can generate.
+  nlohmann::json j = nlohmann::json::parse(projectToJson(Document{}));
+  j["hfields"] = {{{"id", 50}, {"name", "huge"}, {"nrow", 100000}, {"ncol", 100000}, {"data", ""}}};
+  CHECK_FALSE(projectFromJson(d, j.dump(), &err));
+  CHECK(err.find("too large") != std::string::npos);
+  j = nlohmann::json::parse(projectToJson(Document{}));
+  j["textures"] = {{{"id", 51}, {"name", "t"}, {"width", 1000000}, {"height", -5}}};
+  REQUIRE(projectFromJson(d, j.dump(), &err));
+  CHECK(d.textures[0].width == 8192);
+  CHECK(d.textures[0].height == 1);
+}

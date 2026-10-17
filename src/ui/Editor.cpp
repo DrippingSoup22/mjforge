@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -350,15 +351,35 @@ std::string Editor::editorStateJson() const {
   return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
+namespace {
+
+// Readers for settings files that may be damaged: a missing, mistyped or non-finite value keeps
+// the default instead of throwing (which would stop the editor from starting or opening a file).
+double numberOr(const nlohmann::json& j, const char* key, double def, double lo, double hi) {
+  if (!j.is_object() || !j.contains(key) || !j[key].is_number()) return def;
+  double v = j[key].get<double>();
+  return std::isfinite(v) ? std::clamp(v, lo, hi) : def;
+}
+
+bool boolOr(const nlohmann::json& j, const char* key, bool def) {
+  return j.is_object() && j.contains(key) && j[key].is_boolean() ? j[key].get<bool>() : def;
+}
+
+}  // namespace
+
 void Editor::applyEditorState(const std::string& s) {
   auto j = nlohmann::json::parse(s, nullptr, false);
-  if (j.is_discarded() || !j.contains("camera")) return;
+  if (j.is_discarded() || !j.is_object() || !j.contains("camera") || !j["camera"].is_object()) return;
   const auto& c = j["camera"];
-  if (c.contains("target") && c["target"].size() == 3)
-    vp_.cam.target = {c["target"][0].get<double>(), c["target"][1].get<double>(), c["target"][2].get<double>()};
-  vp_.cam.distance = c.value("distance", vp_.cam.distance);
-  vp_.cam.azimuth = c.value("azimuth", vp_.cam.azimuth);
-  vp_.cam.elevation = c.value("elevation", vp_.cam.elevation);
+  if (c.contains("target") && c["target"].is_array() && c["target"].size() == 3) {
+    const auto& t = c["target"];
+    bool ok = true;
+    for (const auto& x : t) ok &= x.is_number() && std::isfinite(x.get<double>()) && std::fabs(x.get<double>()) < 1e6;
+    if (ok) vp_.cam.target = {t[0].get<double>(), t[1].get<double>(), t[2].get<double>()};
+  }
+  vp_.cam.distance = numberOr(c, "distance", vp_.cam.distance, 1e-3, 1e6);
+  vp_.cam.azimuth = numberOr(c, "azimuth", vp_.cam.azimuth, -1e6, 1e6);
+  vp_.cam.elevation = numberOr(c, "elevation", vp_.cam.elevation, -90, 90);
 }
 
 void Editor::loadPrefs() {
@@ -366,19 +387,21 @@ void Editor::loadPrefs() {
   std::string text;
   if (!readTextFile(configDir_ + "/prefs.json", text)) return;
   auto j = nlohmann::json::parse(text, nullptr, false);
-  if (j.is_discarded()) return;
-  if (j.contains("recent")) for (const auto& r : j["recent"]) recent_.push_back(r.get<std::string>());
-  lastDir_ = j.value("lastDir", std::string());
-  snap_ = j.value("snap", false);
-  snapMove_ = j.value("snapMove", 0.05f);
-  snapAngle_ = j.value("snapAngle", 15.0f);
-  snapScale_ = j.value("snapScale", 0.01f);
-  vp_.showShadows = j.value("shadows", true);
-  vp_.showGrid = j.value("grid", true);
-  autosaveSeconds_ = j.value("autosaveSeconds", 30.0);
-  exportAngle_ = j.value("exportAngle", 0);
-  exportSplit_ = j.value("exportSplit", false);
-  exportLoader_ = j.value("exportLoader", true);
+  if (j.is_discarded() || !j.is_object()) return;
+  if (j.contains("recent") && j["recent"].is_array())
+    for (const auto& r : j["recent"])
+      if (r.is_string()) recent_.push_back(r.get<std::string>());
+  if (j.contains("lastDir") && j["lastDir"].is_string()) lastDir_ = j["lastDir"].get<std::string>();
+  snap_ = boolOr(j, "snap", false);
+  snapMove_ = float(numberOr(j, "snapMove", 0.05, 1e-6, 1e3));
+  snapAngle_ = float(numberOr(j, "snapAngle", 15.0, 1e-3, 180));
+  snapScale_ = float(numberOr(j, "snapScale", 0.01, 1e-6, 1e3));
+  vp_.showShadows = boolOr(j, "shadows", true);
+  vp_.showGrid = boolOr(j, "grid", true);
+  autosaveSeconds_ = numberOr(j, "autosaveSeconds", 30.0, 0, 86400);
+  exportAngle_ = int(numberOr(j, "exportAngle", 0, 0, 1));
+  exportSplit_ = boolOr(j, "exportSplit", false);
+  exportLoader_ = boolOr(j, "exportLoader", true);
 }
 
 void Editor::savePrefs() {

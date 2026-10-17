@@ -1,6 +1,7 @@
 #include "core/ProjectIO.h"
 
 #include <algorithm>
+#include <stdexcept>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -339,21 +340,42 @@ template <class T> void loadArray(const json& root, const char* key, std::vector
 
 // Damaged or hand-edited files: elements on missing bodies go to the world, parent cycles are
 // broken, and mesh / height field arrays are made consistent, so every later step can trust them.
-void repairReferences(Document& doc) {
+// Returns how deep the bodies are nested.
+int repairReferences(Document& doc) {
   std::unordered_map<Id, size_t> bodyAt;
   for (size_t i = 0; i < doc.bodies.size(); ++i) bodyAt[doc.bodies[i].id] = i;
   auto isBody = [&](Id id) { return bodyAt.count(id) > 0; };
+  // Walk up from each body until a body whose depth is known; meeting a body of the current walk
+  // closes a cycle, which is broken there. Every body is walked once.
+  std::vector<int> depth(doc.bodies.size(), -1);  // -1 unknown, -2 on the current walk
+  depth[0] = 0;
+  int maxDepth = 0;
+  std::vector<size_t> walk;
   for (size_t i = 1; i < doc.bodies.size(); ++i) {
-    Body& b = doc.bodies[i];
-    if (!isBody(b.parent) || b.parent == b.id) b.parent = kWorldId;
-    // Walk up; reaching this body again means a cycle that never reaches the world.
-    std::unordered_set<Id> seen{b.id};
-    for (Id p = b.parent; p != kWorldId;) {
-      if (!seen.insert(p).second) {
-        b.parent = kWorldId;
-        break;
+    for (bool cycle = true; cycle;) {
+      walk.clear();
+      size_t k = i;
+      cycle = false;
+      while (depth[k] == -1) {
+        depth[k] = -2;
+        walk.push_back(k);
+        Body& b = doc.bodies[k];
+        if (!isBody(b.parent) || b.parent == b.id) b.parent = kWorldId;
+        size_t p = bodyAt[b.parent];
+        if (depth[p] == -2) {  // the body the cycle returns to goes to the world; walk again
+          doc.bodies[p].parent = kWorldId;
+          cycle = true;
+          break;
+        }
+        k = p;
       }
-      p = doc.bodies[bodyAt[p]].parent;
+      if (cycle) {
+        for (size_t w : walk) depth[w] = -1;
+        continue;
+      }
+      int d = depth[k];
+      for (auto it = walk.rbegin(); it != walk.rend(); ++it) depth[*it] = ++d;
+      maxDepth = std::max(maxDepth, d);
     }
   }
   auto onBody = [&](auto& vec) {
@@ -389,6 +411,12 @@ void repairReferences(Document& doc) {
       h.data = std::move(data);
     }
   }
+  // Built-in textures are generated at their size by MuJoCo (the inspector's range).
+  for (Texture& t : doc.textures) {
+    t.width = std::clamp(t.width, 1, 8192);
+    t.height = std::clamp(t.height, 1, 8192);
+  }
+  return maxDepth;
 }
 
 }  // namespace
@@ -541,6 +569,8 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         Hfield h;
         Loader l{item};
         visit(l, h);
+        if (int64_t(std::max(h.nrow, 0)) * std::max(h.ncol, 0) > kMaxHfieldSamples)
+          throw std::runtime_error("height field '" + h.name + "' is too large");
         if (item.contains("data")) h.data = std::make_shared<const std::vector<float>>(readNumbers<float>(item["data"]));
         doc.hfields.push_back(std::move(h));
       }
@@ -620,7 +650,13 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     Id stored = next != root.end() && next->is_number_unsigned() && next->get<uint64_t>() < (uint64_t(1) << 30)
                     ? Id(next->get<uint64_t>()) : 0;
     doc.nextId = std::max<Id>(stored, maxId + 1);
-    repairReferences(doc);
+    // MuJoCo reads at most 496 nested bodies (the analysis says so); far deeper files are damaged
+    // or hostile, and would exhaust the stack of recursive code.
+    int depth = repairReferences(doc);
+    if (depth > kMaxBodyDepth) {
+      if (error) *error = "Malformed project: bodies are nested " + std::to_string(depth) + " deep.";
+      return false;
+    }
     if (version < 3)
       for (Geom& g : doc.geoms)
         if (g.material != kNoId && g.rgba == Color{1, 1, 1, 1}) g.rgba = Geom{}.rgba;

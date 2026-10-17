@@ -153,15 +153,20 @@ const DocIndex& Document::index() const {
 
   ix.dfsOrder.clear();
   ix.depth.assign(nb, 0);
+  // Pre-order depth-first walk with an explicit stack (deep chains must not exhaust the call stack).
   std::vector<uint8_t> visited(nb, 0);
-  std::function<void(uint32_t, int)> dfs = [&](uint32_t b, int d) {
-    if (visited[b]) return;  // guards against accidental cycles
+  std::vector<std::pair<uint32_t, int>> stack;
+  if (nb > 0) stack.push_back({0u, 0});
+  while (!stack.empty()) {
+    auto [b, d] = stack.back();
+    stack.pop_back();
+    if (visited[b]) continue;  // guards against accidental cycles
     visited[b] = 1;
     ix.dfsOrder.push_back(b);
     ix.depth[b] = d;
-    for (uint32_t c : ix.childBodies[b]) dfs(c, d + 1);
-  };
-  if (nb > 0) dfs(0, 0);
+    const std::vector<uint32_t>& children = ix.childBodies[b];
+    for (auto it = children.rbegin(); it != children.rend(); ++it) stack.push_back({*it, d + 1});
+  }
   indexRevision_ = revision_;
   return index_;
 }

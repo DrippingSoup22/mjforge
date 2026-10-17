@@ -996,6 +996,18 @@ class Analyzer {
         };
       }
     }
+    // MuJoCo's XML reader (tinyxml2) accepts at most 496 nested bodies.
+    {
+      const DocIndex& ix = doc_.index();
+      size_t deepest = 0;
+      for (size_t bi = 1; bi < ix.depth.size(); ++bi)
+        if (ix.depth[bi] > ix.depth[deepest]) deepest = bi;
+      if (ix.depth.size() > 1 && ix.depth[deepest] > 496)
+        add(Severity::Error, IssueArea::Model, "body-depth", fmt("Bodies are nested %d deep", ix.depth[deepest]),
+            "MuJoCo's XML reader accepts at most 496 nested bodies, so it cannot load this model. Attach long chains "
+            "to a body higher up.",
+            {doc_.bodies[deepest].id});
+    }
     // Explicit inertials are checked by MuJoCo as written, after the compiler's lower bounds (with
     // inertiafromgeom="true" the geoms replace them).
     if (doc_.compiler.inertiafromgeom != InertiaFromGeom::True)

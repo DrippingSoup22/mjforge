@@ -1,6 +1,7 @@
 // Project files (.mjforge): the full document as versioned, human-readable JSON.
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "core/Document.h"
@@ -10,6 +11,11 @@ namespace mjf {
 // 2: height field data as base64. 3: a geom color other than the default overrides its material,
 // as in MuJoCo (older files used white for "show the material").
 constexpr int kProjectFormatVersion = 3;
+
+// Files beyond these are refused as damaged (or hostile): MuJoCo reads at most 496 nested bodies,
+// and a 64M-sample height field (256 MB) is far beyond any terrain.
+constexpr int kMaxBodyDepth = 1000;
+constexpr int64_t kMaxHfieldSamples = int64_t(1) << 26;
 
 std::string projectToJson(const Document& doc, const std::string& editorStateJson = "");
 // Replaces `doc` on success. `editorStateJson` (optional) receives the "editor" object.
