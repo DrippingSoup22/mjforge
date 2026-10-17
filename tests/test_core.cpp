@@ -435,3 +435,39 @@ TEST_CASE("start pose: joint values, servo targets, mirror, reset, floor") {
   CHECK(keyJointValue(&key, fl) == fl.ref);
   CHECK(key.jointQpos(free->id) != nullptr);
 }
+
+TEST_CASE("align and distribute") {
+  Document doc;
+  REQUIRE(makeTemplate("empty", doc));
+  Id a = addBody(doc, kWorldId, {{0, 0, 0.5}, {}}, "a", Role::Environment);
+  addGeom(doc, a, GeomType::Box, {0.1, 0.1, 0.1}, {});
+  Id b = addBody(doc, kWorldId, {{1, 0.3, 0.2}, axisAngle({0, 0, 1}, 0.3)}, "b", Role::Environment);
+  addGeom(doc, b, GeomType::Box, {0.2, 0.2, 0.2}, {});
+  Id c = addBody(doc, kWorldId, {{2.5, -0.4, 1.0}, {}}, "c", Role::Model);
+  addGeom(doc, c, GeomType::Sphere, {0.05, 0, 0}, {});
+  Id free = addJoint(doc, c, JointType::Free);
+  Keyframe& key = startKeyframe(doc);
+  setKeyJointQpos(key, free, {2.5, -0.4, 1.0, 1, 0, 0, 0});
+  // Bottoms on one level: the lowest bottom (b at 0.2 - 0.2 = 0).
+  alignElements(doc, {a, b, c}, 2, -1);
+  for (Id id : {a, b, c}) CHECK(elementWorldBounds(doc, id).lo.z == doctest::Approx(0.0).epsilon(1e-9));
+  // The free body's start pose moved with it.
+  CHECK((*doc.keyframes[0].jointQpos(free))[2] == doctest::Approx(doc.body(c)->pos.z));
+  // Centers on the mean y.
+  double mean = 0;
+  for (Id id : {a, b, c}) mean += elementWorldBounds(doc, id).center().y / 3;
+  alignElements(doc, {a, b, c}, 1, 0);
+  for (Id id : {a, b, c}) CHECK(elementWorldBounds(doc, id).center().y == doctest::Approx(mean));
+  // Evenly spaced along x between the outer two.
+  distributeElements(doc, {c, a, b}, 0);
+  double xa = elementWorldBounds(doc, a).center().x, xb = elementWorldBounds(doc, b).center().x,
+         xc = elementWorldBounds(doc, c).center().x;
+  CHECK(xb - xa == doctest::Approx(xc - xb));
+  // Geoms inside a rotated body move in world space too.
+  Id g = addGeom(doc, b, GeomType::Sphere, {0.05, 0, 0}, {{0.1, 0, 0}, {}});
+  Vec3 before = elementWorldBounds(doc, g).center();
+  translateWorld(doc, g, {0, 0, 0.5});
+  Vec3 after = elementWorldBounds(doc, g).center();
+  CHECK(after.x == doctest::Approx(before.x));
+  CHECK(after.z - before.z == doctest::Approx(0.5));
+}

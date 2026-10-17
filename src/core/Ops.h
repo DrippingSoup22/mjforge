@@ -98,6 +98,18 @@ int mirrorKeyPose(const Document& doc, Keyframe& key, Id root, bool leftToRight)
 // otherwise the body itself.
 void liftStartPose(Document& doc, Id root, double dz);
 
+// ----- align & distribute -----
+// Moves an element (body with its subtree, geom, site, camera, light) by a world-space offset. A
+// top-level body's free joint keeps its start pose relative to the body.
+void translateWorld(Document& doc, Id element, const Vec3& delta);
+// World bounding box of an element: a body's subtree, a geom, or a point for sites and frames.
+Aabb elementWorldBounds(const Document& doc, Id element);
+// Lines the elements up along a world axis (0 x, 1 y, 2 z): side -1 the low ends of their bounds,
+// 0 their centers, +1 the high ends, matched to the extreme (or mean center) of the group.
+void alignElements(Document& doc, const std::vector<Id>& ids, int axis, int side);
+// Spaces the elements' centers evenly between the two outermost ones along a world axis.
+void distributeElements(Document& doc, const std::vector<Id>& ids, int axis);
+
 // ----- placement & collision presets -----
 // Moves a top-level body so its lowest colliding geom rests `clearance` above z = floorZ at the
 // start pose (the first keyframe if there is one).

@@ -769,6 +769,74 @@ Id addLimb(Document& doc, Id parent, const Vec3& worldPoint, const LimbSpec& spe
   return first;
 }
 
+void translateWorld(Document& doc, Id id, const Vec3& delta) {
+  Kind k = doc.kindOf(id);
+  if (id == kWorldId || k == Kind::None) return;
+  if (k == Kind::Body) {
+    Body* b = doc.body(id);
+    b->pos += rotate(conj(bodyWorldPose(doc, b->parent).quat), delta);
+    // Free bodies: keyframe positions are world positions, shift them too.
+    for (const Joint& j : doc.joints)
+      if (j.body == id && j.type == JointType::Free)
+        for (Keyframe& key : doc.keyframes)
+          for (auto& [jid, q] : key.qpos)
+            if (jid == j.id && q.size() == 7)
+              for (int i = 0; i < 3; ++i) q[i] += delta[i];
+  } else if (k == Kind::Geom || k == Kind::Site || k == Kind::Camera || k == Kind::Light) {
+    Pose local = elementLocalPose(doc, id);
+    local.pos += rotate(conj(bodyWorldPose(doc, doc.ownerBody(id)).quat), delta);
+    setElementLocalPose(doc, id, local);
+  }
+  doc.touch();
+}
+
+Aabb elementWorldBounds(const Document& doc, Id id) {
+  Aabb box;
+  std::vector<Pose> poses = computeBodyPoses(doc);
+  switch (doc.kindOf(id)) {
+    case Kind::Body: box = subtreeAabb(doc, poses, id); break;
+    case Kind::Geom: {
+      const Geom* g = doc.geom(id);
+      if (g->type != GeomType::Plane) box.add(geomWorldAabb(doc, *g, poses[doc.bodyIndex(g->body)] * Pose{g->pos, g->quat}));
+      break;
+    }
+    default: break;
+  }
+  if (!box.valid() && doc.exists(id)) box.add(elementWorldPose(doc, poses, id).pos);
+  return box;
+}
+
+void alignElements(Document& doc, const std::vector<Id>& ids, int axis, int side) {
+  if (ids.size() < 2 || axis < 0 || axis > 2) return;
+  std::vector<Aabb> boxes;
+  for (Id id : ids) boxes.push_back(elementWorldBounds(doc, id));
+  double target = side < 0 ? 1e300 : side > 0 ? -1e300 : 0;
+  for (const Aabb& b : boxes) {
+    if (side < 0) target = std::min(target, b.lo[axis]);
+    else if (side > 0) target = std::max(target, b.hi[axis]);
+    else target += b.center()[axis] / double(boxes.size());
+  }
+  for (size_t i = 0; i < ids.size(); ++i) {
+    double cur = side < 0 ? boxes[i].lo[axis] : side > 0 ? boxes[i].hi[axis] : boxes[i].center()[axis];
+    Vec3 d;
+    d[axis] = target - cur;
+    if (std::fabs(d[axis]) > 1e-12) translateWorld(doc, ids[i], d);
+  }
+}
+
+void distributeElements(Document& doc, const std::vector<Id>& ids, int axis) {
+  if (ids.size() < 3 || axis < 0 || axis > 2) return;
+  std::vector<std::pair<double, Id>> order;
+  for (Id id : ids) order.push_back({elementWorldBounds(doc, id).center()[axis], id});
+  std::sort(order.begin(), order.end());
+  double a = order.front().first, b = order.back().first;
+  for (size_t i = 1; i + 1 < order.size(); ++i) {
+    Vec3 d;
+    d[axis] = a + (b - a) * double(i) / double(order.size() - 1) - order[i].first;
+    if (std::fabs(d[axis]) > 1e-12) translateWorld(doc, order[i].second, d);
+  }
+}
+
 Keyframe& startKeyframe(Document& doc) {
   if (doc.keyframes.empty()) {
     Keyframe k;

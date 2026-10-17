@@ -663,6 +663,45 @@ void Editor::drawMenuBar() {
       if (ImGui::MenuItem("Across XY plane (up/down)")) mirrorSelection(2);
       ImGui::EndMenu();
     }
+    // Movable elements, without those that move with a selected ancestor body.
+    std::vector<Id> movable;
+    for (Id id : sel_.ids) {
+      Kind k = doc_.kindOf(id);
+      if (id == kWorldId || !(k == Kind::Body || k == Kind::Geom || k == Kind::Site || k == Kind::Camera || k == Kind::Light))
+        continue;
+      Id owner = k == Kind::Body ? doc_.body(id)->parent : doc_.ownerBody(id);
+      bool covered = false;
+      for (Id o : sel_.ids) covered |= o != id && doc_.kindOf(o) == Kind::Body && doc_.isAncestor(o, owner);
+      if (!covered) movable.push_back(id);
+    }
+    if (ImGui::BeginMenu("Align", movable.size() >= 2)) {
+      const char* sides[3][3] = {{"Left (min X)", "Center X", "Right (max X)"},
+                                 {"Front (min Y)", "Center Y", "Back (max Y)"},
+                                 {"Bottom (min Z)", "Center Z", "Top (max Z)"}};
+      for (int axis = 0; axis < 3; ++axis) {
+        if (axis) ImGui::Separator();
+        for (int side = -1; side <= 1; ++side)
+          if (ImGui::MenuItem(sides[axis][side + 1])) {
+            checkpoint("Align");
+            alignElements(doc_, movable, axis, side);
+          }
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Line up the selected elements' bounding boxes (world axes). Select at least two.");
+    if (ImGui::BeginMenu("Distribute", movable.size() >= 3)) {
+      for (int axis = 0; axis < 3; ++axis) {
+        const char* label[3] = {"Evenly along X", "Evenly along Y", "Evenly along Z"};
+        if (ImGui::MenuItem(label[axis])) {
+          checkpoint("Distribute");
+          distributeElements(doc_, movable, axis);
+        }
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Equal spacing between the outermost selected elements. Select at least three.");
     ImGui::Separator();
     if (ImGui::MenuItem("Select none", "Esc")) sel_.clear();
     ImGui::EndMenu();

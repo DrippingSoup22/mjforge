@@ -45,6 +45,11 @@ its current angle while simulating.
 *environment* (prop, obstacle, terrain). The role decides where the body goes when you export models
 and environment separately, and the analysis treats models differently (legs, balance, strength).
 
+**Align and distribute.** *Edit > Align* lines up the bounding boxes of the selected bodies, geoms
+or sites along a world axis (low ends, centers or high ends), for example to stand a row of
+obstacles on the same level; *Edit > Distribute* spaces three or more evenly between the outermost
+two.
+
 **Arrays and mirrors.** *Edit > Array* makes linear or radial copies: select one hexapod leg and
 make 5 radial copies around Z with a total angle of 360 degrees to get six legs 60 degrees apart.
 *Ctrl+M* mirrors a body subtree left/right with names (`left` becomes `right`) and joint axes that

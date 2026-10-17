@@ -172,7 +172,7 @@ headless settle).
 - [x] Mirror subtree (left/right naming, symmetric joint axes), duplicate
 - [x] Linear/radial array
 - [x] Drop to floor, snapping
-- [ ] Align / distribute
+- [x] Align / distribute (bounding boxes on world axes; free bodies keep their start pose)
 - [x] Creature templates (quadruped, hexapod, biped, arm)
 - [x] Hopper template
 - [x] Environment generators: stairs, ramps, rough terrain, heightfield (noise), arena walls,
