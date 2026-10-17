@@ -102,6 +102,7 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a.rfind("import:", 0) == 0) beginImport(a.substr(7));
     else if (a.rfind("gen:", 0) == 0) addGeneratedEnvironment(a.substr(4));
     else if (a == "addmodel") addModelRoot();
+    else if (a.rfind("export:", 0) == 0) exportTo(a.substr(7), ExportOptions::Scope::All, false);
     else if (a == "limbtool") limbTool_ = true;
     else if (a.rfind("sim:", 0) == 0) {
       // Start paused and fast-forward: deterministic screenshots of the simulation.
@@ -296,6 +297,13 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
     }
     notify("Exported " + p.filename().string(), pal::kOk, 5);
   }
+  if (exportLoader_) {
+    bool measured = false;
+    fs::path py = p.parent_path() / (p.stem().string() + "_mjwarp.py");
+    if (writeTextFile(py.string(), mjwarpLoader(p.filename().string(), &measured), &err))
+      notify(std::string("Wrote ") + py.filename().string() + (measured ? " (sizes from the simulation)" : " (estimated sizes: simulate first for measured ones)"),
+             pal::kTextDim, 5);
+  }
   lastDir_ = p.parent_path().string();
   return true;
 }
@@ -489,6 +497,10 @@ void Editor::frame() {
     ImGui::RadioButton("Environment only (floor, obstacles, lights, options)", &exportScope_, 2);
     ImGui::Checkbox("Split: scene.xml includes scene_model.xml (MuJoCo Menagerie layout)", &exportSplit_);
     if (exportSplit_) ImGui::TextDisabled("  The scene file gets the environment and <include>s the model file.");
+    ImGui::Checkbox("Also write a MuJoCo Warp loader script (name_mjwarp.py)", &exportLoader_);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("A ready-to-run Python file that loads the XML with mujoco_warp and sets nconmax / njmax from\n"
+                        "the contact peaks of your last simulation preview (or estimates from the start pose).");
     ImGui::TextDisabled("Angle unit in the file");
     ImGui::RadioButton("Radian", &exportAngle_, 0);
     ImGui::SameLine();

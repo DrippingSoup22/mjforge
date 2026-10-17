@@ -25,6 +25,43 @@ bool motorLike(const mjModel* m, int i) {
          m->actuator_dyntype[i] != mjDYN_INTEGRATOR && m->actuator_gainprm[i * mjNGAIN] != 0;
 }
 
+// Smallest inertia a joint's actuator can see about its axis: the moved subtree swinging freely,
+// or the rest of the robot rotating about a planted limb (stance). The armature always adds.
+// Sizing a PD on the swing inertia alone makes it chatter in stance when the limb is heavy.
+double effectiveJointInertia(const mjModel* m, const mjData* ref, int j) {
+  int dof = m->jnt_dofadr[j], b = m->jnt_bodyid[j];
+  double armature = m->dof_armature[dof];
+  double distal = std::max(0.0, m->dof_M0[dof] - armature);
+  int root = m->body_rootid[b];
+  if (m->body_weldid[root] == 0) return distal + armature;  // fixed base: the rest can't move
+  bool angular = m->jnt_type[j] == mjJNT_HINGE;
+  const mjtNum* a = ref->xaxis + 3 * j;
+  const mjtNum* p = ref->xanchor + 3 * j;
+  double proximal = 0;
+  for (int k = 1; k < m->nbody; ++k) {
+    if (m->body_rootid[k] != root) continue;
+    bool below = false;
+    for (int x = k; x > 0; x = m->body_parentid[x])
+      if (x == b) below = true;
+    if (below) continue;
+    double mass = m->body_mass[k];
+    if (!angular) {
+      proximal += mass;
+      continue;
+    }
+    const mjtNum* R = ref->ximat + 9 * k;
+    const mjtNum* I = m->body_inertia + 3 * k;
+    double v[3] = {R[0] * a[0] + R[3] * a[1] + R[6] * a[2], R[1] * a[0] + R[4] * a[1] + R[7] * a[2],
+                   R[2] * a[0] + R[5] * a[1] + R[8] * a[2]};
+    const mjtNum* c = ref->xipos + 3 * k;
+    double r[3] = {c[0] - p[0], c[1] - p[1], c[2] - p[2]};
+    double ra = r[0] * a[0] + r[1] * a[1] + r[2] * a[2];
+    double d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2] - ra * ra;
+    proximal += I[0] * v[0] * v[0] + I[1] * v[1] * v[1] + I[2] * v[2] * v[2] + mass * d2;
+  }
+  return std::min(distal, proximal) + armature;
+}
+
 int indexOf(const std::vector<Id>& v, Id id) {
   for (size_t i = 0; i < v.size(); ++i)
     if (v[i] == id) return int(i);
@@ -152,15 +189,26 @@ void Simulator::prepare() {
       a.kind = ActuatorDrive::Position;
       a.holdCtrl = a.refLength;
       if (lim) half = half > 0 ? std::min(half, 0.5 * (a.hi - a.lo)) : 0.5 * (a.hi - a.lo);
-    } else if (motorLike(m, i) && jointTrn && gear != 0 && m->dof_M0[m->jnt_dofadr[j]] > 0) {
+    } else if (motorLike(m, i) && jointTrn && gear != 0 && ref &&
+               effectiveJointInertia(m, ref.get(), j) > 0) {
       // Torque motor: hold / track positions with the stiffest PD that stays stable when the
       // control is computed explicitly once per step (omega * dt = 0.15, damping ratio 0.8).
-      double inertia = m->dof_M0[m->jnt_dofadr[j]] / (gear * gear);
+      double inertia = effectiveJointInertia(m, ref.get(), j) / (gear * gear);
       double w = 0.15 / dt;
       a.kind = ActuatorDrive::Motor;
       a.gain = m->actuator_gainprm[i * mjNGAIN];
       a.kp = inertia * w * w;
       a.kd = 2.0 * 0.8 * inertia * w;
+      // Keep PD targets a little inside the joint limits: a stiff PD pushing against a limit
+      // constraint chatters (e.g. a leg whose reference pose is fully stretched).
+      if (m->jnt_limited[j]) {
+        double lo = m->jnt_range[2 * j], hi = m->jnt_range[2 * j + 1];
+        double margin = std::min(0.05, 0.1 * (hi - lo));
+        double l1 = gear * (lo + margin), l2 = gear * (hi - margin);
+        a.targetLo = std::min(l1, l2);
+        a.targetHi = std::max(l1, l2);
+        a.refLength = clampv(a.refLength, a.targetLo, a.targetHi);
+      }
     } else if (lim) {
       half = 0.5 * (a.hi - a.lo);
     }
@@ -201,6 +249,7 @@ void Simulator::reset() {
 double Simulator::pdControl(int i, double target) const {
   const ActuatorDrive& a = drives_[i];
   const mjData* d = data_.get();
+  target = clampv(target, a.targetLo, a.targetHi);
   double f = a.kp * (target - d->actuator_length[i]) - a.kd * d->actuator_velocity[i];
   return f / a.gain;
 }

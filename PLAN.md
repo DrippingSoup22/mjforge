@@ -159,21 +159,30 @@ MJWarp broadphase candidates give `nconmax`/`njmax` (copyable Python snippet).
 - [x] Peak `ncon`/`nefc` measurement → `nconmax`/`njmax` recommendation
 
 ### M4 — Modeling tools, environments, import/combine
-- [ ] Add-limb tool (click a surface to attach a jointed limb), extend limb
+
+Done: MJCF import through MuJoCo's own parser/compiler (verified on Menagerie robots), File >
+Import into scene to combine projects or MJCF (models and/or environment, replace environment,
+automatic placement, name de-duplication), keyframes (start pose), environment generators with
+live parameters (stairs, ramp, rough/wave height fields, stepping stones, obstacles, arena), the
+add-limb tool with auto-mirroring, linear/radial arrays, the hopper template, and a MuJoCo Warp
+loader script written next to exported XML (buffer sizes measured in the preview or a short
+headless settle).
+- [x] Add-limb tool (click a surface to attach a jointed limb), extend limb
 - [x] Mirror subtree (left/right naming, symmetric joint axes), duplicate
-- [ ] Linear/radial array
+- [x] Linear/radial array
 - [x] Drop to floor, snapping
 - [ ] Align / distribute
 - [x] Creature templates (quadruped, hexapod, biped, arm)
-- [ ] Hopper template
-- [ ] Environment generators: stairs, ramps, rough terrain, heightfield (noise), arena walls,
+- [x] Hopper template
+- [x] Environment generators: stairs, ramps, rough terrain, heightfield (noise), arena walls,
       obstacle fields; materials & textures; lights & cameras
-- [ ] Import MJCF (mjSpec); import a model/environment from another project
+- [x] Import MJCF (mjSpec); import a model/environment from another project
 - [x] Split export (`scene.xml` + `model.xml`)
-- [ ] Python MJWarp loader snippet on export
+- [x] Python MJWarp loader snippet on export
 
 ### M5 — Polish
-- [ ] Keyframes / pose mode
+- [x] Keyframes (per-joint storage, start pose, capture from simulation)
+- [ ] Pose mode (edit keyframes in the viewport)
 - [ ] Mesh assets (STL/OBJ via MuJoCo) with convex-hull preview
 - [ ] Preferences, keyboard shortcut overlay, user guide
 - [ ] Unit tests (export → MuJoCo compile, JSON round trip, import round trip),

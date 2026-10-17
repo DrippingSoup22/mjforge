@@ -85,7 +85,7 @@ void checkSameModel(const mjModel* a, const mjModel* b) {
 }  // namespace
 
 TEST_CASE("import: templates round-trip through MJCF") {
-  for (const char* t : {"quadruped", "hexapod", "biped", "arm", "empty"}) {
+  for (const char* t : {"quadruped", "hexapod", "biped", "hopper", "arm", "empty"}) {
     INFO(std::string(t));
     Document doc;
     REQUIRE(makeTemplate(t, doc));

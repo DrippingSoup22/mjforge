@@ -236,3 +236,24 @@ TEST_CASE("simulator: starts from the first keyframe") {
   run(sim, 1.0);
   CHECK(sim.data()->qpos[sim.model()->jnt_qposadr[elbow]] == doctest::Approx(1.0).epsilon(0.05));
 }
+
+TEST_CASE("simulator: the motor PD holds steadily in stance (no chattering)") {
+  // The hopper's leg is much heavier than its torso: a PD sized on the swinging leg alone would
+  // chatter between its torque limits while the foot is planted.
+  Document doc;
+  REQUIRE(makeTemplate("hopper", doc));
+  CompileResult cr = compileDoc(doc);
+  Simulator sim;
+  REQUIRE(sim.start(cr.model, cr.map));
+  run(sim, 2.0);
+  double lo[3] = {1e9, 1e9, 1e9}, hi[3] = {-1e9, -1e9, -1e9};
+  for (int i = 0; i < 500; ++i) {
+    sim.stepOnce();
+    for (int a = 0; a < 3; ++a) {
+      lo[a] = std::min(lo[a], sim.data()->ctrl[a]);
+      hi[a] = std::max(hi[a], sim.data()->ctrl[a]);
+    }
+  }
+  CHECK_FALSE(sim.diverged());
+  for (int a = 0; a < 3; ++a) CHECK(hi[a] - lo[a] < 0.05);
+}

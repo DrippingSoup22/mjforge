@@ -61,6 +61,7 @@ struct ActuatorDrive {
   double halfRange = 0;     // half of the motion range used by the sine test (actuator length units)
   double kp = 0, kd = 0;    // built-in PD for torque motors (actuator space)
   double gain = 1;          // force per unit control (motors)
+  double targetLo = -1e300, targetHi = 1e300;  // PD targets stay inside the joint range (actuator length)
   double lo = 0, hi = 0;    // control range (lo >= hi: unlimited)
 };
 

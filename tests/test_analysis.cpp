@@ -30,7 +30,7 @@ AnalysisReport analyzeCompiled(const Document& doc) {
 }  // namespace
 
 TEST_CASE("analysis: templates have no errors or warnings") {
-  for (const char* t : {"quadruped", "hexapod", "biped", "arm", "empty"}) {
+  for (const char* t : {"quadruped", "hexapod", "biped", "hopper", "arm", "empty"}) {
     Document doc;
     REQUIRE(makeTemplate(t, doc));
     AnalysisReport r = analyzeCompiled(doc);

@@ -1,6 +1,7 @@
 #include "core/Templates.h"
 
 #include <cmath>
+#include <tuple>
 
 #include "core/Kinematics.h"
 #include "core/Ops.h"
@@ -49,6 +50,7 @@ const std::vector<TemplateInfo>& templateList() {
       {"quadruped", "Quadruped", "12-DoF four-legged robot with position servos, IMU and foot contact spheres."},
       {"hexapod", "Hexapod", "18-DoF six-legged walker built with a radial leg layout."},
       {"biped", "Biped", "Simple 10-DoF humanoid-style lower body with a torso."},
+      {"hopper", "Hopper", "Classic planar one-legged hopper (as in RL benchmarks): torque motors, 3 planar root DoF."},
       {"arm", "Robot arm", "Fixed-base 4-DoF arm on a pedestal with a gripper-less end effector."},
   };
   return list;
@@ -212,6 +214,40 @@ Id addBiped(Document& doc, const Vec3& pos, const std::string& name) {
   return pelvis;
 }
 
+Id addHopper(Document& doc, const Vec3& pos, const std::string& name) {
+  // Planar: the torso slides in x and z and pitches about y (like the Gym/DM Control hopper).
+  Id torso = addBody(doc, kWorldId, {pos + Vec3{0, 0, 1.25}, {}}, name + "_torso");
+  for (auto [jn, type, axis] : {std::tuple{"_rootx", JointType::Slide, Vec3{1, 0, 0}},
+                                std::tuple{"_rootz", JointType::Slide, Vec3{0, 0, 1}},
+                                std::tuple{"_rooty", JointType::Hinge, Vec3{0, -1, 0}}}) {
+    Id j = addJoint(doc, torso, type, {}, axis, name + jn);
+    doc.joint(j)->armature = 0;
+    doc.joint(j)->damping = 0;
+  }
+  limbGeom(doc, torso, {0, 0, 0.2}, {0, 0, -0.2}, 0.05, kShell, name + "_torso_geom");
+  struct Seg { const char* n; double len, r, lo, hi; };
+  const Seg segs[] = {{"thigh", 0.45, 0.05, -150, 0}, {"leg", 0.5, 0.04, -150, 0}};
+  Id parent = torso;
+  Vec3 at{0, 0, -0.2};
+  for (const Seg& sg : segs) {
+    Id b = addBody(doc, parent, {at, {}}, name + "_" + sg.n);
+    Id j = hinge(doc, b, {0, -1, 0}, deg2rad(sg.lo), deg2rad(sg.hi), name + "_" + sg.n + "_joint", 1.0, 1.0);
+    limbGeom(doc, b, {0, 0, 0}, {0, 0, -sg.len}, sg.r, kLimb, name + "_" + sg.n + "_geom");
+    Id a = addActuator(doc, ActuatorType::Motor, j);
+    doc.actuator(a)->gear[0] = 200;
+    parent = b;
+    at = {0, 0, -sg.len};
+  }
+  Id foot = addBody(doc, parent, {at, {}}, name + "_foot");
+  Id fj = hinge(doc, foot, {0, -1, 0}, deg2rad(-45), deg2rad(45), name + "_foot_joint", 1.0, 1.0);
+  Id fg = limbGeom(doc, foot, {-0.13, 0, 0}, {0.26, 0, 0}, 0.06, kFoot, name + "_foot_geom");
+  doc.geom(fg)->friction = {2.0, 0.005, 0.0001};
+  Id fa = addActuator(doc, ActuatorType::Motor, fj);
+  doc.actuator(fa)->gear[0] = 200;
+  placeOnFloor(doc, torso);
+  return torso;
+}
+
 Id addArm(Document& doc, const Vec3& pos, const std::string& name) {
   Id base = addBody(doc, kWorldId, {pos, {}}, name + "_base");
   Id ped = addGeom(doc, base, GeomType::Cylinder, {0.08, 0.05, 0}, {{0, 0, 0.05}, {}}, name + "_pedestal");
@@ -256,6 +292,10 @@ bool makeTemplate(const std::string& id, Document& out) {
     doc.modelName = "biped";
     addDefaultEnvironment(doc);
     addBiped(doc, {0, 0, 1.0});
+  } else if (id == "hopper") {
+    doc.modelName = "hopper";
+    addDefaultEnvironment(doc);
+    addHopper(doc, {0, 0, 0});
   } else if (id == "arm") {
     doc.modelName = "arm";
     addDefaultEnvironment(doc);

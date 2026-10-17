@@ -23,6 +23,7 @@ void addDefaultEnvironment(Document& doc);
 Id addQuadruped(Document& doc, const Vec3& pos, const std::string& name = "quadruped");
 Id addHexapod(Document& doc, const Vec3& pos, const std::string& name = "hexapod");
 Id addBiped(Document& doc, const Vec3& pos, const std::string& name = "biped");
+Id addHopper(Document& doc, const Vec3& pos, const std::string& name = "hopper");
 Id addArm(Document& doc, const Vec3& pos, const std::string& name = "arm");
 
 }  // namespace mjf

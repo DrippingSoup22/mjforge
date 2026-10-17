@@ -319,6 +319,9 @@ class Editor {
   int exportScope_ = 0;
   bool exportSplit_ = false;
   int exportAngle_ = 0;
+  bool exportLoader_ = true;  // also write <name>_mjwarp.py
+  WarpSizing lastSizing_;     // peaks of the last simulation (kept after stopping)
+  std::string mjwarpLoader(const std::string& xmlFile, bool* measured) const;
   std::string lastDir_;
   std::vector<std::string> recent_;
   std::vector<Toast> toasts_;
