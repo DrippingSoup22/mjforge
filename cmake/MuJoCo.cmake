@@ -124,4 +124,29 @@ else()
   set_target_properties(mujoco::mujoco PROPERTIES IMPORTED_SONAME "${_mj_soname}")
 endif()
 set(MJFORGE_MUJOCO_RUNTIME_FILE "${_mj_lib}")
+# Where the runtime must sit relative to the executables. Usually right next to them, but on macOS
+# the library records its own install name (the Python package's dylib keeps
+# @rpath/mujoco.framework/Versions/A/libmujoco.X.Y.Z.dylib), and the loader looks exactly there.
+get_filename_component(MJFORGE_MUJOCO_RUNTIME_SUBPATH "${_mj_lib}" NAME)
+if(APPLE)
+  # otool -D prints "<file>:" and then the install name on its own line.
+  execute_process(COMMAND otool -D "${_mj_lib}" OUTPUT_VARIABLE _mj_otool OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  string(REPLACE "\n" ";" _mj_otool_lines "${_mj_otool}")
+  foreach(_line IN LISTS _mj_otool_lines)
+    string(STRIP "${_line}" _line)
+    if(_line MATCHES "^@rpath/(.+)$")
+      set(MJFORGE_MUJOCO_RUNTIME_SUBPATH "${CMAKE_MATCH_1}")
+    endif()
+  endforeach()
+endif()
+get_filename_component(MJFORGE_MUJOCO_RUNTIME_SUBDIR "${MJFORGE_MUJOCO_RUNTIME_SUBPATH}" DIRECTORY)
+
+# Copies the MuJoCo runtime next to a target's executable after it is built.
+function(mjforge_copy_mujoco_runtime target)
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/${MJFORGE_MUJOCO_RUNTIME_SUBDIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MJFORGE_MUJOCO_RUNTIME_FILE}"
+            "$<TARGET_FILE_DIR:${target}>/${MJFORGE_MUJOCO_RUNTIME_SUBPATH}"
+    VERBATIM)
+endfunction()
 message(STATUS "MJForge: MuJoCo ${MJFORGE_MUJOCO_VERSION_FOUND} from ${_mj_source}: ${_mj_lib}")

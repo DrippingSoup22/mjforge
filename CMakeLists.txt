@@ -133,12 +133,10 @@ if(WIN32)
 endif()
 
 # Ship the MuJoCo runtime next to the executable.
-add_custom_command(TARGET mjforge POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MJFORGE_MUJOCO_RUNTIME_FILE}" "$<TARGET_FILE_DIR:mjforge>"
-  VERBATIM)
+mjforge_copy_mujoco_runtime(mjforge)
 
 install(TARGETS mjforge RUNTIME DESTINATION bin)
-install(FILES "${MJFORGE_MUJOCO_RUNTIME_FILE}" DESTINATION bin)
+install(FILES "${MJFORGE_MUJOCO_RUNTIME_FILE}" DESTINATION "bin/${MJFORGE_MUJOCO_RUNTIME_SUBDIR}")
 
 # ---------------------------------------------------------------------------------------------
 # Tests
