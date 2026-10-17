@@ -146,6 +146,9 @@ class Editor {
   const CompileResult& compiled() const { return compiled_; }
   const AnalysisReport& report() const { return report_; }
   bool compileValid() const { return compiled_.ok && compiledRevision_ == editRevision_; }
+  // Body masses and inertias as MuJoCo compiled them, while the compile is current (else null and
+  // the geometry-based estimate is used).
+  const InertialTable* massTable() const { return compileValid() && !inertials_.empty() ? &inertials_ : nullptr; }
 
  private:
   // panels
@@ -288,6 +291,7 @@ class Editor {
   // validation
   BackgroundCompiler compiler_;
   CompileResult compiled_;
+  InertialTable inertials_;  // of compiled_
   uint64_t compiledRevision_ = 0;
   uint64_t requestedRevision_ = 0;
   double compileDueTime_ = 0;

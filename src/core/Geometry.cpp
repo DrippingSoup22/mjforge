@@ -1,5 +1,6 @@
 #include "core/Geometry.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -132,6 +133,20 @@ double rayDisk(const Vec3& o, const Vec3& d, double z, double r) {
   return (x * x + y * y <= r * r) ? t : -1;
 }
 
+// Ray vs the end hemisphere of a capsule (radius r, center at z = side * h): the first hit on the
+// outer half, so a ray starting inside the capsule exits through it instead of hitting the
+// sphere's inner half.
+double rayCapSphere(const Vec3& o, const Vec3& d, double r, double h, int side) {
+  Vec3 oc = o - Vec3{0, 0, side * h};
+  double a = dot(d, d), b = dot(oc, d), c = dot(oc, oc) - r * r;
+  double disc = b * b - a * c;
+  if (disc < 0 || a <= 0) return -1;
+  double sq = std::sqrt(disc);
+  for (double t : {(-b - sq) / a, (-b + sq) / a})
+    if (t >= 0 && (oc.z + t * d.z) * side >= 0) return t;
+  return -1;
+}
+
 double minPositive(double a, double b) {
   if (a < 0) return b;
   if (b < 0) return a;
@@ -165,8 +180,8 @@ double rayPrimitive(const Ray& ray, GeomType type, const Vec3& s, const Pose& po
     }
     case GeomType::Capsule: {
       double tc = rayCylinderSide(o, d, s.x, s.y);
-      double t1 = raySphereLocal(o, d, {0, 0, s.y}, s.x);
-      double t2 = raySphereLocal(o, d, {0, 0, -s.y}, s.x);
+      double t1 = rayCapSphere(o, d, s.x, s.y, 1);
+      double t2 = rayCapSphere(o, d, s.x, s.y, -1);
       t = minPositive(tc, minPositive(t1, t2));
       if (t >= 0) {
         Vec3 p = o + d * t;
@@ -253,6 +268,8 @@ struct MeshCache {
   Aabb bounds;
   bool hasMass = false;
   MeshMass mass;
+  bool hasSupport = false;
+  std::vector<Vec3> support;
 };
 
 // Element references stay valid when the map grows; the mutex makes lookups safe from any thread.
@@ -273,6 +290,45 @@ MeshCache& meshCache(const MeshAsset& m) {
 }  // namespace
 
 const Aabb& meshBounds(const MeshAsset& m) { return meshCache(m).bounds; }
+
+const std::vector<Vec3>& meshSupportPoints(const MeshAsset& m) {
+  MeshCache& c = meshCache(m);
+  if (c.hasSupport) return c.support;
+  c.hasSupport = true;
+  if (!m.vert) return c.support;
+  const std::vector<float>& v = *m.vert;
+  size_t nv = v.size() / 3;
+  auto P = [&](size_t i) { return Vec3{v[3 * i], v[3 * i + 1], v[3 * i + 2]}; };
+  if (nv <= 1024) {
+    c.support.reserve(nv);
+    for (size_t i = 0; i < nv; ++i) c.support.push_back(P(i));
+    return c.support;
+  }
+  // Directions: the six axes plus a Fibonacci sphere.
+  std::vector<Vec3> dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  const int n = 256;
+  for (int k = 0; k < n; ++k) {
+    double z = 1.0 - (2.0 * k + 1.0) / n, r = std::sqrt(std::max(0.0, 1.0 - z * z));
+    double phi = k * kPi * (3.0 - std::sqrt(5.0));
+    dirs.push_back({r * std::cos(phi), r * std::sin(phi), z});
+  }
+  std::vector<size_t> best(dirs.size(), 0);
+  std::vector<double> bestDot(dirs.size(), -1e300);
+  for (size_t i = 0; i < nv; ++i) {
+    Vec3 p = P(i);
+    for (size_t k = 0; k < dirs.size(); ++k) {
+      double t = dot(p, dirs[k]);
+      if (t > bestDot[k]) {
+        bestDot[k] = t;
+        best[k] = i;
+      }
+    }
+  }
+  std::sort(best.begin(), best.end());
+  best.erase(std::unique(best.begin(), best.end()), best.end());
+  for (size_t i : best) c.support.push_back(P(i));
+  return c.support;
+}
 
 const MeshMass& meshMassProps(const MeshAsset& m) {
   MeshCache& c = meshCache(m);
@@ -332,12 +388,53 @@ Aabb geomWorldAabb(const Document& doc, const Geom& g, const Pose& world) {
       out.add(world.pos);
       return out;
     }
-    const Aabb& l = meshBounds(*m);
-    for (int k = 0; k < 8; ++k)
-      out.add(world.apply({k & 1 ? l.hi.x : l.lo.x, k & 2 ? l.hi.y : l.lo.y, k & 4 ? l.hi.z : l.lo.z}));
+    for (const Vec3& p : meshSupportPoints(*m)) out.add(world.apply(p));
     return out;
   }
   return primitiveWorldAabb(g.type, g.size, world);
+}
+
+void geomLowPoints(const Document& doc, const Geom& g, const Pose& world, double zMax, std::vector<Vec3>& out) {
+  auto keep = [&](const Vec3& p) { if (p.z <= zMax) out.push_back(p); };
+  const Vec3& s = g.size;
+  Mat3 R = toMat3(world.quat);
+  const Vec3 up{0, 0, 1};
+  switch (g.type) {
+    case GeomType::Sphere: keep(world.pos - up * s.x); break;
+    case GeomType::Capsule:
+      for (int e = -1; e <= 1; e += 2) keep(world.pos + R.col(2) * (e * s.y) - up * s.x);
+      break;
+    case GeomType::Cylinder: {
+      Vec3 a = R.col(2), u = R.col(0), v = R.col(1);
+      Vec3 down = normalize(-up - a * dot(-up, a), {0, 0, 0});  // lowest rim direction (none when upright)
+      for (int e = -1; e <= 1; e += 2) {
+        Vec3 c = world.pos + a * (e * s.y);
+        keep(c + down * s.x);
+        for (int k = 0; k < 16; ++k) {
+          double t = 2.0 * kPi * k / 16;
+          keep(c + (u * std::cos(t) + v * std::sin(t)) * s.x);
+        }
+      }
+      break;
+    }
+    case GeomType::Box:
+      for (int k = 0; k < 8; ++k)
+        keep(world.apply({k & 1 ? s.x : -s.x, k & 2 ? s.y : -s.y, k & 4 ? s.z : -s.z}));
+      break;
+    case GeomType::Ellipsoid: {
+      // Support point in direction -z: S^2 d / |S d| with d in the local frame.
+      Vec3 d = R.transposed() * (-up);
+      Vec3 sd{s.x * d.x, s.y * d.y, s.z * d.z};
+      double n = length(sd);
+      if (n > 0) keep(world.apply({s.x * sd.x / n, s.y * sd.y / n, s.z * sd.z / n}));
+      break;
+    }
+    case GeomType::Mesh:
+      if (const MeshAsset* m = doc.mesh(g.mesh))
+        for (const Vec3& p : meshSupportPoints(*m)) keep(world.apply(p));
+      break;
+    default: break;
+  }
 }
 
 double rayGeom(const Document& doc, const Ray& ray, const Geom& g, const Pose& world, double infiniteExtent,

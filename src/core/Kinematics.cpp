@@ -172,54 +172,131 @@ double MassAccumulator::inertiaAboutAxis(const Vec3& p, const Vec3& a_) const {
   return dot(a, Ic * a) + mass_ * dot(dperp, dperp);
 }
 
-void accumulateBodyMass(const Document& doc, const std::vector<Pose>& poses, Id bodyId, MassAccumulator& acc) {
+// Spatial inertia about point p, angular rows first: [[Ic + m [r]x[r]x^T, m [r]x], [m [r]x^T, m E]].
+static void spatialInertia(const MassAccumulator& acc, const Vec3& p, double out[6][6]) {
+  double m = acc.mass();
+  Vec3 r = acc.com() - p;
+  Mat3 Ic = acc.inertiaAboutCom();
+  double rx[3][3] = {{0, -r.z, r.y}, {r.z, 0, -r.x}, {-r.y, r.x, 0}};
+  double rr = dot(r, r);
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) {
+      out[i][j] = Ic(i, j) + m * ((i == j ? rr : 0.0) - r[i] * r[j]);
+      out[i][j + 3] = m * rx[i][j];
+      out[i + 3][j] = m * rx[j][i];
+      out[i + 3][j + 3] = i == j ? m : 0.0;
+    }
+}
+
+double floatingJointInertia(const MassAccumulator& moved, const MassAccumulator& whole, const Vec3& p, const Vec3& axis,
+                            bool angular) {
+  // With the rest free, momentum is conserved: I = s'As - (As)' T^-1 (As), T = A + rest.
+  double A[6][6], T[6][7];
+  double Tm[6][6];
+  spatialInertia(moved, p, A);
+  spatialInertia(whole, p, Tm);
+  Vec3 a = normalize(axis);
+  double sv[6] = {0, 0, 0, 0, 0, 0};
+  for (int k = 0; k < 3; ++k) sv[angular ? k : k + 3] = a[k];
+  double As[6], sAs = 0;
+  for (int i = 0; i < 6; ++i) {
+    As[i] = 0;
+    for (int j = 0; j < 6; ++j) As[i] += A[i][j] * sv[j];
+    sAs += sv[i] * As[i];
+  }
+  for (int i = 0; i < 6; ++i) {
+    for (int j = 0; j < 6; ++j) T[i][j] = Tm[i][j];
+    T[i][6] = As[i];
+  }
+  // Gaussian elimination with partial pivoting on [T | As].
+  double scale = 0;
+  for (int i = 0; i < 6; ++i) scale = std::max(scale, std::fabs(T[i][i]));
+  for (int c = 0; c < 6; ++c) {
+    int piv = c;
+    for (int r = c + 1; r < 6; ++r)
+      if (std::fabs(T[r][c]) > std::fabs(T[piv][c])) piv = r;
+    if (std::fabs(T[piv][c]) <= 1e-12 * scale) return sAs;  // the whole has no inertia this way
+    if (piv != c)
+      for (int k = 0; k < 7; ++k) std::swap(T[c][k], T[piv][k]);
+    for (int r = 0; r < 6; ++r) {
+      if (r == c) continue;
+      double f = T[r][c] / T[c][c];
+      for (int k = c; k < 7; ++k) T[r][k] -= f * T[c][k];
+    }
+  }
+  double coupling = 0;
+  for (int i = 0; i < 6; ++i) coupling += As[i] * T[i][6] / T[i][i];
+  return std::max(0.0, sAs - coupling);
+}
+
+void accumulateBodyMass(const Document& doc, const std::vector<Pose>& poses, Id bodyId, MassAccumulator& acc,
+                        const InertialTable* table) {
   const Body* b = doc.body(bodyId);
   if (!b || bodyId == kWorldId) return;
   Pose bp = bodyPoseFrom(doc, poses, bodyId);
-  if (b->hasInertial) {
-    Pose ip = bp * Pose{b->ipos, b->iquat};
+  auto addInertial = [&](MassAccumulator& to, double m, const Vec3& ipos, const Quat& iquat, const Vec3& diag) {
+    Pose ip = bp * Pose{ipos, iquat};
     Mat3 R = toMat3(ip.quat);
-    Mat3 I = R * Mat3::diag(b->diaginertia) * R.transposed();
-    acc.add(b->mass, ip.pos, I);
-    return;
+    to.add(m, ip.pos, R * Mat3::diag(diag) * R.transposed());
+  };
+  if (table) {
+    auto it = table->find(bodyId);
+    if (it != table->end()) {
+      addInertial(acc, it->second.mass, it->second.ipos, it->second.iquat, it->second.diaginertia);
+      return;
+    }
   }
-  int bi = doc.bodyIndex(bodyId);
-  for (uint32_t gi : doc.index().bodyGeoms[bi]) {
-    const Geom& g = doc.geoms[gi];
-    if (g.type == GeomType::Mesh) {
-      const MeshAsset* ma = doc.mesh(g.mesh);
-      double m = geomMass(doc, g);
-      if (!ma || m <= 0) continue;
-      const MeshMass& mm = meshMassProps(*ma);
-      if (mm.volume <= 0) continue;
+  const CompilerSettings& cs = doc.compiler;
+  MassAccumulator own;
+  if (b->hasInertial && cs.inertiafromgeom != InertiaFromGeom::True) {
+    addInertial(own, b->mass, b->ipos, b->iquat, b->diaginertia);
+  } else if (cs.inertiafromgeom != InertiaFromGeom::False) {
+    int bi = doc.bodyIndex(bodyId);
+    for (uint32_t gi : doc.index().bodyGeoms[bi]) {
+      const Geom& g = doc.geoms[gi];
       Pose gp = bp * Pose{g.pos, g.quat};
       Mat3 R = toMat3(gp.quat);
-      acc.add(m, gp.apply(mm.center), R * (mm.inertia * (m / mm.volume)) * R.transposed());
-      continue;
+      if (g.type == GeomType::Mesh) {
+        const MeshAsset* ma = doc.mesh(g.mesh);
+        double m = geomMass(doc, g);
+        if (!ma || m <= 0) continue;
+        const MeshMass& mm = meshMassProps(*ma);
+        if (mm.volume <= 0) continue;
+        own.add(m, gp.apply(mm.center), R * (mm.inertia * (m / mm.volume)) * R.transposed());
+        continue;
+      }
+      double m = geomMass(g);
+      if (m <= 0) continue;
+      own.add(m, gp.pos, R * Mat3::diag(primitiveInertia(g.type, g.size, m)) * R.transposed());
     }
-    double m = geomMass(g);
-    if (m <= 0) continue;
-    Pose gp = bp * Pose{g.pos, g.quat};
-    Mat3 R = toMat3(gp.quat);
-    Mat3 I = R * Mat3::diag(primitiveInertia(g.type, g.size, m)) * R.transposed();
-    acc.add(m, gp.pos, I);
   }
+  if (cs.boundmass > 0 || cs.boundinertia > 0) {
+    // The compiler raises the mass and each principal inertia to these minimums.
+    Vec3 ev;
+    Mat3 evec;
+    eigSym3(own.inertiaAboutCom(), &ev, &evec);
+    for (int k = 0; k < 3; ++k) ev[k] = std::max(ev[k], cs.boundinertia);
+    acc.add(std::max(own.mass(), cs.boundmass), own.mass() > 0 ? own.com() : bp.pos,
+            evec * Mat3::diag(ev) * evec.transposed());
+    return;
+  }
+  acc.add(own.mass(), own.com(), own.inertiaAboutCom());
 }
 
-MassProps bodyMassProps(const Document& doc, const std::vector<Pose>& poses, Id body) {
+MassProps bodyMassProps(const Document& doc, const std::vector<Pose>& poses, Id body, const InertialTable* table) {
   MassAccumulator acc;
-  accumulateBodyMass(doc, poses, body, acc);
+  accumulateBodyMass(doc, poses, body, acc, table);
   return {acc.mass(), acc.com(), acc.inertiaAboutCom()};
 }
 
-MassAccumulator subtreeAccumulator(const Document& doc, const std::vector<Pose>& poses, Id body) {
+MassAccumulator subtreeAccumulator(const Document& doc, const std::vector<Pose>& poses, Id body, const InertialTable* table) {
   MassAccumulator acc;
-  for (Id b : doc.subtree(body)) accumulateBodyMass(doc, poses, b, acc);
+  for (Id b : doc.subtree(body)) accumulateBodyMass(doc, poses, b, acc, table);
   return acc;
 }
 
-MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, Id body) {
-  MassAccumulator acc = subtreeAccumulator(doc, poses, body);
+MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, Id body, const InertialTable* table) {
+  MassAccumulator acc = subtreeAccumulator(doc, poses, body, table);
   return {acc.mass(), acc.com(), acc.inertiaAboutCom()};
 }
 

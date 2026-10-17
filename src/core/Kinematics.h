@@ -1,6 +1,7 @@
 // Forward kinematics of the document (reference configuration or a keyframe) and mass properties.
 #pragma once
 
+#include <unordered_map>
 #include <vector>
 
 #include "core/Document.h"
@@ -50,18 +51,39 @@ class MassAccumulator {
   Mat3 originInertia_ = Mat3::zero();  // inertia about the world origin
 };
 
+// Inertia a joint feels when it moves the `moved` part of a free-floating `whole` (which contains
+// it) and every other joint holds still: the moved part and the rest push against each other
+// (angular = hinge about the axis through p, else slide along it). Exact for rigid bodies.
+double floatingJointInertia(const MassAccumulator& moved, const MassAccumulator& whole, const Vec3& p, const Vec3& axis,
+                            bool angular);
+
 struct MassProps {
   double mass = 0;
   Vec3 com;
   Mat3 inertia = Mat3::zero();  // about com, world axes
 };
 
-// Mass properties of a single body (explicit inertial or inferred from its geoms).
-void accumulateBodyMass(const Document& doc, const std::vector<Pose>& poses, Id body, MassAccumulator& acc);
-MassProps bodyMassProps(const Document& doc, const std::vector<Pose>& poses, Id body);
+// A body's inertial properties in its own frame, as a compiled MuJoCo model has them: they include
+// every compiler option (mesh inertia modes, shell inertia, total mass) that the geometry-based
+// estimate below leaves out.
+struct BodyInertial {
+  double mass = 0;
+  Vec3 ipos;
+  Quat iquat;
+  Vec3 diaginertia;
+};
+using InertialTable = std::unordered_map<Id, BodyInertial>;
+
+// Mass properties of a single body: from `table` when it has the body, else estimated like MuJoCo's
+// compiler does (explicit inertial or the geoms, following inertiafromgeom, boundmass and
+// boundinertia; settotalmass is not applied).
+void accumulateBodyMass(const Document& doc, const std::vector<Pose>& poses, Id body, MassAccumulator& acc,
+                        const InertialTable* table = nullptr);
+MassProps bodyMassProps(const Document& doc, const std::vector<Pose>& poses, Id body, const InertialTable* table = nullptr);
 // Mass properties of the subtree rooted at body.
-MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, Id body);
-MassAccumulator subtreeAccumulator(const Document& doc, const std::vector<Pose>& poses, Id body);
+MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, Id body, const InertialTable* table = nullptr);
+MassAccumulator subtreeAccumulator(const Document& doc, const std::vector<Pose>& poses, Id body,
+                                   const InertialTable* table = nullptr);
 
 // Whether a geom takes part in collisions at all (visual-only geoms have contype = conaffinity = 0).
 inline bool geomCollides(const Geom& g) { return g.contype != 0 || g.conaffinity != 0; }

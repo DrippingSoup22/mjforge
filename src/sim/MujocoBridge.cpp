@@ -1,5 +1,6 @@
 #include "sim/MujocoBridge.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -130,18 +131,34 @@ CompileResult compileMjcf(const std::string& xml, const std::vector<std::pair<st
         ic.pos = {c.pos[0], c.pos[1], c.pos[2]};
         r.initialContacts.push_back(ic);
       }
-      r.subtreeMass.resize(m->nbody);
-      r.subtreeCom.resize(m->nbody);
-      for (int b = 0; b < m->nbody; ++b) {
-        r.subtreeMass[b] = m->body_subtreemass[b];
-        r.subtreeCom[b] = {d->subtree_com[3 * b], d->subtree_com[3 * b + 1], d->subtree_com[3 * b + 2]};
+      r.actuatorMoments.resize(m->nu);
+      for (int a = 0; a < m->nu; ++a) {
+        int row = m->actuator_outadr[a];
+        for (int k = 0; k < d->moment_rownnz[row]; ++k) {
+          int adr = d->moment_rowadr[row] + k;
+          if (d->actuator_moment[adr] != 0) r.actuatorMoments[a].push_back({d->moment_colind[adr], d->actuator_moment[adr]});
+        }
       }
     }
   } catch (const std::exception& e) {
     r.warnings.emplace_back(e.what());
   }
-  for (auto& w : takeMujocoWarnings()) r.warnings.push_back(w);
+  for (auto& w : takeMujocoWarnings())
+    if (std::find(r.warnings.begin(), r.warnings.end(), w) == r.warnings.end()) r.warnings.push_back(w);
   return r;
+}
+
+InertialTable compiledInertials(const CompileResult& r) {
+  InertialTable t;
+  const mjModel* m = r.model.get();
+  if (!r.ok || !m || r.map.bodies.size() != size_t(m->nbody)) return t;
+  for (int b = 1; b < m->nbody; ++b) {
+    const mjtNum* p = m->body_ipos + 3 * b;
+    const mjtNum* q = m->body_iquat + 4 * b;
+    const mjtNum* i = m->body_inertia + 3 * b;
+    t[r.map.bodies[b]] = {m->body_mass[b], {p[0], p[1], p[2]}, {q[0], q[1], q[2], q[3]}, {i[0], i[1], i[2]}};
+  }
+  return t;
 }
 
 BackgroundCompiler::BackgroundCompiler() { thread_ = std::thread([this] { loop(); }); }

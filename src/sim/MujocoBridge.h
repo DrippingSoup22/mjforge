@@ -13,6 +13,7 @@
 
 #include <mujoco/mujoco.h>
 
+#include "core/Kinematics.h"
 #include "core/Math.h"
 #include "core/MjcfWriter.h"
 
@@ -55,9 +56,15 @@ struct CompileResult {
   // Evaluated at the start state (keyframe 0, else qpos0) with mj_forward.
   std::vector<InitialContact> initialContacts;
   int nefc0 = 0;
-  std::vector<double> subtreeMass;  // per compiled body
-  std::vector<Vec3> subtreeCom;     // per compiled body
+  // Transmissions at the start state: for each compiled actuator, the DoFs it drives with its moment
+  // arm on each (gear for a joint; gear times the length derivative for tendons, sites, cranks).
+  struct Moment { int dof; double arm; };
+  std::vector<std::vector<Moment>> actuatorMoments;
 };
+
+// Every body's compiled mass, center of mass and principal inertia, by document ID. Empty unless
+// the compile succeeded and its map covers every compiled body.
+InertialTable compiledInertials(const CompileResult& r);
 
 // Compiles MJCF text. `files` are additional virtual files (path -> content) for meshes etc.
 CompileResult compileMjcf(const std::string& xml,

@@ -195,8 +195,8 @@ void Editor::inspectBody(Body& b) {
   if (props::section("Mass & inertia")) {
     if (!movesInSimulation(b.id))
       props::info("Static", "%s", "welded to the world: its mass has no effect on the simulation");
-    MassProps mp = bodyMassProps(doc_, poses, b.id);
-    MassProps st = subtreeMassProps(doc_, poses, b.id);
+    MassProps mp = bodyMassProps(doc_, poses, b.id, massTable());
+    MassProps st = subtreeMassProps(doc_, poses, b.id, massTable());
     props::info("Body mass", "%.4g kg", mp.mass);
     props::info("Subtree mass", "%.4g kg  (this body and everything attached below it)", st.mass);
     if (compileValid()) {
@@ -211,7 +211,19 @@ void Editor::inspectBody(Body& b) {
     if (props::checkbox("Explicit inertial", &b.hasInertial, false,
                         "Override the mass and inertia that MuJoCo would compute from the geoms (density/mass "
                         "of each geom). Usually you want the automatic values.")) {
-      if (b.hasInertial) {
+      // MuJoCo's own values make switching on lossless (unless settotalmass would scale them again).
+      const InertialTable* compiledMass = doc_.compiler.settotalmass > 0 ? nullptr : massTable();
+      const BodyInertial* exact = nullptr;
+      if (compiledMass) {
+        auto it = compiledMass->find(b.id);
+        if (it != compiledMass->end()) exact = &it->second;
+      }
+      if (b.hasInertial && exact) {
+        b.mass = exact->mass;
+        b.ipos = exact->ipos;
+        b.iquat = exact->iquat;
+        b.diaginertia = exact->diaginertia;
+      } else if (b.hasInertial) {
         // Initialize from the geometry so switching on is lossless.
         Pose bp = poses[doc_.bodyIndex(b.id)];
         if (mp.mass > 0) {

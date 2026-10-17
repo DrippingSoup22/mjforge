@@ -4,6 +4,7 @@
 // a one-click fix.
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <limits>
 #include <string>
@@ -37,17 +38,17 @@ struct JointReport {
   bool actuated = false;
   bool unbounded = false;       // some actuator has no control/force bound
   double capacity = 0;          // max torque (N*m) or force (N) the actuators can apply here
-  double liftLoad = 0;          // worst-case gravity load of the moved subtree
+  double liftLoad = 0;          // worst-case gravity load of the part it moves
   double supportLoad = 0;       // estimated load while supporting the body in locomotion (legs)
-  double holdLoad = 0;          // static load supporting the body at the reference pose (legs)
-  double movedMass = 0;         // mass of the subtree this joint moves
+  double holdLoad = 0;          // static load at the start pose (gravity, or the body's weight on a leg)
+  double movedMass = 0;         // mass of the part it moves (the lighter side on a floating model)
   double inertia = 0;           // effective inertia about the axis incl. armature
   double stiffness = 0;         // servo + spring stiffness in joint space
   double damping = 0;           // actuator + joint damping in joint space
   double omegaDt = 0;           // natural frequency * timestep (stability: keep < 0.5)
   double sag = 0;               // steady-state deflection of position servos under holdLoad
   double axisTilt = 1;          // |axis x gravity direction|: 0 = vertical axis (gravity can't load it)
-  double required() const { return std::max(liftLoad, supportLoad); }
+  double required() const { return std::max({liftLoad, supportLoad, holdLoad}); }
 };
 
 struct PairTypeStat {

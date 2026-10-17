@@ -65,7 +65,7 @@ LimbSpec Editor::limbSpecAt(Id body, const Vec3& normal) const {
   spec.axis = rotate(rootPose.quat, {0, 1, 0});  // swing forward/backward relative to the creature
   // Strong enough to carry the creature's weight at full extension (the analysis refines this).
   std::vector<Pose> poses = computeBodyPoses(doc_);
-  double mass = std::max(0.2, subtreeMassProps(doc_, poses, root).mass);
+  double mass = std::max(0.2, subtreeMassProps(doc_, poses, root, massTable()).mass);
   spec.maxTorque = niceRound(std::max(1.0, mass * 9.81 * spec.length * spec.segments * 0.75));
   return spec;
 }

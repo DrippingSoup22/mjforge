@@ -34,12 +34,20 @@ struct MeshMass {
 const MeshMass& meshMassProps(const MeshAsset& mesh);
 // Bounds of a mesh in its own frame (cached).
 const Aabb& meshBounds(const MeshAsset& mesh);
+// Vertices that bound the mesh in every direction (cached): all of them for meshes up to 1024
+// vertices, else the extreme vertices along 262 directions (bounds then within ~1% of the size).
+const std::vector<Vec3>& meshSupportPoints(const MeshAsset& mesh);
 
 // Geom helpers that also handle meshes (the primitive versions above can't see mesh assets).
 double geomMass(const Document& doc, const Geom& g);
 Aabb geomWorldAabb(const Document& doc, const Geom& g, const Pose& world);
 double rayGeom(const Document& doc, const Ray& ray, const Geom& g, const Pose& world, double infiniteExtent = 50.0,
                Vec3* normal = nullptr);
+
+// Appends the points of a geom's surface at or below world height zMax that can carry it on a floor:
+// box corners, the bottoms of a capsule's end spheres, cylinder rim points, the lowest point of
+// spheres and ellipsoids, mesh vertices. Planes and height fields add nothing.
+void geomLowPoints(const Document& doc, const Geom& g, const Pose& world, double zMax, std::vector<Vec3>& out);
 
 // Distance between a ray and a segment, plus the parameters of the closest points.
 double raySegmentDistance(const Ray& ray, const Vec3& a, const Vec3& b, double* tRay, double* tSeg);

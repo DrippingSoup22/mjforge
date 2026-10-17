@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -135,7 +136,13 @@ double rbound(const Document& doc, const Geom& g) {
       const Hfield* h = doc.hfield(g.hfield);
       return h ? std::sqrt(h->size.x * h->size.x + h->size.y * h->size.y + h->size.z * h->size.z) : 1.0;
     }
-    default: return 0;
+    case GeomType::Mesh: {
+      double r = 0;
+      if (const MeshAsset* m = doc.mesh(g.mesh))
+        for (const Vec3& p : meshSupportPoints(*m)) r = std::max(r, length(p));
+      return std::max(r, 1e-6);
+    }
+    default: return 0;  // planes
   }
 }
 
@@ -177,6 +184,169 @@ double polygonDistance(const std::vector<Vec2>& poly, const Vec2& q) {
   return worst;
 }
 
+// Control range after inheritrange: a servo can take its range from the joint it drives.
+Vec2 servoCtrlRange(const Document& doc, const Actuator& a, bool* limited) {
+  const Joint* j = (a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) ? doc.joint(a.target) : nullptr;
+  if (a.type == ActuatorType::Position && a.inheritrange > 0 && j && j->limited) {
+    double mid = 0.5 * (j->range.x + j->range.y), half = 0.5 * (j->range.y - j->range.x) * a.inheritrange;
+    *limited = true;
+    return {mid - half, mid + half};
+  }
+  *limited = a.ctrllimited;
+  return a.ctrlrange;
+}
+
+// Largest position error a position-like servo can see (actuator space): between its farthest
+// target and the farthest position the joint can reach, or its target span on an unlimited joint.
+// Infinite when nothing bounds the targets.
+double servoSpan(const Document& doc, const Actuator& a) {
+  const Joint* j = (a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) ? doc.joint(a.target) : nullptr;
+  bool limited = false;
+  Vec2 t;
+  if (a.type == ActuatorType::IntVelocity) {  // the integrated activation is the target
+    limited = a.actlimited;
+    t = a.actrange;
+    if (a.inheritrange > 0 && j && j->limited) {
+      double mid = 0.5 * (j->range.x + j->range.y), half = 0.5 * (j->range.y - j->range.x) * a.inheritrange;
+      limited = true;
+      t = {mid - half, mid + half};
+    }
+  } else {
+    t = servoCtrlRange(doc, a, &limited);
+  }
+  if (!limited) return kInf;
+  if (j && j->limited) {
+    double l1 = a.gear[0] * j->range.x, l2 = a.gear[0] * j->range.y;
+    return std::max(t.y - std::min(l1, l2), std::max(l1, l2) - t.x);
+  }
+  return t.y - t.x;
+}
+
+// A General actuator wired as a position servo (force = kp * (ctrl - length) ...).
+bool positionLikeGeneral(const Actuator& a) {
+  return a.type == ActuatorType::General && a.gaintype == GainType::Fixed && a.biastype == BiasType::Affine &&
+         a.biasprm[1] < 0;
+}
+
+// Multiplies a servo's stiffness by s, rounded up to a nice value; an explicit kv grows with the
+// square root so the damping ratio stays.
+void stiffenServo(Document& d, Id id, double s) {
+  Actuator* a = d.actuator(id);
+  if (!a || !(s > 1)) return;
+  if (a->type == ActuatorType::Position || a->type == ActuatorType::IntVelocity) {
+    double kp = niceCeil(a->kp * s);
+    if (a->dampratio <= 0 && a->kv > 0 && a->kp > 0) a->kv *= std::sqrt(kp / a->kp);
+    a->kp = kp;
+  } else if (positionLikeGeneral(*a)) {
+    double k = niceCeil(-a->biasprm[1] * s), f = k / -a->biasprm[1];
+    a->biasprm[1] = -k;
+    a->gainprm[0] *= f;
+    a->biasprm[2] *= std::sqrt(f);
+  }
+}
+
+// Label for a list of (actuator, stiffness factor) changes: the new kp when they all agree.
+std::string stiffenLabel(const Document& doc, const std::vector<std::pair<Id, double>>& scales) {
+  double kp = -1;
+  for (const auto& [id, s] : scales) {
+    const Actuator* a = doc.actuator(id);
+    if (!a || (a->type != ActuatorType::Position && a->type != ActuatorType::IntVelocity)) return "Stiffen the servos";
+    double v = niceCeil(a->kp * s);
+    if (kp >= 0 && std::fabs(v - kp) > 1e-9 * kp) return "Stiffen the servos";
+    kp = v;
+  }
+  return kp > 0 ? fmt("Set kp to %.3g", kp) : "Stiffen the servos";
+}
+
+// Raises the actuators of a joint until together they reach `target` (joint space); each comes
+// with its moment arm on the joint. Widens force ranges and the joint's actuator force cap that
+// would clamp the result.
+void strengthenJoint(Document& d, const std::vector<std::pair<Id, double>>& arms, double target, Id joint) {
+  if (arms.empty()) return;
+  double share = target / double(arms.size());
+  for (const auto& [id, arm] : arms) {
+    Actuator* a = d.actuator(id);
+    if (!a) continue;
+    double f = share / std::max(1e-12, std::fabs(arm));  // actuator-space force it must reach
+    double fmax = actuatorMaxForce(d, *a);
+    if (!(fmax < f)) continue;
+    if (a->type == ActuatorType::Motor) {
+      // The gear scales the arm, so it scales the torque at the joint without touching the ranges.
+      double g = std::fabs(a->gear[0]) * f / std::max(fmax, 1e-12);
+      a->gear[0] = std::copysign(niceCeil(g), a->gear[0] == 0 ? 1.0 : a->gear[0]);
+      continue;
+    }
+    Actuator open = *a;
+    open.forcelimited = false;
+    double free = actuatorMaxForce(d, open);
+    if (free < f) {
+      double s = f / std::max(free, 1e-12);
+      switch (a->type) {
+        case ActuatorType::Position:
+        case ActuatorType::IntVelocity: {
+          double span = servoSpan(d, *a);
+          a->kp = std::max(a->kp, niceCeil(std::isfinite(span) && span > 0 ? f / span : a->kp * s));
+          break;
+        }
+        case ActuatorType::Velocity: a->kv = niceCeil(a->kv * s); break;
+        case ActuatorType::Cylinder:
+          if (a->diameter > 0) a->diameter *= std::sqrt(s);
+          else a->area *= s;
+          break;
+        case ActuatorType::Muscle:
+          if (a->muscleForce > 0) a->muscleForce = niceCeil(a->muscleForce * s);
+          else a->muscleScale *= s;
+          break;
+        case ActuatorType::General:
+          a->gainprm[0] *= s;
+          if (positionLikeGeneral(*a)) {
+            a->biasprm[1] *= s;
+            a->biasprm[2] *= std::sqrt(s);
+          }
+          break;
+        default: break;
+      }
+    }
+    if (a->forcelimited && std::max(std::fabs(a->forcerange.x), std::fabs(a->forcerange.y)) < f) {
+      a->forcerange.x = std::min(a->forcerange.x, -f);
+      a->forcerange.y = std::max(a->forcerange.y, f);
+    }
+  }
+  if (Joint* j = d.joint(joint))
+    if (j->actuatorfrclimited && std::max(std::fabs(j->actuatorfrcrange.x), std::fabs(j->actuatorfrcrange.y)) < target) {
+      j->actuatorfrcrange.x = std::min(j->actuatorfrcrange.x, -target);
+      j->actuatorfrcrange.y = std::max(j->actuatorfrcrange.y, target);
+    }
+}
+
+// Replaces compiler settotalmass (deprecated in MuJoCo 3.16) by scaling every mass source the way
+// MuJoCo scales the compiled masses: the model stays the same.
+void bakeTotalMass(Document& d) {
+  double target = d.compiler.settotalmass;
+  if (!(target > 0)) return;
+  d.compiler.settotalmass = -1;
+  CompileResult r = compileMjcf(writeMjcf(d));
+  double total = 0;
+  if (r.ok)
+    for (int b = 1; b < r.model->nbody; ++b) total += r.model->body_mass[b];
+  if (!(total > 0)) {
+    d.compiler.settotalmass = target;
+    return;
+  }
+  double s = target / total;
+  for (Geom& g : d.geoms) {
+    if (g.mass >= 0) g.mass *= s;
+    else g.density *= s;
+  }
+  for (Body& b : d.bodies)
+    if (b.hasInertial) {
+      b.mass *= s;
+      b.diaginertia = b.diaginertia * s;
+    }
+  d.compiler.boundmass *= s;
+  d.compiler.boundinertia *= s;
+}
+
 class Analyzer {
  public:
   Analyzer(const Document& d, const CompileResult* cr, bool crValid) : doc_(d), cr_(cr), crValid_(crValid) {}
@@ -188,6 +358,7 @@ class Analyzer {
     Vec3 g = doc_.option.gravity;
     gmag_ = doc_.option.gravityFlag ? length(g) : 0.0;
     gdir_ = normalize(g, {0, 0, -1});
+    prepare();
     checkStructure();
     checkMass();
     analyzeJoints();
@@ -220,6 +391,7 @@ class Analyzer {
   void groupRepeated() {
     struct G { const char* code; const char* title; };
     const G groups[] = {{"weak-actuator", "joints are too weak for the loads they carry"},
+                        {"weak-for-motion", "joints may be too weak for some motions"},
                         {"servo-sag", "position servos are soft and sag under the body weight"},
                         {"stiff-servo", "joints are too stiff for the timestep"},
                         {"strong-actuator", "joints are much stronger than their loads"},
@@ -306,14 +478,23 @@ class Analyzer {
                                              : "A muscle's force depends on its length, which only joints and tendons have.",
             {a.id});
       }
-      if (a.delay > 0 && a.nsample <= 0) {
-        Issue& i = add(Severity::Error, IssueArea::Model, "delay-history",
-                       fmt("Actuator %s has a delay but no history buffer", quote(a.name).c_str()),
-                       "A control delay is read from the actuator's history; it needs at least delay / timestep samples.", {a.id});
+      // The delayed control is read from the last nsample controls (one per step), so the buffer must
+      // reach back delay / timestep steps or the delay is cut short.
+      int needSamples = std::max(1, int(std::ceil(a.delay / doc_.option.timestep - 1e-9)));
+      if (a.delay > 0 && a.nsample < needSamples) {
+        bool none = a.nsample <= 0;
+        Issue& i = add(none ? Severity::Error : Severity::Warning, IssueArea::Model, "delay-history",
+                       none ? fmt("Actuator %s has a delay but no history buffer", quote(a.name).c_str())
+                            : fmt("Actuator %s keeps too few samples for its delay", quote(a.name).c_str()),
+                       none ? std::string("MuJoCo refuses a control delay without a history buffer: the delayed control "
+                                          "is read from the actuator's last nsample controls.")
+                            : fmt("The delayed control is read from the last %d controls, which reach back %.3g s, so the "
+                                  "%.3g s delay is cut short. It needs delay / timestep = %d samples.",
+                                  a.nsample, a.nsample * doc_.option.timestep, a.delay, needSamples),
+                       {a.id});
         Id id = a.id;
-        int need = std::max(1, int(std::ceil(a.delay / doc_.option.timestep - 1e-9)));
-        i.fixLabel = fmt("Keep %d samples", need);
-        i.fix = [id, need](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = need; };
+        i.fixLabel = fmt("Keep %d samples", needSamples);
+        i.fix = [id, needSamples](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = needSamples; };
       }
       bool servo = a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity;
       if (servo && a.kv > 0 && a.dampratio > 0) {
@@ -337,9 +518,10 @@ class Analyzer {
                              : "RL policies need a bounded action space; the force is not limited either unless a force range is set.",
                        {a.id});
         Id id = a.id;
-        const Joint* j = doc_.joint(a.target);
-        Vec2 r = (servo && j && j->limited) ? j->range : Vec2{-1, 1};
-        i.fixLabel = servo && j && j->limited ? "Use the joint range" : "Limit to [-1, 1]";
+        const Joint* j = a.trn == TrnType::Joint ? doc_.joint(a.target) : nullptr;
+        bool useJoint = a.type == ActuatorType::Position && j && j->limited;  // an intvelocity control is a speed
+        Vec2 r = useJoint ? j->range : Vec2{-1, 1};
+        i.fixLabel = useJoint ? "Use the joint range" : "Limit to [-1, 1]";
         i.fix = [id, r](Document& d) { if (Actuator* x = d.actuator(id)) { x->ctrllimited = true; x->ctrlrange = r; } };
       }
       if (a.ctrllimited && a.ctrlrange.x > a.ctrlrange.y)
@@ -347,20 +529,29 @@ class Analyzer {
       if (a.forcelimited && a.forcerange.x > a.forcerange.y)
         add(Severity::Error, IssueArea::Model, "force-range-order", fmt("Actuator %s: force range lower > upper", quote(a.name).c_str()), "", {a.id});
       const Joint* tj = a.trn == TrnType::Joint ? doc_.joint(a.target) : nullptr;
-      bool degrees = servo && a.ctrllimited && tj && tj->type == JointType::Hinge &&
-                     std::max(std::fabs(a.ctrlrange.x), std::fabs(a.ctrlrange.y)) > 2 * kPi + 0.1;
+      // The range of joint angles a servo targets: the control of a position servo, the integrated
+      // activation of an intvelocity servo (whose control is a speed).
+      bool intvel = a.type == ActuatorType::IntVelocity;
+      bool hasTargets = intvel ? a.actlimited : a.type == ActuatorType::Position && a.ctrllimited && a.inheritrange <= 0;
+      Vec2 targets = intvel ? a.actrange : a.ctrlrange;
+      bool degrees = hasTargets && tj && tj->type == JointType::Hinge &&
+                     std::max(std::fabs(targets.x), std::fabs(targets.y)) > 2 * kPi + 0.1;
       if (degrees) {
-        // MuJoCo converts joint ranges from degrees (compiler angle="degree") but never ctrlrange.
+        // MuJoCo converts joint ranges from degrees (compiler angle="degree") but never these.
         Issue& i = add(Severity::Warning, IssueArea::Physics, "ctrl-range-degrees",
-                       fmt("Servo %s: control range [%.4g, %.4g] looks like degrees", quote(a.name).c_str(),
-                           a.ctrlrange.x, a.ctrlrange.y),
+                       fmt("Servo %s: %s range [%.4g, %.4g] looks like degrees", quote(a.name).c_str(),
+                           intvel ? "activation" : "control", targets.x, targets.y),
                        "Servo targets are joint angles in radians. MuJoCo converts joint ranges written in degrees "
-                       "(compiler angle=\"degree\") but never converts ctrlrange, a common mistake in imported files.",
+                       "(compiler angle=\"degree\") but never converts ctrlrange or actrange, a common mistake in "
+                       "imported files.",
                        {a.id});
         Id id = a.id;
         i.fixLabel = "Convert to radians";
-        i.fix = [id](Document& d) {
-          if (Actuator* x = d.actuator(id)) x->ctrlrange = {deg2rad(x->ctrlrange.x), deg2rad(x->ctrlrange.y)};
+        i.fix = [id, intvel](Document& d) {
+          if (Actuator* x = d.actuator(id)) {
+            Vec2& r = intvel ? x->actrange : x->ctrlrange;
+            r = {deg2rad(r.x), deg2rad(r.y)};
+          }
         };
       }
       if (a.type == ActuatorType::Position && a.ctrllimited && a.trn == TrnType::Joint && !degrees) {
@@ -410,15 +601,25 @@ class Analyzer {
       }
       if (!ok) add(Severity::Error, IssueArea::Model, "sensor-target", fmt("Sensor %s has no valid target", quote(s.name).c_str()),
                    "Choose what this sensor is attached to in the inspector.", {s.id});
-      if ((s.delay > 0 || s.interval.x > 0) && s.nsample <= 0) {
-        Issue& i = add(Severity::Error, IssueArea::Model, "sensor-history",
-                       fmt("Sensor %s has a delay or update period but no history buffer", quote(s.name).c_str()),
-                       "Delayed and slower-rate sensor values are read from the sensor's history: it needs at least "
-                       "delay / timestep samples.", {s.id});
+      // Delayed and slower-rate values are read from the sensor's history buffer: one sample per step,
+      // or per update period when there is one.
+      int needSamples = std::max(1, s.interval.x > 0 ? int(std::ceil(s.delay / s.interval.x - 1e-9)) + 1
+                                                     : int(std::ceil(s.delay / doc_.option.timestep - 1e-9)));
+      bool noBuffer = s.nsample <= 0;
+      if ((s.delay > 0 && s.nsample < needSamples) || (s.interval.x > 0 && noBuffer)) {
+        bool refused = s.delay > 0 && noBuffer;
+        Issue& i = add(refused ? Severity::Error : Severity::Warning, IssueArea::Model, "sensor-history",
+                       noBuffer ? fmt("Sensor %s has a %s but no history buffer", quote(s.name).c_str(),
+                                      s.delay > 0 ? "delay" : "update period")
+                                : fmt("Sensor %s keeps too few samples for its delay", quote(s.name).c_str()),
+                       refused    ? std::string("MuJoCo refuses a sensor delay without a history buffer.")
+                       : noBuffer ? std::string("Without a history buffer MuJoCo ignores the update period and computes "
+                                                "the sensor every step.")
+                                  : fmt("The buffer reaches back too little time, so the %.3g s delay is cut short.", s.delay),
+                       {s.id});
         Id id = s.id;
-        int need = std::max(2, int(std::ceil(std::max(s.delay, s.interval.x) / doc_.option.timestep - 1e-9)) + 1);
-        i.fixLabel = fmt("Keep %d samples", need);
-        i.fix = [id, need](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = need; };
+        i.fixLabel = fmt("Keep %d samples", needSamples);
+        i.fix = [id, needSamples](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = needSamples; };
       }
       if (s.type == SensorType::Contact) {
         constexpr int kVel = (1 << 7) | (1 << 8);  // linvel, angvel
@@ -483,6 +684,34 @@ class Analyzer {
         Id id = j.id;
         i.fixLabel = "Set lower bound to 0";
         i.fix = [id](Document& d) { if (Joint* x = d.joint(id)) x->range.x = 0; };
+      }
+    }
+    // MuJoCo's rules for the joints of one body.
+    for (size_t bi = 1; bi < doc_.bodies.size(); ++bi) {
+      const Body& b = doc_.bodies[bi];
+      const std::vector<uint32_t>& js = doc_.index().bodyJoints[bi];
+      int dofs = 0;
+      bool ball = false, rotationAfterBall = false;
+      for (uint32_t ji : js) {
+        const Joint& j = doc_.joints[ji];
+        dofs += j.type == JointType::Free ? 6 : j.type == JointType::Ball ? 3 : 1;
+        rotationAfterBall |= ball && (j.type == JointType::Ball || j.type == JointType::Hinge);
+        ball |= j.type == JointType::Ball;
+      }
+      if (dofs > 6)
+        add(Severity::Error, IssueArea::Model, "body-dofs", fmt("Body %s has %d degrees of freedom", quote(b.name).c_str(), dofs),
+            "MuJoCo allows at most 6 per body. Remove joints, or chain them through more bodies.", {b.id});
+      if (rotationAfterBall)
+        add(Severity::Error, IssueArea::Model, "ball-then-rotation",
+            fmt("Body %s has a hinge or ball joint after a ball joint", quote(b.name).c_str()),
+            "MuJoCo refuses this order: a ball joint already turns the body every way, so any further rotation is "
+            "redundant. Remove the extra joint, put the ball joint last, or move it to a body of its own.", {b.id});
+      if (b.mocap && b.parent != kWorldId) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "mocap-not-top", fmt("Mocap body %s is not attached to the world", quote(b.name).c_str()),
+                       "MuJoCo moves mocap bodies in world coordinates, so they must be children of the world.", {b.id});
+        Id id = b.id;
+        i.fixLabel = "Move body to the world";
+        i.fix = [id](Document& d) { reparentBody(d, id, kWorldId, true); };
       }
     }
     for (const Body& b : doc_.bodies) {
@@ -650,30 +879,112 @@ class Analyzer {
   }
 
   // ---------------------------------------------------------------- mass
+  // How a model's root moves: a free joint, a slide that lets it rise and fall (planar walkers), or
+  // fixed to the world.
+  enum class Base { Fixed, Free, Planar };
+  struct Arm {
+    Id joint;
+    double arm;
+  };
+
+  bool compiledOk() const { return crValid_ && cr_ && cr_->ok && cr_->model; }
+  const InertialTable* table() const { return inertials_.empty() ? nullptr : &inertials_; }
+
+  // Per-body mass and center of mass (from the compiled model when there is one, so every compiler
+  // option counts), the share of each body's weight that joints carry, how each model's root moves,
+  // and which joints each actuator drives.
+  void prepare() {
+    inertials_ = crValid_ && cr_ ? compiledInertials(*cr_) : InertialTable{};
+    size_t n = doc_.bodies.size();
+    bodyMass_.assign(n, {});
+    bodyWeight_.assign(n, 0);
+    for (size_t bi = 1; bi < n; ++bi) {
+      const Body& b = doc_.bodies[bi];
+      bodyMass_[bi] = bodyMassProps(doc_, poses_, b.id, table());
+      bodyWeight_[bi] = bodyMass_[bi].mass * (1.0 - b.gravcomp);  // gravity compensation carries the rest
+    }
+    for (const Body& b : doc_.bodies) {
+      if (b.id == kWorldId || b.parent != kWorldId) continue;
+      Base base = Base::Fixed;
+      for (uint32_t ji : doc_.index().bodyJoints[doc_.bodyIndex(b.id)]) {
+        const Joint& j = doc_.joints[ji];
+        Vec3 a;
+        jointWorldFrame(doc_, jointFrames_, j, nullptr, &a);
+        if (j.type == JointType::Free) base = Base::Free;
+        else if (j.type == JointType::Slide && std::fabs(a.z) > 0.5 && base == Base::Fixed) base = Base::Planar;
+      }
+      base_[b.id] = base;
+      if (base != Base::Fixed) rootAcc_[b.id] = subtreeAcc(b.id);
+    }
+    // Transmissions: exact moment arms at the start state from MuJoCo, else joints and fixed tendons.
+    const mjModel* m = compiledOk() ? cr_->model.get() : nullptr;
+    if (m && cr_->map.actuators.size() == size_t(m->nu) && cr_->actuatorMoments.size() == size_t(m->nu) &&
+        cr_->map.joints.size() == size_t(m->njnt)) {
+      for (int a = 0; a < m->nu; ++a) {
+        Id id = cr_->map.actuators[a];
+        compiledActuator_[id] = a;
+        const Actuator* act = doc_.actuator(id);
+        if (!act || act->type == ActuatorType::Adhesion) continue;
+        for (const CompileResult::Moment& mo : cr_->actuatorMoments[a]) {
+          int jnt = m->dof_jntid[mo.dof];
+          if (m->jnt_type[jnt] == mjJNT_HINGE || m->jnt_type[jnt] == mjJNT_SLIDE) arms_[id].push_back({cr_->map.joints[jnt], mo.arm});
+        }
+      }
+      return;
+    }
+    for (const Actuator& a : doc_.actuators) {
+      if (a.type == ActuatorType::Adhesion) continue;
+      auto scalar = [&](Id j) {
+        const Joint* x = doc_.joint(j);
+        return x && (x->type == JointType::Hinge || x->type == JointType::Slide);
+      };
+      if ((a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) && scalar(a.target)) {
+        arms_[a.id].push_back({a.target, a.gear[0]});
+      } else if (a.trn == TrnType::Tendon) {
+        const Tendon* t = doc_.tendon(a.target);
+        if (t && t->type == TendonType::Fixed)
+          for (const TendonJoint& tj : t->joints)
+            if (scalar(tj.joint)) arms_[a.id].push_back({tj.joint, a.gear[0] * tj.coef});
+      }
+    }
+  }
+
   void checkMass() {
     double minM = kInf, maxM = 0;
     Id minId = kNoId, maxId = kNoId;
+    const DocIndex& ix = doc_.index();
+    // MuJoCo's rule for a body with joints: it, or a body welded below it, needs a mass and three
+    // principal inertias above mjMINVAL. A model that compiled has passed it.
+    std::function<bool(uint32_t)> hasMass = [&](uint32_t bi) {
+      const MassProps& mp = bodyMass_[bi];
+      Vec3 ev;
+      eigSym3(mp.inertia, &ev, nullptr);
+      if (mp.mass >= 1e-15 && ev.x >= 1e-15 && ev.y >= 1e-15 && ev.z >= 1e-15) return true;
+      for (uint32_t ci : ix.childBodies[bi])
+        if (ix.bodyJoints[ci].empty() && hasMass(ci)) return true;
+      return false;
+    };
     for (size_t bi = 1; bi < doc_.bodies.size(); ++bi) {
       const Body& b = doc_.bodies[bi];
-      if (doc_.roleOf(b.id) == Role::Model) rep_.modelMass += bodyMassProps(doc_, poses_, b.id).mass;
+      if (doc_.roleOf(b.id) == Role::Model) rep_.modelMass += bodyMass_[bi].mass;
+      if (!compiledOk() && !ix.bodyJoints[bi].empty() && !hasMass(uint32_t(bi))) {
+        add(Severity::Error, IssueArea::Model, "massless", fmt("Body %s can move but has no mass", quote(b.name).c_str()),
+            "MuJoCo needs a mass and inertia on every body with joints, or on a body attached to it without joints. "
+            "Add a geom with volume, or an explicit inertial.", {b.id});
+        continue;
+      }
       if (weld_.weld[bi] != int(bi) || weld_.dof[bi] == 0) continue;  // only moving weld roots
       // Mass of this rigid group: the body and all bodies welded to it.
       double m = 0;
       for (Id sb : doc_.subtree(b.id)) {
         int si = doc_.bodyIndex(sb);
-        if (weld_.weld[si] == int(bi)) m += bodyMassProps(doc_, poses_, sb).mass;
-      }
-      double subtree = subtreeMassProps(doc_, poses_, b.id).mass;
-      if (subtree <= 1e-12) {
-        add(Severity::Error, IssueArea::Model, "massless", fmt("Body %s can move but has no mass", quote(b.name).c_str()),
-            "It has joints but no geoms with volume below it. Add a geom, or an explicit inertial.", {b.id});
-        continue;
+        if (weld_.weld[si] == int(bi)) m += bodyMass_[si].mass;
       }
       if (m > 0 && m < minM) { minM = m; minId = b.id; }
       if (m > maxM) { maxM = m; maxId = b.id; }
       if (m > 0 && m < 1e-3) {
         bool hasArm = false;
-        for (uint32_t ji : doc_.index().bodyJoints[bi]) hasArm |= doc_.joints[ji].armature > 0;
+        for (uint32_t ji : ix.bodyJoints[bi]) hasArm |= doc_.joints[ji].armature > 0;
         if (!hasArm)
           add(Severity::Warning, IssueArea::Stability, "tiny-mass", fmt("Body %s is very light (%.2g g)", quote(b.name).c_str(), m * 1000),
               "Very light moving bodies make the dynamics stiff and can destabilize the simulation. Add some joint "
@@ -688,6 +999,86 @@ class Analyzer {
               quote(doc_.nameOf(maxId)).c_str(), maxM, quote(doc_.nameOf(minId)).c_str(), minM),
           {maxId, minId});
     }
+    if (doc_.compiler.settotalmass > 0) {
+      Issue& i = add(Severity::Info, IssueArea::Model, "settotalmass",
+                     fmt("The compiler scales the total mass to %.4g kg", doc_.compiler.settotalmass),
+                     "MuJoCo 3.16 deprecates compiler settotalmass and warns about it. Scaling the geom densities, masses "
+                     "and explicit inertials by the same factor gives the identical model without it.");
+      i.fixLabel = "Bake it into the masses";
+      i.fix = [](Document& d) { bakeTotalMass(d); };
+    }
+  }
+
+  // Weight (mass times the share of gravity the joints carry) of a subtree and its first moment
+  // about p.
+  struct WeightSum {
+    double w = 0;
+    Vec3 moment;
+  };
+  WeightSum weightOf(Id root, const Vec3& p) const {
+    WeightSum s;
+    for (Id b : doc_.subtree(root)) {
+      int bi = doc_.bodyIndex(b);
+      s.w += bodyWeight_[bi];
+      s.moment += (bodyMass_[bi].com - p) * bodyWeight_[bi];
+    }
+    return s;
+  }
+
+  // Mass properties of a subtree from the per-body values.
+  MassAccumulator subtreeAcc(Id root) const {
+    MassAccumulator acc;
+    for (Id b : doc_.subtree(root)) {
+      const MassProps& mp = bodyMass_[doc_.bodyIndex(b)];
+      acc.add(mp.mass, mp.com, mp.inertia);
+    }
+    return acc;
+  }
+
+  Base base(Id root) const {
+    auto it = base_.find(root);
+    return it == base_.end() ? Base::Fixed : it->second;
+  }
+
+  // Moment arm of an actuator on a joint (0 when it doesn't drive it).
+  double armOn(Id actuator, Id joint) const {
+    auto it = arms_.find(actuator);
+    if (it == arms_.end()) return 0;
+    double s = 0;
+    for (const Arm& a : it->second)
+      if (a.joint == joint) s += a.arm;
+    return s;
+  }
+
+  // Actuator stiffness and damping in actuator space: MuJoCo's compiled gains when available (they
+  // include damping ratios turned into kv), else the document's.
+  void servoGains(const Actuator& act, double jointInertia, double arm2, double* k, double* c) const {
+    *k = *c = 0;
+    auto it = compiledActuator_.find(act.id);
+    if (it != compiledActuator_.end()) {
+      const mjModel* m = cr_->model.get();
+      int a = it->second;
+      if (m->actuator_biastype[a] == mjBIAS_AFFINE) {
+        *k = std::max(0.0, -m->actuator_biasprm[mjNBIAS * a + 1]);
+        *c = std::max(0.0, -m->actuator_biasprm[mjNBIAS * a + 2]);
+      }
+      return;
+    }
+    switch (act.type) {
+      case ActuatorType::Position:
+      case ActuatorType::IntVelocity:
+        *k = act.kp;
+        *c = act.dampratio > 0 ? act.dampratio * 2.0 * std::sqrt(act.kp * std::max(jointInertia, 1e-12) / arm2) : act.kv;
+        break;
+      case ActuatorType::Velocity: *c = act.kv; break;
+      case ActuatorType::General:
+        if (act.biastype == BiasType::Affine) {
+          *k = std::max(0.0, -act.biasprm[1]);
+          *c = std::max(0.0, -act.biasprm[2]);
+        }
+        break;
+      default: break;
+    }
   }
 
   // ---------------------------------------------------------------- joints
@@ -698,49 +1089,58 @@ class Analyzer {
       JointReport r;
       r.joint = j.id;
       r.angular = j.type == JointType::Hinge;
-      MassAccumulator acc = subtreeAccumulator(doc_, poses_, j.body);
       Vec3 p, a;
       jointWorldFrame(doc_, jointFrames_, j, &p, &a);
-      r.movedMass = acc.mass();
-      double base = r.angular ? acc.inertiaAboutAxis(p, a) : acc.mass();
-      r.inertia = base + j.armature;
+      MassAccumulator moved = subtreeAcc(j.body);
+      WeightSum w = weightOf(j.body, p);
+      double inertia = r.angular ? moved.inertiaAboutAxis(p, a) : moved.mass();
+      double mass = moved.mass();
+      // On a floating model the joint moves both of its sides, which push against each other; the
+      // lighter side is the one that swings when the heavier one stands or lies on something.
+      Id root = doc_.rootOf(j.body);
+      if (root != j.body && base(root) != Base::Fixed) {
+        const MassAccumulator& all = rootAcc_[root];
+        inertia = floatingJointInertia(moved, all, p, a, r.angular);
+        if (all.mass() - mass < mass) {
+          WeightSum wAll = weightOf(root, p);
+          w = {wAll.w - w.w, wAll.moment - w.moment};
+          mass = all.mass() - mass;
+        }
+        // Swinging a limb from any angle is routine; tilting a big part of the body (a torso) all the
+        // way over is not, so that lift is only advice.
+        if (mass > 0.25 * all.mass()) bigPart_.insert(j.id);
+      }
+      r.movedMass = mass;
+      r.inertia = inertia + j.armature;
       if (r.angular) {
-        Vec3 rr = acc.com() - p;
-        Vec3 rperp = rr - a * dot(a, rr);
         double h = length(cross(a, gdir_));
         r.axisTilt = h;
-        r.liftLoad = r.movedMass * gmag_ * length(rperp) * std::max(h, 0.25);
+        r.liftLoad = gmag_ * length(w.moment - a * dot(a, w.moment)) * std::max(h, 0.25);
+        r.holdLoad = gmag_ * std::fabs(dot(a, cross(w.moment, gdir_)));  // gravity's torque at the start pose
       } else {
         r.axisTilt = std::fabs(dot(a, gdir_));
-        r.liftLoad = r.movedMass * gmag_ * std::max(r.axisTilt, 0.25);
+        r.liftLoad = gmag_ * std::fabs(w.w) * std::max(r.axisTilt, 0.25);
+        r.holdLoad = gmag_ * std::fabs(w.w) * r.axisTilt;
       }
-      double kServo = 0, cAct = 0, cPassive = 0;
-      // Rotor inertia and damping that actuators add to the joint (MuJoCo scales them by gear^2).
-      for (const Actuator& act : doc_.actuators)
-        if ((act.trn == TrnType::Joint || act.trn == TrnType::JointInParent) && act.target == j.id &&
-            act.type != ActuatorType::Adhesion) {
-          double g2 = act.gear[0] * act.gear[0];
-          r.inertia += act.armature * g2;
-          cPassive += act.damping * g2;
-        }
+      // Rotor inertia and damping that actuators add (MuJoCo scales them by the squared arm).
+      double cPassive = 0;
       for (const Actuator& act : doc_.actuators) {
-        if ((act.trn != TrnType::Joint && act.trn != TrnType::JointInParent) || act.target != j.id) continue;
+        double arm = armOn(act.id, j.id);
+        r.inertia += act.armature * arm * arm;
+        cPassive += act.damping * arm * arm;
+      }
+      double kServo = 0, cAct = 0;
+      for (const Actuator& act : doc_.actuators) {
+        double arm = armOn(act.id, j.id);
+        if (arm == 0) continue;
         r.actuated = true;
-        double gear = std::fabs(act.gear[0]);
         double f = actuatorMaxForce(doc_, act);
         if (std::isinf(f)) r.unbounded = true;
-        r.capacity += gear * f;
-        double g2 = gear * gear;
-        if (act.type == ActuatorType::Position || act.type == ActuatorType::IntVelocity) {
-          kServo += act.kp * g2;
-          if (act.dampratio > 0) cAct += act.dampratio * 2.0 * std::sqrt(act.kp * g2 * std::max(r.inertia, 1e-12));
-          else cAct += act.kv * g2;
-        } else if (act.type == ActuatorType::Velocity) {
-          cAct += act.kv * g2;
-        } else if (act.type == ActuatorType::General && act.biastype == BiasType::Affine) {
-          kServo += std::max(0.0, -act.biasprm[1]) * g2;
-          cAct += std::max(0.0, -act.biasprm[2]) * g2;
-        }
+        r.capacity += std::fabs(arm) * f;
+        double k, c;
+        servoGains(act, r.inertia, arm * arm, &k, &c);
+        kServo += k * arm * arm;
+        cAct += c * arm * arm;
       }
       if (j.actuatorfrclimited)
         r.capacity = std::min(r.capacity, std::max(std::fabs(j.actuatorfrcrange.x), std::fabs(j.actuatorfrcrange.y)));
@@ -750,89 +1150,219 @@ class Analyzer {
       if (r.inertia > 0 && r.stiffness > 0) r.omegaDt = std::sqrt(r.stiffness / r.inertia) * dt;
       servoStiffness_[j.id] = kServo;
       actDamping_[j.id] = cAct;
+      passiveDamping_[j.id] = j.damping + cPassive;
       rep_.joints.push_back(r);
     }
   }
 
-  // Legs: chains from a model root down to "feet" (bodies at the bottom of the model).
+  // The axle of a wheel: a hinge of the body about which the geoms it stands on are round (a sphere,
+  // a cylinder on the same axis, a round mesh), so the load passes through the axle.
+  Id wheelAxle(int bi, const std::vector<const Geom*>& ground) const {
+    const DocIndex& ix = doc_.index();
+    for (uint32_t ji : ix.bodyJoints[bi]) {
+      const Joint& j = doc_.joints[ji];
+      if (j.type != JointType::Hinge) continue;
+      Vec3 p, a;
+      jointWorldFrame(doc_, jointFrames_, j, &p, &a);
+      for (const Geom* gg : ground) {
+        const Geom& g = *gg;
+        Pose gp = poses_[bi] * Pose{g.pos, g.quat};
+        Vec3 d = gp.pos - p;
+        if (g.type == GeomType::Sphere && length(d) < 0.2 * g.size.x) return j.id;
+        if (g.type == GeomType::Cylinder && std::fabs(dot(rotate(gp.quat, {0, 0, 1}), a)) > 0.95 &&
+            length(d - a * dot(d, a)) < 0.2 * g.size.x)
+          return j.id;
+        if (g.type == GeomType::Mesh) {
+          // A mesh reaching equally far from the axle in every direction across it.
+          const MeshAsset* mesh = doc_.mesh(g.mesh);
+          if (!mesh) continue;
+          Quat qi = conj(gp.quat);
+          Vec3 al = rotate(qi, a), pl = rotate(qi, p - gp.pos);
+          Vec3 u = normalize(cross(al, std::fabs(al.x) < 0.9 ? Vec3{1, 0, 0} : Vec3{0, 1, 0})), v = cross(al, u);
+          double rmin = kInf, rmax = 0;
+          for (int k = 0; k < 16; ++k) {
+            Vec3 dir = u * std::cos(kPi * k / 8) + v * std::sin(kPi * k / 8);
+            double ext = -kInf;
+            for (const Vec3& q : meshSupportPoints(*mesh)) ext = std::max(ext, dot(q - pl, dir));
+            rmin = std::min(rmin, ext);
+            rmax = std::max(rmax, ext);
+          }
+          if (rmax > 0 && rmin > 0.95 * rmax) return j.id;
+        }
+      }
+    }
+    return kNoId;
+  }
+
+  int commonAncestor(int a, int b) const {
+    const DocIndex& ix = doc_.index();
+    while (a != b && a > 0 && b > 0) {
+      if (ix.depth[a] >= ix.depth[b]) a = doc_.bodyIndex(doc_.bodies[a].parent);
+      else b = doc_.bodyIndex(doc_.bodies[b].parent);
+    }
+    return a == b ? a : 0;
+  }
+
+  // Legs: chains from a floating model's root down to its feet, the bodies at the bottom.
   void analyzeLegs() {
+    const DocIndex& ix = doc_.index();
     for (const Body& root : doc_.bodies) {
       if (root.id == kWorldId || root.parent != kWorldId || root.role != Role::Model) continue;
+      if (base(root.id) == Base::Fixed) continue;  // fixed-base robots don't stand on legs
       int ri = doc_.bodyIndex(root.id);
-      bool floating = false;
-      for (uint32_t ji : doc_.index().bodyJoints[ri]) floating |= doc_.joints[ji].type == JointType::Free;
-      if (!floating) continue;  // fixed-base robots don't stand on legs
       Aabb box = subtreeAabb(doc_, poses_, root.id, true);  // feet must be able to touch the ground
       if (!box.valid()) continue;
       double height = box.hi.z - box.lo.z;
       double tol = std::max(0.01, 0.06 * height);
-      // Feet: bodies whose own geoms reach the bottom of the model.
-      struct Foot { int body; Vec3 point; int leg; };
+      // Feet: bodies whose own geoms reach the bottom of the model, with the points they stand on.
+      struct Foot {
+        int body;
+        std::vector<Vec3> points;
+        double zmin;
+        double mu;
+        Id axle = kNoId;
+      };
       std::vector<Foot> feet;
+      std::vector<int> feetBelow(doc_.bodies.size(), 0), isFoot(doc_.bodies.size(), 0);
       for (Id b : doc_.subtree(root.id)) {
         if (b == root.id) continue;
         int bi = doc_.bodyIndex(b);
-        Aabb own;
-        for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
+        std::vector<std::pair<const Geom*, std::vector<Vec3>>> low;
+        double zmin = kInf;
+        for (uint32_t gi : ix.bodyGeoms[bi]) {
           const Geom& g = doc_.geoms[gi];
-          if (g.type == GeomType::Plane || !geomCollides(g)) continue;
-          own.add(geomWorldAabb(doc_, g, poses_[bi] * Pose{g.pos, g.quat}));
+          if (g.type == GeomType::Plane || g.type == GeomType::Hfield || !geomCollides(g)) continue;
+          std::vector<Vec3> pts;
+          geomLowPoints(doc_, g, poses_[bi] * Pose{g.pos, g.quat}, box.lo.z + tol, pts);
+          for (const Vec3& q : pts) zmin = std::min(zmin, q.z);
+          if (!pts.empty()) low.push_back({&g, std::move(pts)});
         }
-        if (!own.valid() || own.lo.z > box.lo.z + tol) continue;
-        // The leg is identified by the root's child that leads to this foot.
-        Id cur = b;
-        while (doc_.body(cur)->parent != root.id) cur = doc_.body(cur)->parent;
-        feet.push_back({bi, {own.center().x, own.center().y, own.lo.z}, doc_.bodyIndex(cur)});
+        if (low.empty()) continue;
+        // What it stands on: the geoms reaching within a centimeter of its lowest point.
+        Foot f{bi, {}, zmin, 0};
+        std::vector<const Geom*> ground;
+        for (const auto& [g, pts] : low) {
+          bool touches = false;
+          for (const Vec3& q : pts)
+            if (q.z <= zmin + 0.01) {
+              f.points.push_back(q);
+              touches = true;
+            }
+          if (!touches) continue;
+          ground.push_back(g);
+          f.mu = std::max(f.mu, g->friction.x);
+        }
+        f.axle = wheelAxle(bi, ground);
+        feet.push_back(std::move(f));
+        isFoot[bi] = 1;
+        for (int x = bi; x > 0 && x != ri; x = doc_.bodyIndex(doc_.bodies[x].parent)) feetBelow[x]++;
       }
       if (feet.empty()) continue;
-      std::set<int> legs;
-      for (const Foot& f : feet) legs.insert(f.leg);
-      int nLegs = int(legs.size());
-      rep_.legCount += nLegs;
-      double mass = subtreeMassProps(doc_, poses_, root.id).mass;
-      double W = mass * gmag_;
-      double wStatic = W / nLegs;
-      double wDyn = W / std::max(1.0, nLegs / 2.0);  // about half the feet are on the ground while moving
-      legInfo_.push_back({root.id, nLegs, mass});
-      // One representative foot per leg: the lowest.
-      std::map<int, Foot> perLeg;
-      for (const Foot& f : feet) {
-        auto it = perLeg.find(f.leg);
-        if (it == perLeg.end() || f.point.z < it->second.point.z) perLeg[f.leg] = f;
-      }
-      for (const auto& [leg, foot] : perLeg) {
-        // Joints on the chain from the foot up to the leg's first body.
-        int bi = foot.body;
+      // A leg runs from its feet up to where it meets the other legs: the root, or a body high in the
+      // model (a pelvis). Feet that meet low down (toes and a heel) belong to the same leg.
+      auto legTop = [&](int f) {
+        int cur = f;
         while (true) {
-          for (uint32_t ji : doc_.index().bodyJoints[bi]) {
-            const Joint& j = doc_.joints[ji];
-            JointReport* r = findReport(j.id);
-            if (!r) continue;
-            Vec3 p, a;
-            jointWorldFrame(doc_, jointFrames_, j, &p, &a);
-            Vec3 up = -gdir_;
-            if (r->angular) {
-              Vec3 rr = foot.point - p;
-              double leverRef = std::fabs(dot(a, cross(rr, up)));
-              double lperp = length(rr - a * dot(a, rr));
-              double h = length(cross(a, up));
-              r->holdLoad = std::max(r->holdLoad, wStatic * leverRef);
-              r->supportLoad = std::max(r->supportLoad, wDyn * std::max(leverRef, 0.35 * lperp * h));
-            } else {
-              double c = std::fabs(dot(a, up));
-              r->holdLoad = std::max(r->holdLoad, wStatic * c);
-              r->supportLoad = std::max(r->supportLoad, wDyn * c);
-            }
-            supportCtx_[j.id] = fmt("%.3g kg on %d leg%s", mass, nLegs, nLegs > 1 ? "s" : "");
-          }
-          if (bi == leg) break;
-          bi = doc_.bodyIndex(doc_.bodies[bi].parent);
-          if (bi <= 0) break;
+          int p = doc_.bodyIndex(doc_.bodies[cur].parent);
+          if (p <= 0 || p == ri) return cur;
+          bool branches = feetBelow[p] - isFoot[p] > feetBelow[cur];  // other feet hang below p
+          if (branches && poses_[p].pos.z - box.lo.z > 0.25 * height) return cur;
+          cur = p;
         }
+      };
+      std::unordered_map<int, Id> wheelAxleOf;
+      for (const Foot& f : feet) wheelAxleOf[f.body] = f.axle;
+      std::map<int, std::vector<const Foot*>> byTop;
+      for (const Foot& f : feet) byTop[legTop(f.body)].push_back(&f);
+      // Each leg stands on its lowest feet (a shin that merely comes close does not carry it).
+      struct Leg {
+        int top, start = -1;
+        std::vector<Vec3> points;
+        Vec3 center;
+        double mu = 0;
+        bool wheel = true;
+      };
+      std::vector<Leg> legs;
+      int nLegs = 0;
+      for (const auto& [top, fs] : byTop) {
+        double low = kInf;
+        for (const Foot* f : fs) low = std::min(low, f->zmin);
+        Leg leg;
+        leg.top = top;
+        for (const Foot* f : fs) {
+          if (f->zmin > low + 0.01) continue;
+          leg.wheel &= f->axle != kNoId;
+          leg.mu = std::max(leg.mu, f->mu);
+          leg.start = leg.start < 0 ? f->body : commonAncestor(leg.start, f->body);
+          leg.points.insert(leg.points.end(), f->points.begin(), f->points.end());
+        }
+        for (const Vec3& q : leg.points) leg.center += q;
+        leg.center = leg.center / double(leg.points.size());
+        nLegs += !leg.wheel;
+        legs.push_back(std::move(leg));
+      }
+      rep_.legCount += nLegs;
+      legsOf_[root.id] = nLegs;
+      double mass = rootAcc_[root.id].mass();
+      double W = gmag_ * weightOf(root.id, {}).w;
+      if (W <= 0) continue;
+      double wStatic = W / double(legs.size());
+      double wDyn = W / std::max(1.0, nLegs / 2.0);  // about half the feet are on the ground while moving
+      Vec3 up = -gdir_;
+      std::string ctx = fmt("%.3g kg on %d %s", mass, int(legs.size()),
+                            nLegs ? (legs.size() > 1 ? "legs" : "leg") : (legs.size() > 1 ? "wheels" : "wheel"));
+      // With friction the ground can push along a leg rather than straight up: the reaction then
+      // points at the leg's top joint, which is how a splayed stance stands without hip torque. The
+      // sideways pushes of all legs must cancel, and stay inside the friction cone.
+      std::vector<Vec3> tilt(legs.size());
+      Vec3 meanTilt;
+      for (size_t k = 0; k < legs.size(); ++k) {
+        const Leg& leg = legs[k];
+        Vec3 hip = poses_[leg.top].pos;
+        if (!ix.bodyJoints[leg.top].empty())
+          jointWorldFrame(doc_, jointFrames_, doc_.joints[ix.bodyJoints[leg.top][0]], &hip, nullptr);
+        Vec3 d = hip - leg.center;
+        double vert = dot(d, up);
+        tilt[k] = vert > 1e-9 ? (d - up * vert) / vert : Vec3{};
+        meanTilt += tilt[k] / double(legs.size());
       }
       std::vector<int> footBodies;
-      for (const auto& [leg, foot] : perLeg) footBodies.push_back(foot.body);
-      if (nLegs <= 2) checkAnkleBalance(root, footBodies, box.lo.z + tol);
+      for (size_t k = 0; k < legs.size(); ++k) {
+        const Leg& leg = legs[k];
+        if (!leg.wheel) footBodies.push_back(leg.start);
+        Vec3 t = tilt[k] - meanTilt;
+        double mu = std::min(leg.mu, 1.0);
+        if (length(t) > mu) t = t * (mu / length(t));
+        Vec3 F = up + t;  // per unit of carried weight
+        for (int bi = leg.start; bi > 0;) {
+          for (uint32_t ji : ix.bodyJoints[bi]) {
+            const Joint& j = doc_.joints[ji];
+            JointReport* r = findReport(j.id);
+            if (!r || (leg.wheel && j.id == wheelAxleOf[bi])) continue;
+            Vec3 p, a;
+            jointWorldFrame(doc_, jointFrames_, j, &p, &a);
+            double lever, dynLever;
+            if (r->angular) {
+              Vec3 rr = leg.center - p;
+              lever = std::fabs(dot(a, cross(rr, F)));
+              // Striding moves the foot away from under the joint.
+              dynLever = std::max(lever, 0.2 * length(rr - a * dot(a, rr)) * length(cross(a, up)));
+              // The most the joint can use: the load at the edge of the foot.
+              double reach = dynLever;
+              for (const Vec3& q : leg.points) reach = std::max(reach, std::fabs(dot(a, cross(q - p, F))));
+              footReach_[j.id] = std::max(footReach_[j.id], wDyn * reach);
+            } else {
+              lever = dynLever = std::fabs(dot(a, F));
+            }
+            r->holdLoad = std::max(r->holdLoad, wStatic * lever);
+            if (!leg.wheel) r->supportLoad = std::max(r->supportLoad, wDyn * dynLever);
+            supportCtx_[j.id] = ctx;
+          }
+          if (bi == leg.top) break;
+          bi = doc_.bodyIndex(doc_.bodies[bi].parent);
+        }
+      }
+      if (nLegs > 0 && nLegs <= 2) checkAnkleBalance(root, footBodies, box.lo.z + tol);
     }
     // Soft contacts let feet creep under a constant sideways load (splayed legs standing still).
     if (rep_.legCount > 0 && (doc_.option.cone == Cone::Pyramidal || doc_.option.impratio < 5)) {
@@ -847,6 +1377,19 @@ class Analyzer {
         d.option.impratio = std::max(d.option.impratio, 10.0);
       };
     }
+  }
+
+  // Servo actuators of a joint with the factor that brings its servo stiffness to `need`.
+  std::vector<std::pair<Id, double>> servoScales(Id joint, double need) {
+    std::vector<std::pair<Id, double>> out;
+    double k = servoStiffness_[joint];
+    if (k <= 0 || need <= k) return out;
+    for (Id a : actuatorsOf(joint, false)) {
+      const Actuator* act = doc_.actuator(a);
+      if (act && (act->type == ActuatorType::Position || act->type == ActuatorType::IntVelocity || positionLikeGeneral(*act)))
+        out.push_back({a, need / k});
+    }
+    return out;
   }
 
   // Standing on one or two flat feet, the body above the ankles is an inverted pendulum: only the
@@ -868,8 +1411,8 @@ class Analyzer {
         flat |= geomWorldAabb(doc_, g, poses_[fb] * Pose{g.pos, g.quat}).lo.z <= floorLevel;
       }
       if (!flat) return;  // point-like feet: covered by the stance check
-      MassProps fm = subtreeMassProps(doc_, poses_, doc_.bodies[fb].id);
-      feet.add(fm.mass, fm.com, fm.inertia);
+      MassAccumulator fm = subtreeAcc(doc_.bodies[fb].id);
+      feet.add(fm.mass(), fm.com(), fm.inertiaAboutCom());
       for (uint32_t ji : doc_.index().bodyJoints[fb]) {
         const Joint& j = doc_.joints[ji];
         const JointReport* r = findReport(j.id);
@@ -889,10 +1432,10 @@ class Analyzer {
         grp->anchors += p;
       }
     }
-    MassProps all = subtreeMassProps(doc_, poses_, root.id);
-    double mAbove = all.mass - feet.mass();
+    MassAccumulator all = subtreeAcc(root.id);
+    double mAbove = all.mass() - feet.mass();
     if (mAbove <= 0) return;
-    Vec3 comAbove = (all.com * all.mass - feet.com() * feet.mass()) * (1.0 / mAbove);
+    Vec3 comAbove = (all.com() * all.mass() - feet.com() * feet.mass()) * (1.0 / mAbove);
     for (const Group& g : groups) {
       Vec3 anchor = g.anchors * (1.0 / g.joints.size());
       double h = dot(comAbove - anchor, -gdir_);
@@ -900,25 +1443,23 @@ class Analyzer {
       double kGravity = mAbove * gmag_ * h;
       // Torque-controlled ankles (no servo or spring stiffness) are balanced by the policy.
       if (g.k <= 0 || g.k >= 1.5 * kGravity) continue;
-      double kpEach = niceCeil(2.0 * kGravity / g.joints.size());
+      double kEach = niceCeil(2.0 * kGravity / g.joints.size());
       Issue& i = add(Severity::Info, IssueArea::Physics, "ankle-balance",
                      fmt("%s can't stand still: its ankles are softer than gravity's tipping pull", quote(root.name).c_str()),
                      fmt("On its feet, the %.3g kg above the ankles (center of mass %.2f m up) is an inverted pendulum: "
                          "gravity tips it with %.3g N*m/rad while the ankle joints resist with %.3g N*m/rad. Holding "
                          "a pose it slowly falls over, so a policy must balance it actively. For a stance that holds "
-                         "by itself, raise the ankle kp to about %.3g each.",
-                         mAbove, h, kGravity, g.k, kpEach),
+                         "by itself, raise each ankle's stiffness to about %.3g N*m/rad.",
+                         mAbove, h, kGravity, g.k, kEach),
                      g.joints);
-      std::vector<Id> acts;
-      for (Id j : g.joints)
-        for (Id a : actuatorsOf(j, false)) acts.push_back(a);
-      if (acts.empty()) continue;
-      i.fixLabel = fmt("Set ankle kp to %.3g", kpEach);
-      i.fix = [acts, kpEach](Document& d) {
-        for (Id id : acts)
-          if (Actuator* a = d.actuator(id))
-            if (a->type == ActuatorType::Position || a->type == ActuatorType::IntVelocity) a->kp = std::max(a->kp, kpEach);
-      };
+      std::vector<std::pair<Id, double>> scales;
+      for (Id jid : g.joints) {
+        const Joint* jj = doc_.joint(jid);
+        for (const auto& s : servoScales(jid, kEach - (jj ? jj->stiffness : 0))) scales.push_back(s);
+      }
+      if (scales.empty()) continue;
+      i.fixLabel = stiffenLabel(doc_, scales);
+      i.fix = [scales](Document& d) { for (const auto& [id, s] : scales) stiffenServo(d, id, s); };
     }
   }
 
@@ -930,104 +1471,125 @@ class Analyzer {
   void checkJointFindings() {
     const double dt = doc_.option.timestep;
     const std::unordered_set<Id> constrainedJoints = tendonOrEqualityJoints();
-    bool explicitDamping = doc_.option.integrator == Integrator::Euler || doc_.option.integrator == Integrator::RK4;
+    const Integrator integ = doc_.option.integrator;
+    bool explicitDamping = integ == Integrator::Euler || integ == Integrator::RK4;
+    bool actuation = doc_.option.actuation;
+    if (!actuation && !doc_.actuators.empty()) {
+      Issue& i = add(Severity::Warning, IssueArea::Physics, "actuation-off",
+                     fmt("Actuation is off: the %zu actuator(s) apply no force", doc_.actuators.size()),
+                     "The actuation flag (Scene > Flags) disables every actuator, so the model can't move by itself and "
+                     "the strength checks are skipped.");
+      i.fixLabel = "Enable actuation";
+      i.fix = [](Document& d) { d.option.actuation = true; };
+    }
     for (JointReport& r : rep_.joints) {
       const Joint* j = doc_.joint(r.joint);
       if (r.stiffness > 0 && r.holdLoad > 0) r.sag = r.holdLoad / r.stiffness;
       const char* tu = r.angular ? "N*m" : "N";
       std::string jn = quote(j->name);
-      // Strength.
+      bool leg = supportCtx_.count(r.joint) > 0;
+      // Strength. Holding the start pose and lifting a limb are firm needs; carrying the body on
+      // fewer feet while walking, or tilting a torso all the way over, are estimates, so falling short
+      // of them only earns an Info.
       double need = r.required();
-      if (r.actuated && !r.unbounded && need > 1e-9 && r.capacity < need) {
-        double ratio = r.capacity / need;
-        bool support = r.supportLoad >= r.liftLoad;
-        std::string why = support ? fmt("to support the body while moving (%s, about half the feet on the ground)",
-                                        supportCtx_[r.joint].c_str())
-                                  : fmt("to lift the %.3g kg it moves against gravity", r.movedMass);
-        Issue& i = add(ratio < 0.25 ? Severity::Error : Severity::Warning, IssueArea::Physics, "weak-actuator",
-                       fmt("Joint %s is too weak: %.3g of ~%.3g %s needed", jn.c_str(), r.capacity, need, tu),
-                       fmt("Its actuators can apply at most %.3g %s but it needs about %.3g %s %s. That is %s of "
-                           "what is required, so the %s.",
-                           r.capacity, tu, need, tu, why.c_str(),
-                           ratio < 0.001 ? "under 0.1%" : fmt("%.1f%%", ratio * 100).c_str(),
-                           ratio < 0.25 ? "creature will barely move" : "motion will be sluggish or it may collapse"),
-                       actuatorsOf(r.joint, true));
+      double firm = std::max(bigPart_.count(r.joint) ? 0.0 : r.liftLoad, r.holdLoad);
+      if (actuation && r.actuated && !r.unbounded && need > 1e-9 && r.capacity < need) {
+        bool walking = r.capacity >= firm;
+        double ratio = r.capacity / (walking ? need : firm);
+        std::string why = r.holdLoad > r.liftLoad
+                              ? fmt("to hold the start pose (%s)", supportCtx_.count(r.joint) ? supportCtx_[r.joint].c_str()
+                                                                                              : "against gravity")
+                              : fmt("to lift the %.3g kg it moves against gravity", r.movedMass);
+        std::string motion = r.supportLoad >= r.liftLoad
+                                 ? fmt("carrying the body on fewer feet in this posture takes about %.3g %s (%s). Fine if "
+                                       "the policy walks more upright or the gait keeps more feet down.",
+                                       r.supportLoad, tu, supportCtx_[r.joint].c_str())
+                                 : fmt("tilting the %.3g kg it moves all the way over (getting up, say) takes about %.3g "
+                                       "%s. Policies usually get help from the other joints and momentum.",
+                                       r.movedMass, r.liftLoad, tu);
+        Issue& i = walking
+                       ? add(Severity::Info, IssueArea::Physics, "weak-for-motion",
+                             fmt("Joint %s may be too weak for some motions: %.3g of ~%.3g %s", jn.c_str(), r.capacity,
+                                 need, tu),
+                             fmt("Its actuators can apply at most %.3g %s. That holds the start pose, but %s", r.capacity,
+                                 tu, motion.c_str()),
+                             actuatorsOf(r.joint, true))
+                       : add(ratio < 0.25 ? Severity::Error : Severity::Warning, IssueArea::Physics, "weak-actuator",
+                             fmt("Joint %s is too weak: %.3g of ~%.3g %s needed", jn.c_str(), r.capacity, need, tu),
+                             fmt("Its actuators can apply at most %.3g %s but it needs about %.3g %s %s. That is %s of "
+                                 "what is required, so the %s.",
+                                 r.capacity, tu, firm, tu, why.c_str(),
+                                 ratio < 0.001 ? "under 0.1%" : fmt("%.1f%%", ratio * 100).c_str(),
+                                 ratio < 0.25 ? "creature will barely move" : "motion will be sluggish or it may collapse"),
+                             actuatorsOf(r.joint, true));
         double target = niceCeil(1.5 * need);
-        std::vector<Id> acts = actuatorsOf(r.joint, false);
-        i.fixLabel = fmt("Make actuators %.3g %s strong", target, tu);
-        i.fix = [acts, target](Document& d) {
-          double share = target / std::max<size_t>(1, acts.size());
-          for (Id id : acts) {
-            Actuator* a = d.actuator(id);
-            if (!a) continue;
-            double gear = std::max(1e-9, std::fabs(a->gear[0]));
-            double f = share / gear;
-            switch (a->type) {
-              case ActuatorType::Motor: {
-                double umax = a->ctrllimited ? std::max(std::fabs(a->ctrlrange.x), std::fabs(a->ctrlrange.y)) : 1.0;
-                a->gear[0] = niceCeil(share / std::max(umax, 1e-9));
-                if (a->forcelimited) a->forcerange = {-share / a->gear[0], share / a->gear[0]};
-                break;
-              }
-              case ActuatorType::Position:
-              case ActuatorType::IntVelocity: {
-                // Full force at ~0.25 rad (or 2.5 cm) tracking error.
-                a->kp = std::max(a->kp, niceCeil(f / 0.25));
-                if (a->forcelimited) a->forcerange = {-f, f};
-                break;
-              }
-              default:
-                if (a->forcelimited) a->forcerange = {-f, f};
-                break;
-            }
-          }
-        };
+        std::vector<std::pair<Id, double>> arms;
+        for (const Actuator& act : doc_.actuators) {
+          double arm = armOn(act.id, r.joint);
+          if (arm != 0 && act.type != ActuatorType::Damper) arms.push_back({act.id, arm});
+        }
+        if (!arms.empty()) {
+          Id jid = r.joint;
+          i.fixLabel = fmt("Make actuators %.3g %s strong", target, tu);
+          i.fix = [arms, target, jid](Document& d) { strengthenJoint(d, arms, target, jid); };
+        }
       }
-      // Servo sag under the static body weight.
+      // Servo sag under the weight the joint holds at the start pose.
       double sagLimit = r.angular ? 0.15 : 0.02;
-      if (r.actuated && servoStiffness_[r.joint] > 0 && r.sag > sagLimit && (r.capacity >= need || r.unbounded)) {
+      if (actuation && r.actuated && servoStiffness_[r.joint] > 0 && r.sag > sagLimit && (r.capacity >= need || r.unbounded)) {
         Issue& i = add(Severity::Warning, IssueArea::Physics, "servo-sag",
-                       fmt("Servo on %s is soft: sags ~%.3g%s under the body weight", jn.c_str(),
-                           r.angular ? rad2deg(r.sag) : r.sag * 100, r.angular ? " deg" : " cm"),
-                       fmt("Holding the body needs %.3g %s at this joint; with a stiffness of %.3g %s/%s the joint "
+                       fmt("Servo on %s is soft: sags ~%.3g%s under the %s", jn.c_str(),
+                           r.angular ? rad2deg(r.sag) : r.sag * 100, r.angular ? " deg" : " cm",
+                           leg ? "body weight" : "weight it holds"),
+                       fmt("Holding %s needs %.3g %s at this joint; with a stiffness of %.3g %s/%s the joint "
                            "deflects that much from its target. Raise kp for tighter tracking.",
-                           r.holdLoad, tu, r.stiffness, tu, r.angular ? "rad" : "m"),
+                           leg ? "the body up" : "its load at the start pose", r.holdLoad, tu, r.stiffness, tu,
+                           r.angular ? "rad" : "m"),
                        actuatorsOf(r.joint, true));
-        std::vector<Id> acts = actuatorsOf(r.joint, false);
-        double kpNew = niceCeil(r.holdLoad / (r.angular ? 0.05 : 0.005));
-        i.fixLabel = fmt("Set kp to %.3g", kpNew);
-        i.fix = [acts, kpNew](Document& d) {
-          for (Id id : acts)
-            if (Actuator* a = d.actuator(id))
-              if (a->type == ActuatorType::Position || a->type == ActuatorType::IntVelocity) a->kp = std::max(a->kp, kpNew);
-        };
+        double K = r.holdLoad / (r.angular ? 0.05 : 0.005);
+        std::vector<std::pair<Id, double>> scales = servoScales(r.joint, K - j->stiffness);
+        if (!scales.empty()) {
+          i.fixLabel = stiffenLabel(doc_, scales);
+          i.fix = [scales](Document& d) { for (const auto& [id, s] : scales) stiffenServo(d, id, s); };
+        }
       }
       // Very overpowered (only a tip).
-      if (r.actuated && !r.unbounded && need > 1e-6 && r.axisTilt > 0.5 && r.capacity > 100 * need) {
+      double useful = std::max(need, footReach_.count(r.joint) ? footReach_[r.joint] : 0.0);
+      if (actuation && r.actuated && !r.unbounded && need > 1e-6 && r.axisTilt > 0.5 && r.capacity > 100 * useful) {
         add(Severity::Tip, IssueArea::Physics, "strong-actuator",
-            fmt("Joint %s is ~%.0fx stronger than its load", jn.c_str(), r.capacity / need),
+            fmt("Joint %s is ~%.0fx stronger than its load", jn.c_str(), r.capacity / useful),
             fmt("Up to %.3g %s for a load of ~%.3g %s. Fine for learning, but unrealistic forces can make policies "
                 "rely on violent motions that don't transfer to hardware.",
-                r.capacity, tu, need, tu),
+                r.capacity, tu, useful, tu),
             actuatorsOf(r.joint, true));
       }
-      // Timestep stability of stiff servos / springs.
-      if (r.omegaDt > 0.6) {
-        bool explode = r.omegaDt > 2.0;
-        Issue& i = add(explode ? Severity::Error : Severity::Warning, IssueArea::Stability, "stiff-servo",
-                       fmt("Joint %s is too stiff for the timestep (w*dt = %.2f)", jn.c_str(), r.omegaDt),
-                       fmt("Stiffness %.3g over an effective inertia of %.3g gives a natural frequency of %.3g rad/s. "
-                           "With dt = %.4g s that is w*dt = %.2f; %s Increase armature, reduce kp, or reduce the timestep.",
-                           r.stiffness, r.inertia, r.omegaDt / dt, dt, r.omegaDt,
-                           explode ? "above 2 explicit integration diverges." : "keep it below ~0.5 for accurate, stable motion."),
-                       {r.joint});
-        double base = r.inertia - j->armature;
-        double arm = r.stiffness * (dt / 0.5) * (dt / 0.5) - base;
-        if (arm > j->armature) {
-          Id jid = r.joint;
-          double armNice = niceCeil(arm);
-          i.fixLabel = fmt("Set armature to %.3g", armNice);
-          i.fix = [jid, armNice](Document& d) { if (Joint* x = d.joint(jid)) x->armature = armNice; };
+      // Timestep stability of stiff servos / springs. Damping the integrator treats implicitly lets
+      // a stiff joint stay stable (and an overdamped one moves slowly anyway).
+      if (r.inertia > 0 && r.stiffness > 0) {
+        double w = std::sqrt(r.stiffness / r.inertia);
+        double crit = 2.0 * std::sqrt(r.stiffness * r.inertia);
+        double cImplicit = integ == Integrator::RK4 ? 0 : integ == Integrator::Euler ? passiveDamping_[r.joint] : r.damping;
+        double zi = cImplicit / crit, z = r.damping / crit;
+        double hDiverge = integ == Integrator::RK4 ? 2.8 : 2 * zi + 2 * std::sqrt(zi * zi + 1);
+        double slow = z > 1 ? w * (z - std::sqrt(z * z - 1)) : w;
+        bool explode = w * dt > hDiverge;
+        if (explode || slow * dt > 0.6) {
+          Issue& i = add(explode ? Severity::Error : Severity::Warning, IssueArea::Stability, "stiff-servo",
+                         fmt("Joint %s is too stiff for the timestep (w*dt = %.2f)", jn.c_str(), r.omegaDt),
+                         fmt("Stiffness %.3g over an effective inertia of %.3g gives a natural frequency of %.3g rad/s%s. "
+                             "With dt = %.4g s that is w*dt = %.2f; %s Increase armature, reduce kp, or reduce the timestep.",
+                             r.stiffness, r.inertia, w, z > 0.05 ? fmt(" (damping ratio %.2g)", z).c_str() : "", dt, r.omegaDt,
+                             explode ? fmt("above %.2g this integrator diverges.", hDiverge).c_str()
+                                     : "keep it below ~0.5 for accurate, stable motion."),
+                         {r.joint});
+          double base = r.inertia - j->armature;
+          double arm = r.stiffness * (dt / 0.5) * (dt / 0.5) - base;
+          if (arm > j->armature) {
+            Id jid = r.joint;
+            double armNice = niceCeil(arm);
+            i.fixLabel = fmt("Set armature to %.3g", armNice);
+            i.fix = [jid, armNice](Document& d) { if (Joint* x = d.joint(jid)) x->armature = armNice; };
+          }
         }
       }
       if (explicitDamping && r.inertia > 0 && actDamping_[r.joint] * dt / r.inertia > 1.0) {
@@ -1040,8 +1602,10 @@ class Analyzer {
         i.fixLabel = "Use implicitfast";
         i.fix = [](Document& d) { d.option.integrator = Integrator::ImplicitFast; };
       }
+      // The root joints of a floating model (planar walkers) move the whole body: not "passive".
+      bool baseDof = doc_.body(j->body)->parent == kWorldId && base(j->body) != Base::Fixed;
       if (!r.actuated && j->damping == 0 && j->stiffness == 0 && j->frictionloss == 0 && r.movedMass > 0 &&
-          !constrainedJoints.count(r.joint)) {
+          !constrainedJoints.count(r.joint) && !baseDof) {
         add(Severity::Info, IssueArea::Physics, "passive-joint", fmt("Joint %s is passive and undamped", jn.c_str()),
             "It has no actuator, damping or friction, so it will swing freely. Add an actuator, or some damping if "
             "it's meant to be passive.",
@@ -1054,26 +1618,54 @@ class Analyzer {
     std::vector<Id> out;
     if (includeJoint) out.push_back(joint);
     for (const Actuator& a : doc_.actuators)
-      if ((a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) && a.target == joint) out.push_back(a.id);
+      if (armOn(a.id, joint) != 0) out.push_back(a.id);
     return out;
   }
 
   // ---------------------------------------------------------------- start state
   void checkStartState() {
+    // Floors: upward-facing planes of the world or of static bodies.
     double floorZ = -kInf;
-    for (const Geom& g : doc_.geoms)
-      if (g.body == kWorldId && g.type == GeomType::Plane && std::fabs(rotate(g.quat, {0, 0, 1}).z) > 0.999)
-        floorZ = std::max(floorZ, g.pos.z);
+    std::unordered_set<Id> floors;
+    for (size_t bi = 0; bi < doc_.bodies.size(); ++bi) {
+      if (weld_.weld[bi] != 0) continue;
+      for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
+        const Geom& g = doc_.geoms[gi];
+        if (g.type != GeomType::Plane) continue;
+        Pose gp = poses_[bi] * Pose{g.pos, g.quat};
+        if (rotate(gp.quat, {0, 0, 1}).z < 0.999) continue;  // walls and ceilings
+        floors.insert(g.id);
+        floorZ = std::max(floorZ, gp.pos.z);
+      }
+    }
+    // Contacts MuJoCo finds at the start state, by geom pair (most penetrating distance).
+    std::map<std::pair<Id, Id>, double> worst;
+    if (compiledOk()) {
+      for (const InitialContact& c : cr_->initialContacts) {
+        if (c.dist > -1e-3) continue;
+        if (c.geom1 < 0 || c.geom2 < 0 || size_t(c.geom1) >= cr_->map.geoms.size() || size_t(c.geom2) >= cr_->map.geoms.size()) continue;
+        Id g1 = cr_->map.geoms[c.geom1], g2 = cr_->map.geoms[c.geom2];
+        auto key = std::make_pair(std::min(g1, g2), std::max(g1, g2));
+        worst[key] = std::min(worst.count(key) ? worst[key] : 0.0, c.dist);
+      }
+    }
+    std::unordered_set<Id> floorChecked;
     for (const Body& root : doc_.bodies) {
       if (root.id == kWorldId || root.parent != kWorldId || root.role != Role::Model) continue;
-      int ri = doc_.bodyIndex(root.id);
-      bool floating = false;
-      for (uint32_t ji : doc_.index().bodyJoints[ri]) floating |= doc_.joints[ji].type == JointType::Free;
-      if (!floating || floorZ == -kInf) continue;
+      Base b = base(root.id);
+      if (b == Base::Fixed || floorZ == -kInf) continue;
       double minZ = subtreeMinZ(doc_, poses_, root.id, true);
       if (!std::isfinite(minZ)) continue;
+      floorChecked.insert(root.id);
       Id rid = root.id;
       double dz = minZ - floorZ;
+      for (const auto& [pair, dist] : worst) {
+        const Geom* a = doc_.geom(pair.first);
+        const Geom* c = doc_.geom(pair.second);
+        if (!a || !c) continue;
+        if ((floors.count(a->id) && doc_.rootOf(c->body) == rid) || (floors.count(c->id) && doc_.rootOf(a->body) == rid))
+          dz = std::min(dz, dist);
+      }
       if (dz > 0.03) {
         Issue& i = add(Severity::Info, IssueArea::Start, "floating",
                        fmt("%s starts %.0f cm above the floor", quote(root.name).c_str(), dz * 100),
@@ -1087,61 +1679,44 @@ class Analyzer {
         i.fixLabel = "Place on floor";
         i.fix = [rid, dz](Document& d) { liftStartPose(d, rid, 0.002 - dz); };
       }
-      // Balance: is the COM above the support polygon of the feet touching the floor?
-      if (std::fabs(dz) < 0.01) {
-        std::vector<Vec2> pts;
-        for (Id b : doc_.subtree(root.id)) {
-          int bi = doc_.bodyIndex(b);
+      // Balance: is the center of gravity above the support polygon of the points touching the floor?
+      if (b == Base::Free && std::fabs(dz) < 0.01) {
+        std::vector<Vec3> low;
+        for (Id body : doc_.subtree(root.id)) {
+          int bi = doc_.bodyIndex(body);
           for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
             const Geom& g = doc_.geoms[gi];
-            if (g.type == GeomType::Plane || !geomCollides(g)) continue;
-            Aabb ab = geomWorldAabb(doc_, g, poses_[bi] * Pose{g.pos, g.quat});
-            if (ab.lo.z - floorZ < 0.01) {
-              // Use the footprint corners for boxes, the center for round shapes.
-              if (g.type == GeomType::Box) {
-                pts.push_back({ab.lo.x, ab.lo.y});
-                pts.push_back({ab.hi.x, ab.lo.y});
-                pts.push_back({ab.hi.x, ab.hi.y});
-                pts.push_back({ab.lo.x, ab.hi.y});
-              } else {
-                pts.push_back({ab.center().x, ab.center().y});
-              }
-            }
+            if (g.type != GeomType::Plane && geomCollides(g)) geomLowPoints(doc_, g, poses_[bi] * Pose{g.pos, g.quat}, floorZ + 0.01, low);
           }
         }
-        MassProps mp = subtreeMassProps(doc_, poses_, root.id);
+        std::vector<Vec2> pts;
+        for (const Vec3& q : low) pts.push_back({q.x, q.y});
+        WeightSum w = weightOf(root.id, {});
         std::vector<Vec2> hull = hull2d(pts);
-        if (hull.size() >= 3 && mp.mass > 0) {
-          double d = polygonDistance(hull, {mp.com.x, mp.com.y});
+        if (hull.size() >= 3 && w.w > 0) {
+          Vec3 cog = w.moment / w.w;
+          double d = polygonDistance(hull, {cog.x, cog.y});
           if (d > 0.005)
             add(Severity::Warning, IssueArea::Start, "tip-over",
                 fmt("%s will tip over: its center of mass is %.1f cm outside the feet", quote(root.name).c_str(), d * 100),
                 "The center of mass projected on the floor lies outside the polygon spanned by the contacts. Move the "
                 "legs or the heavy parts so the COM sits above the feet (enable View > Centers of mass).",
                 {rid});
-        } else if (hull.size() < 3 && pts.size() > 0 && mp.mass > 0 && rep_.legCount > 0) {
+        } else if (hull.size() < 3 && !pts.empty() && w.w > 0 && legsOf_[root.id] > 0) {
           add(Severity::Info, IssueArea::Start, "unstable-stance",
               fmt("%s touches the floor in fewer than 3 points", quote(root.name).c_str()),
               "With one or two contacts it cannot stand passively; it will fall over unless the policy balances it.", {rid});
         }
       }
     }
-    if (!crValid_ || !cr_ || !cr_->ok) return;
-    // Penetrations reported by MuJoCo at the reference pose.
-    std::map<std::pair<Id, Id>, double> worst;
-    for (const InitialContact& c : cr_->initialContacts) {
-      if (c.dist > -1e-3) continue;
-      if (c.geom1 < 0 || c.geom2 < 0 || size_t(c.geom1) >= cr_->map.geoms.size() || size_t(c.geom2) >= cr_->map.geoms.size()) continue;
-      Id g1 = cr_->map.geoms[c.geom1], g2 = cr_->map.geoms[c.geom2];
-      auto key = std::make_pair(std::min(g1, g2), std::max(g1, g2));
-      worst[key] = std::min(worst.count(key) ? worst[key] : 0.0, c.dist);
-    }
+    // Other penetrations reported by MuJoCo at the start state.
     for (const auto& [pair, dist] : worst) {
       const Geom* a = doc_.geom(pair.first);
       const Geom* b = doc_.geom(pair.second);
       if (!a || !b) continue;
-      bool floorA = a->body == kWorldId && a->type == GeomType::Plane, floorB = b->body == kWorldId && b->type == GeomType::Plane;
-      if (floorA || floorB) continue;  // handled by the floor check above
+      if ((floors.count(a->id) && floorChecked.count(doc_.rootOf(b->body))) ||
+          (floors.count(b->id) && floorChecked.count(doc_.rootOf(a->body))))
+        continue;  // reported by the floor check above
       Issue& i = add(Severity::Warning, IssueArea::Start, "penetration",
                      fmt("%s and %s overlap by %.1f mm at the start", quote(a->name).c_str(), quote(b->name).c_str(), -dist * 1000),
                      "Overlapping geoms of different bodies are pushed apart violently on the first step. Move them apart, "
@@ -1381,39 +1956,45 @@ class Analyzer {
   Weld weld_;
   double gmag_ = 9.81;
   Vec3 gdir_{0, 0, -1};
-  std::unordered_map<Id, double> servoStiffness_, actDamping_;
+  InertialTable inertials_;           // compiled body inertials, by body ID (empty without a compile)
+  std::vector<MassProps> bodyMass_;    // per body index: mass, world COM, inertia
+  std::vector<double> bodyWeight_;     // per body index: mass not carried by gravity compensation
+  std::unordered_map<Id, Base> base_;  // per model root
+  std::unordered_map<Id, MassAccumulator> rootAcc_;  // floating roots: the whole model
+  std::unordered_map<Id, std::vector<Arm>> arms_;    // actuator -> hinge/slide joints it drives
+  std::unordered_map<Id, int> compiledActuator_;     // actuator -> index in the compiled model
+  std::unordered_map<Id, double> servoStiffness_, actDamping_, passiveDamping_;
   std::unordered_map<Id, std::string> supportCtx_;
-  struct LegInfo { Id root; int legs; double mass; };
-  std::vector<LegInfo> legInfo_;
+  std::unordered_map<Id, int> legsOf_;  // per model root
+  std::unordered_set<Id> bigPart_;      // joints that move a large part of a floating model
+  std::unordered_map<Id, double> footReach_;  // leg joints: the load with the weight at the edge of the foot
 };
 
 }  // namespace
 
 double actuatorMaxForce(const Document& doc, const Actuator& a) {
   auto absmax = [](const Vec2& r) { return std::max(std::fabs(r.x), std::fabs(r.y)); };
-  double umax = a.ctrllimited ? absmax(a.ctrlrange) : kInf;
+  bool limited = false;
+  Vec2 ctrl = servoCtrlRange(doc, a, &limited);
+  double umax = limited ? absmax(ctrl) : kInf;
   double f = kInf;
   switch (a.type) {
     case ActuatorType::Motor: f = umax; break;
     case ActuatorType::Position:
-    case ActuatorType::IntVelocity: {
-      double span = kInf;
-      const Joint* j = (a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) ? doc.joint(a.target) : nullptr;
-      if (a.type == ActuatorType::IntVelocity && a.actlimited) span = a.actrange.y - a.actrange.x;
-      else if (a.ctrllimited) span = a.ctrlrange.y - a.ctrlrange.x;
-      if (j && j->limited) span = std::min(span, (j->range.y - j->range.x) * std::fabs(a.gear[0]));
-      f = a.kp * span;
-      break;
-    }
+    case ActuatorType::IntVelocity: f = a.kp * servoSpan(doc, a); break;
     case ActuatorType::Velocity: f = a.kv * umax * 2.0; break;
     case ActuatorType::Damper: f = 0; break;  // cannot hold a load
-    case ActuatorType::Cylinder: f = a.area * umax + std::fabs(a.cylBias.x); break;
+    case ActuatorType::Cylinder: {
+      double area = a.diameter > 0 ? kPi / 4 * a.diameter * a.diameter : a.area;  // diameter wins in MuJoCo
+      f = area * umax + std::fabs(a.cylBias.x);
+      break;
+    }
     case ActuatorType::Muscle: f = a.muscleForce > 0 ? a.muscleForce : kInf; break;
     case ActuatorType::Adhesion: f = a.adhesionGain * (a.ctrllimited ? absmax(a.ctrlrange) : 1.0); break;
     case ActuatorType::General: {
-      double g = std::fabs(a.gainprm[0]) * umax;
-      double bias = std::fabs(a.biasprm[0]);
-      f = (a.gaintype == GainType::Fixed) ? g + bias : kInf;
+      if (a.gaintype != GainType::Fixed) break;
+      double g = std::fabs(a.gainprm[0]);
+      f = (positionLikeGeneral(a) ? g * servoSpan(doc, a) : g * umax) + std::fabs(a.biasprm[0]);
       break;
     }
   }
@@ -1434,6 +2015,10 @@ std::string explainCompileError(const std::string& e) {
       {"damper control range cannot be negative", "Damper actuators need a non-negative control range, e.g. [0, 1]."},
       {"must be positive in geom", "A geom has a zero size."},
       {"range[0] should be 0 in ball joint", "Ball joint ranges are [0, maximum angle]."},
+      {"ball followed by rotation", "A body has a hinge or ball joint after a ball joint; put the ball joint last."},
+      {"more than 6 dofs", "A body has more than 6 degrees of freedom."},
+      {"is not a fixed child of world", "Mocap bodies must be children of the world without joints."},
+      {"setting delay > 0 without a history buffer", "A delayed actuator or sensor needs a history buffer (nsample)."},
       {"repeated name", "Two elements of the same type share a name."},
       {"unrecognized attribute", "The XML uses an attribute this MuJoCo version doesn't know (version mismatch?)."},
   };

@@ -264,7 +264,7 @@ void Editor::buildOverlays() {
     MassAccumulator total;
     for (uint32_t bi = 1; bi < doc_.bodies.size(); ++bi) {
       const Body& b = doc_.bodies[bi];
-      MassProps mp = bodyMassProps(doc_, poses_, b.id);
+      MassProps mp = bodyMassProps(doc_, poses_, b.id, massTable());
       if (mp.mass <= 0) continue;
       if (doc_.roleOf(b.id) == Role::Model) total.add(mp.mass, mp.com, mp.inertia);
       if (vp_.showCom) {

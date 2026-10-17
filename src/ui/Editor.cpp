@@ -425,6 +425,7 @@ void Editor::pollCompile() {
   if (!compiler_.poll(r)) return;
   compiledRevision_ = r.revision;
   compiled_ = std::move(r);
+  inertials_ = compiledInertials(compiled_);
   if (compiledRevision_ != editRevision_) return;
   runAnalysis();
   if (simWanted_) {

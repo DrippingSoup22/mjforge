@@ -1050,16 +1050,23 @@ int mirrorKeyPose(const Document& doc, Keyframe& key, Id root, bool leftToRight)
 }
 
 void liftStartPose(Document& doc, Id root, double dz) {
+  Body* b = doc.body(root);
+  if (!b) return;
   if (!doc.keyframes.empty())
-    for (const Joint& j : doc.joints)
-      if (j.body == root && j.type == JointType::Free)
-        for (auto& [jid, q] : doc.keyframes[0].qpos)
-          if (jid == j.id && q.size() == 7) {
-            q[2] += dz;
-            doc.touch();
-            return;
-          }
-  if (Body* b = doc.body(root)) b->pos.z += dz;
+    for (const Joint& j : doc.joints) {
+      if (j.body != root) continue;
+      // A free joint's start pose is world coordinates; a vertical root slide (planar walkers) moves
+      // the body along its axis.
+      double along = j.type == JointType::Free ? 1.0 : j.type == JointType::Slide ? rotate(b->quat, normalize(j.axis)).z : 0.0;
+      if (std::fabs(along) < 0.5) continue;
+      for (auto& [jid, q] : doc.keyframes[0].qpos)
+        if (jid == j.id && q.size() == (j.type == JointType::Free ? 7u : 1u)) {
+          q[j.type == JointType::Free ? 2 : 0] += dz / along;
+          doc.touch();
+          return;
+        }
+    }
+  b->pos.z += dz;
   doc.touch();
 }
 
