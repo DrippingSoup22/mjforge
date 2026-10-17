@@ -98,12 +98,22 @@ CompileResult compileMjcf(const std::string& xml, const std::vector<std::pair<st
   for (const auto& [name, content] : files) mj_addBufferVFS(&vfs, name.c_str(), content.data(), int(content.size()));
   char err[4096] = "";
   mjModel* m = nullptr;
+  mjSpec* spec = nullptr;
   try {
-    m = mj_loadXML(kMain, &vfs, err, sizeof err);
+    spec = mj_parseXML(kMain, &vfs, err, sizeof err);
+    if (spec) {
+      // On one thread: MuJoCo's worker threads (muscle length ranges) would report an engine error
+      // through the error handler, whose exception cannot leave them, and the program would end.
+      spec->compiler.usethread = 0;
+      m = mj_compile(spec, &vfs);
+      if (!m || mjs_isWarning(spec)) std::snprintf(err, sizeof err, "%s", mjs_getError(spec));
+    }
   } catch (const std::exception& e) {
     std::snprintf(err, sizeof err, "%s", e.what());
+    if (m) mj_deleteModel(m);
     m = nullptr;
   }
+  if (spec) mj_deleteSpec(spec);
   mj_deleteVFS(&vfs);
   r.compileMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
   if (!m) {

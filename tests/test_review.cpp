@@ -656,6 +656,49 @@ TEST_CASE("review: values only a damaged file can hold are repaired or reported"
   CHECK(dupes == 2);
   CHECK(site);
   CHECK(condim);
+
+  // Sensor outputs this version does not know are dropped (they used to export as data="").
+  Document f = base;
+  Id contact = addSensor(f, SensorType::Contact, kNoId, "touch");
+  Id ray = addSensor(f, SensorType::RangeFinder, f.sites[0].id, "ray");
+  nlohmann::json k = nlohmann::json::parse(projectToJson(f));
+  for (auto& x : k["sensors"]) {
+    if (x["id"].get<Id>() == contact) x["condata"] = 1 << 20;
+    if (x["id"].get<Id>() == ray) x["raydata"] = (1 << 20) | 2;
+  }
+  // A height field with a non-positive size or non-finite elevations (both refused by MuJoCo).
+  Id rough = addGenerated(f, "rough", {3, 0, 0});
+  k = nlohmann::json::parse(projectToJson(f));
+  for (auto& x : k["sensors"]) {
+    if (x["id"].get<Id>() == contact) x["condata"] = 1 << 20;
+    if (x["id"].get<Id>() == ray) x["raydata"] = (1 << 20) | 2;
+  }
+  k["hfields"][0]["size"] = {0, -1, 0.1, 0.05};
+  // Elevations are stored as base64 float32, which can hold NaN (JSON numbers cannot).
+  std::vector<float> nan(size_t(k["hfields"][0]["nrow"].get<int>() * k["hfields"][0]["ncol"].get<int>()), std::nanf(""));
+  std::string bytes(reinterpret_cast<const char*>(nan.data()), nan.size() * sizeof(float)), b64;
+  const char* digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  for (size_t i = 0; i < bytes.size(); i += 3) {
+    uint32_t v = uint32_t((unsigned char)bytes[i]) << 16;
+    if (i + 1 < bytes.size()) v |= uint32_t((unsigned char)bytes[i + 1]) << 8;
+    if (i + 2 < bytes.size()) v |= uint32_t((unsigned char)bytes[i + 2]);
+    b64 += digits[v >> 18 & 63];
+    b64 += digits[v >> 12 & 63];
+    b64 += i + 1 < bytes.size() ? digits[v >> 6 & 63] : '=';
+    b64 += i + 2 < bytes.size() ? digits[v & 63] : '=';
+  }
+  k["hfields"][0]["data"] = b64;
+  (void)rough;
+  REQUIRE(projectFromJson(d, k.dump(), &err));
+  REQUIRE(d.hfields[0].data);
+  CHECK(d.hfields[0].size.x > 0);
+  CHECK(d.hfields[0].size.y > 0);
+  CHECK(std::isfinite((*d.hfields[0].data)[0]));
+  CHECK(d.sensor(contact)->condata == 1);
+  CHECK(d.sensor(ray)->raydata == 2);
+  cr = compileMjcf(writeMjcf(d));
+  INFO(cr.error);
+  CHECK(cr.ok);
 }
 
 TEST_CASE("review: the examples' committed exports match what the editor exports now") {
@@ -718,4 +761,46 @@ TEST_CASE("review: loader scripts and export paths survive unusual file names") 
   CHECK(err.find("backslash") != std::string::npos);
   CHECK_FALSE(fs::exists(dir / "a\\b.xml"));
 #endif
+}
+
+TEST_CASE("review: an engine error during muscle length ranges is a compile error, not a crash") {
+  // MuJoCo computes muscle length ranges on worker threads; an engine error there used to end the
+  // program (the error handler's exception cannot leave MuJoCo's threads).
+  Document doc;
+  Id wrapGeom = addGeom(doc, kWorldId, GeomType::Cylinder, {0.05, 0.05, 0}, {{0.1, 0, 1.5}, axisAngle({1, 0, 0}, kPi / 2)}, "pulley");
+  Id anchor = addSite(doc, kWorldId, {{0, 0, 2}, {}}, "anchor");
+  std::vector<Id> joints;
+  Id tip = kNoId;
+  for (int k = 0; k < 2; ++k) {
+    Id b = addBody(doc, kWorldId, {{0, 0.5 * k, 1}, {}}, "link" + std::to_string(k));
+    Id j = addJoint(doc, b, JointType::Hinge, {}, {0, 1, 0}, "hinge" + std::to_string(k));
+    doc.joint(j)->limited = true;
+    doc.joint(j)->range = {-1, 1};
+    addGeom(doc, b, GeomType::Sphere, {0.1, 0, 0}, {{0.2, 0, 0}, {}});
+    if (k == 0) tip = addSite(doc, b, {{0.4, 0, 0}, {}}, "tip");
+    joints.push_back(j);
+    Id m = addActuator(doc, ActuatorType::Motor, j, "muscle" + std::to_string(k));
+    setActuatorType(doc, *doc.actuator(m), ActuatorType::Muscle);
+  }
+  Id t = addTendon(doc, TendonType::Spatial, "cable");
+  doc.tendon(t)->path = {{TendonPoint::Type::Site, anchor}, {TendonPoint::Type::Geom, wrapGeom}, {TendonPoint::Type::Site, tip}};
+  Id motor = addActuator(doc, ActuatorType::Motor, joints[0], "winch");
+  doc.actuator(motor)->trn = TrnType::Tendon;
+  doc.actuator(motor)->target = t;
+  doc.actuator(motor)->armature = 0.01;
+  CompileResult cr = compileMjcf(writeMjcf(doc));
+  CHECK_FALSE(cr.ok);
+  CHECK(cr.error.find("geom wrapping not supported") != std::string::npos);
+  AnalysisReport r = analyzeModel(doc, nullptr, false);
+  const Issue* i = nullptr;
+  for (const Issue& x : r.issues)
+    if (x.code == "tendon-wrap-armature") i = &x;
+  REQUIRE(i);
+  CHECK(i->severity == Severity::Error);
+  CHECK_FALSE(hasIssue(r, "mjw-actuator-armature"));  // its fix would move the armature onto the tendon
+  REQUIRE(i->fix);
+  i->fix(doc);
+  cr = compileMjcf(writeMjcf(doc));
+  INFO(cr.error);
+  CHECK(cr.ok);
 }

@@ -557,21 +557,146 @@ class Analyzer {
       }
       // The delayed control is read from the last nsample controls (one per step), so the buffer must
       // reach back delay / timestep steps or the delay is cut short.
-      int needSamples = std::max(1, int(std::ceil(a.delay / doc_.option.timestep - 1e-9)));
-      if (a.delay > 0 && a.nsample < needSamples) {
+      int needSamples = actuatorHistoryNeeded(a, doc_.option.timestep);
+      bool beyond = needSamples > kMaxHistorySamples;  // a delay longer than MuJoCo can hold
+      if (a.nsample > kMaxHistorySamples) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "history-size",
+                       fmt("Actuator %s keeps more history than MuJoCo allows", quote(a.name).c_str()),
+                       fmt("MuJoCo keeps at most %d samples.", kMaxHistorySamples), {a.id});
+        int n = std::min(needSamples, kMaxHistorySamples);
+        Id id = a.id;
+        i.fixLabel = fmt("Keep %d samples", n);
+        i.fix = [id, n](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = n; };
+      } else if (a.delay > 0 && a.nsample < needSamples) {
         bool none = a.nsample <= 0;
+        std::string detail =
+            beyond ? fmt("The %.3g s delay needs more than the %d samples MuJoCo keeps at this timestep: shorten the delay "
+                         "or lengthen the timestep.", a.delay, kMaxHistorySamples)
+            : none ? std::string("MuJoCo refuses a control delay without a history buffer: the delayed control is read "
+                                 "from the actuator's last nsample controls.")
+                   : fmt("The delayed control is read from the last %d controls, which reach back %.3g s, so the %.3g s "
+                         "delay is cut short. It needs delay / timestep = %d samples.",
+                         a.nsample, a.nsample * doc_.option.timestep, a.delay, needSamples);
         Issue& i = add(none ? Severity::Error : Severity::Warning, IssueArea::Model, "delay-history",
                        none ? fmt("Actuator %s has a delay but no history buffer", quote(a.name).c_str())
                             : fmt("Actuator %s keeps too few samples for its delay", quote(a.name).c_str()),
-                       none ? std::string("MuJoCo refuses a control delay without a history buffer: the delayed control "
-                                          "is read from the actuator's last nsample controls.")
-                            : fmt("The delayed control is read from the last %d controls, which reach back %.3g s, so the "
-                                  "%.3g s delay is cut short. It needs delay / timestep = %d samples.",
-                                  a.nsample, a.nsample * doc_.option.timestep, a.delay, needSamples),
+                       detail, {a.id});
+        if (!beyond) {
+          Id id = a.id;
+          i.fixLabel = fmt("Keep %d samples", needSamples);
+          i.fix = [id, needSamples](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = needSamples; };
+        }
+      }
+      // inheritrange (on a servo: position, intvelocity, or a general actuator shaped like one) takes
+      // the range of a hinge or slide joint or of a tendon, which must have one.
+      bool servoShape = a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity ||
+                        (a.type == ActuatorType::General && a.gaintype == GainType::Fixed && a.biastype == BiasType::Affine &&
+                         a.gainprm[0] == -a.biasprm[1]);
+      if (servoShape && a.inheritrange > 1e-12) {
+        const Joint* tj = a.trn == TrnType::Joint ? doc_.joint(a.target) : nullptr;
+        const Tendon* tt = a.trn == TrnType::Tendon ? doc_.tendon(a.target) : nullptr;
+        bool dynOk = a.type != ActuatorType::General || a.dyntype == DynType::None || a.dyntype == DynType::FilterExact ||
+                     a.dyntype == DynType::Integrator;
+        const char* why = !dynOk ? "works only with position or integrator dynamics"
+                          : a.trn != TrnType::Joint && a.trn != TrnType::Tendon
+                              ? "needs a joint or tendon transmission (not a joint in its parent's frame, a site or a body)"
+                          : tj && tj->type != JointType::Hinge && tj->type != JointType::Slide ? "needs a hinge or slide joint"
+                          : (tj && tj->range.x == tj->range.y) || (tt && tt->range.x == tt->range.y)
+                              ? "copies the range of its joint or tendon, which has none"
+                              : nullptr;
+        if (why) {
+          Issue& i = add(Severity::Error, IssueArea::Model, "inherit-range",
+                         fmt("Actuator %s cannot inherit its range", quote(a.name).c_str()),
+                         std::string("MuJoCo refuses it: inheritrange ") + why + ".", {a.id, a.target});
+          Id id = a.id;
+          i.fixLabel = "Use its own range";
+          i.fix = [id](Document& d) {
+            if (Actuator* x = d.actuator(id)) {
+              x->inheritrange = 0;
+              if (!(x->ctrlrange.x < x->ctrlrange.y)) x->ctrllimited = false;
+              if (!(x->actrange.x < x->actrange.y)) x->actlimited = false;
+            }
+          };
+        }
+      }
+      // A muscle's length range is found by MuJoCo, which drives the transmission to its extremes
+      // (mj_setLengthRange), unless a valid one is given: its length must be bounded. Measured with
+      // MuJoCo 3.16: an unlimited hinge or slide, a ball or a free joint fails; a spatial tendon
+      // fails when its ends can drift apart without limit (an unlimited slide or a free joint between
+      // them, while rotations keep it bounded); a fixed tendon fails on any unlimited joint; a
+      // limited tendon is always bounded.
+      bool muscleLike = a.type == ActuatorType::Muscle ||
+                        (a.type == ActuatorType::General && (a.gaintype == GainType::Muscle || a.biastype == BiasType::Muscle));
+      bool lrGiven = (std::fabs(a.lengthrange.x) > 1e-12 || std::fabs(a.lengthrange.y) > 1e-12) && a.lengthrange.x < a.lengthrange.y;
+      if (muscleLike && !lrGiven) {
+        auto bounded = [](const Joint& j) { return j.limited && j.range.x < j.range.y; };
+        const Joint* jt = a.trn == TrnType::Joint || a.trn == TrnType::JointInParent ? doc_.joint(a.target) : nullptr;
+        const Tendon* tn = a.trn == TrnType::Tendon ? doc_.tendon(a.target) : nullptr;
+        std::string why;
+        if (jt && (jt->type == JointType::Ball || jt->type == JointType::Free))
+          why = fmt("a %s joint has no single length to range over: muscles act on hinge and slide joints or tendons.",
+                    jt->type == JointType::Ball ? "ball" : "free");
+        else if (jt && !bounded(*jt))
+          why = fmt("joint %s is not limited. Limit it, or set the muscle's length range (Other).", quote(jt->name).c_str());
+        else if (tn && !(tn->limited && tn->range.x < tn->range.y)) {
+          const Joint* loose = nullptr;
+          if (tn->type == TendonType::Fixed) {
+            for (const TendonJoint& tj : tn->joints)
+              if (const Joint* j = doc_.joint(tj.joint); j && tj.coef != 0 && !bounded(*j) && !loose) loose = j;
+          } else {
+            // Joints between the bodies the path is attached to: below their common ancestor.
+            std::vector<Id> ends;
+            for (const TendonPoint& p : tn->path) {
+              const Site* st = p.type == TendonPoint::Type::Site ? doc_.site(p.obj) : nullptr;
+              const Geom* gm = p.type == TendonPoint::Type::Geom ? doc_.geom(p.obj) : nullptr;
+              if (st) ends.push_back(st->body);
+              if (gm) ends.push_back(gm->body);
+            }
+            const DocIndex& ix = doc_.index();
+            auto up = [&](Id b) { const Body* x = doc_.body(b); return x ? x->parent : kWorldId; };
+            auto depthOf = [&](Id b) { int i = doc_.bodyIndex(b); return i < 0 ? 0 : ix.depth[size_t(i)]; };
+            Id common = ends.empty() ? kWorldId : ends[0];
+            for (Id e : ends) {
+              Id x = common, y = e;
+              while (depthOf(x) > depthOf(y)) x = up(x);
+              while (depthOf(y) > depthOf(x)) y = up(y);
+              while (x != y && x != kWorldId) {
+                x = up(x);
+                y = up(y);
+              }
+              common = x == y ? x : kWorldId;
+            }
+            for (Id e : ends)
+              for (Id b = e; b != common && b != kWorldId && doc_.bodyIndex(b) >= 0 && !loose; b = up(b))
+                for (uint32_t ji : ix.bodyJoints[size_t(doc_.bodyIndex(b))]) {
+                  const Joint& j = doc_.joints[ji];
+                  if (j.type == JointType::Free || (j.type == JointType::Slide && !bounded(j))) loose = &j;
+                }
+          }
+          if (loose)
+            why = fmt("tendon %s can stretch without limit (joint %s %s freely). Limit the tendon or that joint, or set "
+                      "the muscle's length range (Other).",
+                      quote(tn->name).c_str(), quote(loose->name).c_str(),
+                      loose->type == JointType::Hinge ? "turns" : loose->type == JointType::Slide ? "slides" : "moves");
+        }
+        if (!why.empty())
+          add(Severity::Error, IssueArea::Model, "muscle-length",
+              fmt("MuJoCo cannot find the length range of muscle %s", quote(a.name).c_str()),
+              "It moves a muscle's joint or tendon to its extremes to find its operating lengths, but " + why, {a.id, a.target});
+      }
+      // Damping and armature act on the driven joint or tendon (the export writes them unless below
+      // 1e-12; adhesion has neither).
+      bool jointOrTendon = a.trn == TrnType::Joint || a.trn == TrnType::JointInParent || a.trn == TrnType::Tendon;
+      if (a.type != ActuatorType::Adhesion && !jointOrTendon && (std::fabs(a.damping) > 1e-12 || std::fabs(a.armature) > 1e-12)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "actuator-reflected",
+                       fmt("Actuator %s has damping or armature on a %s transmission", quote(a.name).c_str(),
+                           enumLabel(kTrnTypes, a.trn)),
+                       "MuJoCo adds actuator damping and armature to the joint or tendon it drives, and refuses them on "
+                       "other transmissions. Put them on the joints instead.",
                        {a.id});
         Id id = a.id;
-        i.fixLabel = fmt("Keep %d samples", needSamples);
-        i.fix = [id, needSamples](Document& d) { if (Actuator* x = d.actuator(id)) x->nsample = needSamples; };
+        i.fixLabel = "Remove them";
+        i.fix = [id](Document& d) { if (Actuator* x = d.actuator(id)) x->damping = x->armature = 0; };
       }
       bool servo = a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity;
       if (servo && a.kv > 0 && a.dampratio > 0) {
@@ -834,27 +959,38 @@ class Analyzer {
       // Delayed and slower-rate values are read from the sensor's history buffer: one sample per step,
       // or per update period when there is one.
       int needSamples = sensorHistoryNeeded(s, doc_.option.timestep);
+      bool beyond = needSamples > kMaxHistorySamples;
       bool noBuffer = s.nsample <= 0;
-      if ((s.delay > 0 && s.nsample < needSamples) || (s.interval.x > 0 && noBuffer)) {
+      if (s.nsample > kMaxHistorySamples) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "history-size",
+                       fmt("Sensor %s keeps more history than MuJoCo allows", quote(s.name).c_str()),
+                       fmt("MuJoCo keeps at most %d samples.", kMaxHistorySamples), {s.id});
+        int n = std::min(needSamples, kMaxHistorySamples);
+        Id id = s.id;
+        i.fixLabel = fmt("Keep %d samples", n);
+        i.fix = [id, n](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = n; };
+      } else if ((s.delay > 0 && s.nsample < needSamples) || (s.interval.x > 0 && noBuffer)) {
         bool refused = s.delay > 0 && noBuffer;
+        std::string detail =
+            beyond     ? fmt("The %.3g s delay needs more than the %d samples MuJoCo keeps: shorten the delay, or "
+                             "lengthen the timestep or update period.", s.delay, kMaxHistorySamples)
+            : refused  ? std::string("MuJoCo refuses a sensor delay without a history buffer.")
+            : noBuffer ? std::string("Without a history buffer MuJoCo ignores the update period and computes the sensor "
+                                     "every step.")
+                       : fmt("The buffer reaches back too little time, so the %.3g s delay is cut short.", s.delay);
         Issue& i = add(refused ? Severity::Error : Severity::Warning, IssueArea::Model, "sensor-history",
                        noBuffer ? fmt("Sensor %s has a %s but no history buffer", quote(s.name).c_str(),
                                       s.delay > 0 ? "delay" : "update period")
                                 : fmt("Sensor %s keeps too few samples for its delay", quote(s.name).c_str()),
-                       refused    ? std::string("MuJoCo refuses a sensor delay without a history buffer.")
-                       : noBuffer ? std::string("Without a history buffer MuJoCo ignores the update period and computes "
-                                                "the sensor every step.")
-                                  : fmt("The buffer reaches back too little time, so the %.3g s delay is cut short.", s.delay),
-                       {s.id});
-        Id id = s.id;
-        i.fixLabel = fmt("Keep %d samples", needSamples);
-        i.fix = [id, needSamples](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = needSamples; };
+                       detail, {s.id});
+        if (!beyond) {
+          Id id = s.id;
+          i.fixLabel = fmt("Keep %d samples", needSamples);
+          i.fix = [id, needSamples](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = needSamples; };
+        }
       }
       if (s.type == SensorType::Contact) {
         constexpr int kVel = (1 << 7) | (1 << 8);  // linvel, angvel
-        if (s.condata == 0)
-          add(Severity::Error, IssueArea::Model, "contact-sensor-data", fmt("Contact sensor %s reports no data", quote(s.name).c_str()),
-              "Tick at least one field (found, force, ...).", {s.id});
         if ((s.condata & kVel) && s.reduce == 3)
           add(Severity::Error, IssueArea::Model, "contact-sensor-netforce",
               fmt("Contact sensor %s: velocities cannot be combined with net force", quote(s.name).c_str()),
@@ -872,6 +1008,18 @@ class Analyzer {
       }
     }
     for (const Camera& c : doc_.cameras) {
+      // MuJoCo refuses a fovy of 180 or more, also when it is an orthographic view height in meters
+      // (written unless a lens replaces it).
+      if (c.fovy >= 180 && !(c.sensorsize.x > 0 && c.sensorsize.y > 0)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "camera-fovy",
+                       fmt(c.orthographic ? "Camera %s: view height of 180 m or more" : "Camera %s: field of view of 180 degrees or more",
+                           quote(c.name).c_str()),
+                       "MuJoCo refuses a fovy of 180 or more (for an orthographic camera it is the view height in meters).",
+                       {c.id});
+        Id id = c.id;
+        i.fixLabel = c.orthographic ? "Use 179 m" : "Use 90 degrees";
+        i.fix = [id](Document& d) { if (Camera* x = d.camera(id)) x->fovy = x->orthographic ? 179 : 90; };
+      }
       bool sensor = c.sensorsize.x > 0 && c.sensorsize.y > 0;
       bool partial = !sensor && (c.sensorsize.x != 0 || c.sensorsize.y != 0 || c.focal.x != 0 || c.focal.y != 0 ||
                                  c.principal.x != 0 || c.principal.y != 0);
@@ -1178,6 +1326,23 @@ class Analyzer {
           add(Severity::Error, IssueArea::Model, "tendon-path", fmt("Spatial tendon %s has an invalid path", n.c_str()),
               "MuJoCo refuses it: " + why + ". Paths run through sites; wrapping geoms (spheres or cylinders) sit between "
               "two sites; a pulley starts a new branch of sites.", {t.id});
+        // An actuator's armature is added to the tendon it drives, and MuJoCo's tendon dynamics do
+        // not support armature with geom wrapping: it stops with "geom wrapping not supported"
+        // already while compiling (measured with MuJoCo 3.16; its compile check sees only the
+        // tendon's own armature).
+        bool wraps = std::any_of(t.path.begin(), t.path.end(), [](const TendonPoint& p) { return p.type == TendonPoint::Type::Geom; });
+        if (wraps)
+          for (const Actuator& a : doc_.actuators)
+            if (a.trn == TrnType::Tendon && a.target == t.id && a.type != ActuatorType::Adhesion && std::fabs(a.armature) > 1e-12) {
+              Issue& i = add(Severity::Error, IssueArea::Model, "tendon-wrap-armature",
+                             fmt("Actuator %s adds armature to tendon %s, which wraps around a geom", quote(a.name).c_str(), n.c_str()),
+                             "MuJoCo's tendon dynamics do not support armature with geom wrapping: it stops with \"geom "
+                             "wrapping not supported\". Put the inertia on the joints instead.",
+                             {a.id, t.id});
+              Id aid = a.id;
+              i.fixLabel = "Remove the actuator's armature";
+              i.fix = [aid](Document& d) { if (Actuator* x = d.actuator(aid)) x->armature = 0; };
+            }
       }
       if (t.limited && t.range.x >= t.range.y)
         add(Severity::Error, IssueArea::Model, "tendon-range", fmt("Tendon %s: lower limit is not below the upper limit", n.c_str()), "",
@@ -2180,10 +2345,15 @@ class Analyzer {
     // Measured with mujoco-warp 3.16: actuator armature is silently ignored (trajectories differ
     // from MuJoCo C). The joint / tendon armature it stands for gives the same dynamics.
     std::vector<Id> withArmature;
+    // (Not on a tendon that wraps around a geom: MuJoCo refuses armature there, reported above.)
+    auto wrapping = [&](Id tendon) {
+      const Tendon* t = doc_.tendon(tendon);
+      return t && std::any_of(t->path.begin(), t->path.end(), [](const TendonPoint& p) { return p.type == TendonPoint::Type::Geom; });
+    };
     for (const Actuator& a : doc_.actuators)
       if (a.armature > 0 && a.type != ActuatorType::Adhesion &&
           (((a.trn == TrnType::Joint || a.trn == TrnType::JointInParent) && doc_.joint(a.target)) ||
-           (a.trn == TrnType::Tendon && doc_.tendon(a.target))))
+           (a.trn == TrnType::Tendon && doc_.tendon(a.target) && !wrapping(a.target))))
         withArmature.push_back(a.id);
     if (!withArmature.empty()) {
       Issue& i = add(Severity::Warning, IssueArea::MJWarp, "mjw-actuator-armature",
@@ -2465,8 +2635,9 @@ double actuatorMaxForce(const Document& doc, const Actuator& a) {
       // of the on-board controller otherwise (none: it delivers whatever it is asked).
       double K, R;
       dcMotorConstants(a, &K, &R);
+      if (!(K > 0 && R > 0)) return kInf;  // not specified yet (reported by dcmotor-constants): unknown, not weak
       double v = a.dcinput == DcInput::Voltage ? umax : a.controller[5] > 0 ? a.controller[5] : kInf;
-      f = K > 0 && R > 0 ? K * v / R : 0.0;
+      f = K * v / R;
       double cap = a.saturation.x > 0 ? a.saturation.x : a.saturation.y > 0 ? K * a.saturation.y : kInf;
       return std::min(f, cap);
     }
@@ -2492,12 +2663,22 @@ std::string explainCompileError(const std::string& e) {
       {"more than 6 dofs", "A body has more than 6 degrees of freedom."},
       {"is not a fixed child of world", "Mocap bodies must be children of the world without joints."},
       {"setting delay > 0 without a history buffer", "A delayed actuator or sensor needs a history buffer (nsample)."},
+      {"samples in sensor history buffer", "A sensor keeps more history samples than MuJoCo allows (2^24)."},
+      {"samples in history buffer", "An actuator keeps more history samples than MuJoCo allows (2^24)."},
       {"repeated name", "Two elements of the same type share a name."},
       {"inertia must satisfy A + B >= C",
        "An explicit inertia is impossible for a rigid body: each principal inertia must be at most the sum of the "
        "other two."},
       {"is repeated in equality constraint", "An equality constraint uses the same element on both sides."},
       {"1st body/geom must be different from 2nd", "A distance sensor measures a geom or body against itself."},
+      {"requires joint or tendon transmission", "Actuator damping and armature need a joint or tendon transmission."},
+      {"inheritrange", "An actuator inherits the range of a joint or tendon that has none, or of the wrong kind."},
+      {"Lengthrange computation did not converge",
+       "MuJoCo could not find a muscle's length range: its joint or tendon can move without limit. Limit it, or set "
+       "the muscle's length range."},
+      {"Invalid lengthrange", "A muscle's joint or tendon does not change length, so it has no length range."},
+      {"fovy too large in camera", "A camera's fovy is 180 or more (for an orthographic camera, its view height in meters)."},
+      {"geom wrapping not supported", "An actuator adds armature to a tendon that wraps around a geom, which MuJoCo does not support."},
       {"joint must be slide or hinge in sensor",
        "Joint position and velocity sensors need a hinge or slide joint; ball joints use ball sensors, free joints "
        "frame sensors."},

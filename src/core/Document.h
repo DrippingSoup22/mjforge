@@ -296,9 +296,14 @@ struct Sensor {
 };
 // Number of values a sensor writes to sensordata.
 int sensorDim(const Sensor& s);
+// MuJoCo keeps at most 2^24 history samples per actuator or sensor (its cursor is stored as a float).
+constexpr int kMaxHistorySamples = 1 << 24;
 // History samples a sensor needs for its delay: MuJoCo keeps one per step, or one per update period
-// plus the one being held when there is a period (measured with MuJoCo 3.16).
+// plus the one being held when there is a period (measured with MuJoCo 3.16). A delay beyond what
+// MuJoCo can hold gives kMaxHistorySamples + 1.
 int sensorHistoryNeeded(const Sensor& s, double timestep);
+// History samples an actuator needs for its delay: one per step (same saturation).
+int actuatorHistoryNeeded(const Actuator& a, double timestep);
 
 struct Exclude {
   Id id = kNoId;

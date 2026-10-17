@@ -643,7 +643,8 @@ void Editor::inspectCamera(Camera& c) {
     props::vec3("Position", &c.pos, {}, O(D("camera.pos"), "m", 0.005));
     props::orientation("Orientation", &c.quat, "The camera looks along its local -Z axis, with +Y up.");
     props::checkbox("Orthographic", &c.orthographic, false, D("camera.projection"));
-    if (c.orthographic) props::real("View height", &c.fovy, 45, O(D("camera.fovy"), "m", 0.01, 1e-4, 1e4));
+    // MuJoCo refuses a fovy of 180 or more, also as an orthographic view height.
+    if (c.orthographic) props::real("View height", &c.fovy, 45, O(D("camera.fovy"), "m", 0.01, 1e-4, 179.9));
     else props::real("Field of view", &c.fovy, 45, O(D("camera.fovy"), "deg", 0.2, 1, 179));
     props::combo("Mode", &c.mode, kCameraModes, CameraMode::Fixed, D("camera.mode"));
     if (c.mode == CameraMode::TargetBody || c.mode == CameraMode::TargetBodyCom)
@@ -785,7 +786,9 @@ void Editor::inspectActuator(Actuator& a) {
     } else if (a.type == ActuatorType::Motor) {
       props::info("", "Unbounded controls: RL policies usually need a bounded action space.");
     }
-    if (a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity) {
+    // MuJoCo inherits only from a joint or tendon (a set value stays visible so it can be cleared).
+    if ((a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity) &&
+        (a.trn == TrnType::Joint || a.trn == TrnType::Tendon || a.inheritrange != 0)) {
       if (props::real("Inherit range", &a.inheritrange, 0, O(D("position.inheritrange"), nullptr, 0.01, 0, 10)))
         applyToSelected<Actuator>([&](Actuator& o) { o.inheritrange = a.inheritrange; });
     }
@@ -806,7 +809,7 @@ void Editor::inspectActuator(Actuator& a) {
                       "buffer (samples), set automatically.",
                       "s", 0.0005, 0, 10))) {
       // MuJoCo's common case: delay = nsample * timestep.
-      int need = a.delay > 0 ? int(std::ceil(a.delay / dt - 1e-9)) : 0;
+      int need = a.delay > 0 ? std::min(actuatorHistoryNeeded(a, dt), kMaxHistorySamples) : 0;
       if (a.nsample < need) a.nsample = need;
       double d = a.delay;
       int ns = a.nsample;
@@ -818,7 +821,12 @@ void Editor::inspectActuator(Actuator& a) {
       applyToSelected<Actuator>([&](Actuator& o) { o.interp = a.interp; });
     if (a.delay > 0) props::info("", "%.1f timesteps late", a.delay / dt);
   }
-  if (a.type != ActuatorType::Adhesion && props::section("Reflected damping & inertia", false)) {
+  // Only a joint or tendon has damping and inertia to add to (MuJoCo refuses them elsewhere); set
+  // values stay visible so they can be cleared.
+  bool jointOrTendon = a.trn == TrnType::Joint || a.trn == TrnType::JointInParent || a.trn == TrnType::Tendon;
+  if (a.type != ActuatorType::Adhesion && (jointOrTendon || a.damping != 0 || a.armature != 0) &&
+      props::section("Reflected damping & inertia", false)) {
+    if (!jointOrTendon) props::info("", "Only for joint and tendon transmissions: set both to 0.");
     if (props::real("Damping", &a.damping, 0, O(D("general.damping"), nullptr, 0.01, 0, 1e9)))
       applyToSelected<Actuator>([&](Actuator& o) { o.damping = a.damping; });
     if (props::real("Armature (rotor)", &a.armature, 0, O(D("general.armature"), nullptr, 0.0005, 0, 1e9)))
@@ -960,14 +968,15 @@ void Editor::inspectSensor(Sensor& s) {
       return std::vector<std::pair<Id, std::string>>{};
     };
     // Changing an object's type clears the object (it would be of the wrong kind).
-    // `other` (when of the same type) is left out of the list: for objects that must differ.
+    // `other` (when of the same type) is left out of the list, for objects that must differ, unless
+    // it is the current choice (shown, and reported by the analysis).
     auto typed = [&](const char* typeLabel, FrameObj* t, const auto& table, FrameObj def, const char* label, Id* obj,
                      bool allowNone, const char* noneLabel, const char* tip, Id other = kNoId) {
       FrameObj before = *t;
       props::combo(typeLabel, t, table, def, tip);
       if (*t != before) *obj = kNoId;
       auto list = objects(*t);
-      if (other != kNoId)
+      if (other != kNoId && other != *obj)
         list.erase(std::remove_if(list.begin(), list.end(), [&](const auto& e) { return e.first == other; }), list.end());
       props::element(label, obj, list, allowNone, tip, noneLabel);
     };
@@ -986,7 +995,8 @@ void Editor::inspectSensor(Sensor& s) {
           for (int i = 0; i < int(std::size(kRayData)); ++i) {
             bool on = (s.raydata & (1 << i)) != 0;
             std::string label = std::string("Report ") + kRayData[i].xml;
-            if (props::checkbox(label.c_str(), &on, i == 0, kRayData[i].label))
+            // At least one output stays on (MuJoCo refuses none).
+            if (props::checkbox(label.c_str(), &on, i == 0, kRayData[i].label) && (on || (s.raydata & ~(1 << i))))
               s.raydata = on ? s.raydata | (1 << i) : s.raydata & ~(1 << i);
           }
         break;
@@ -1020,7 +1030,7 @@ void Editor::inspectSensor(Sensor& s) {
         for (int i = 0; i < int(std::size(kContactData)); ++i) {
           bool on = (s.condata & (1 << i)) != 0;
           std::string label = std::string("Report ") + kContactData[i].xml;
-          if (props::checkbox(label.c_str(), &on, i == 0, kContactData[i].label))
+          if (props::checkbox(label.c_str(), &on, i == 0, kContactData[i].label) && (on || (s.condata & ~(1 << i))))
             s.condata = on ? s.condata | (1 << i) : s.condata & ~(1 << i);
         }
         break;
@@ -1062,8 +1072,11 @@ void Editor::inspectSensor(Sensor& s) {
                         "between (MJCF: phase = this time - period).", "s", 0.001, 0, s.interval.x)))
         s.interval.y = first > 0 && first < s.interval.x ? first - s.interval.x : 0;
     }
-    if (s.delay > 0 || s.interval.x > 0)
-      props::info("Samples needed", "%d", sensorHistoryNeeded(s, doc_.option.timestep));
+    if (s.delay > 0 || s.interval.x > 0) {
+      int need = sensorHistoryNeeded(s, doc_.option.timestep);
+      if (need > kMaxHistorySamples) props::info("Samples needed", "more than MuJoCo keeps (%d)", kMaxHistorySamples);
+      else props::info("Samples needed", "%d", need);
+    }
   }
   props::end();
 }

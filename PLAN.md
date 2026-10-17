@@ -219,6 +219,17 @@ headless settle).
       state finite unless a divergence is reported, live edits keep every joint's state
 - [x] Hostile project files (random corruption, deep nesting, huge arrays, damaged settings):
       refused or repaired, never a crash or an unbounded allocation
+- [x] Environment generators: edits on generated pieces (friction, materials, names) and what refers
+      to them survive parameter changes, duplicated terrains get their own height field, every
+      parameter value the inspector allows compiles; the MuJoCo Warp loader escapes file names and
+      starts delayed actuators from the keyframe
+- [x] Second sweep of MuJoCo's compiler errors, with fuzzing of generated environments and
+      actuator transmissions: now predicted are distance sensors measuring an object against
+      itself, actuator damping / armature off joints and tendons, inherited ranges from targets
+      without one, muscle length ranges MuJoCo cannot find, camera fovy of 180 or more, history
+      buffers beyond 2^24 samples, and actuator armature on tendons that wrap around geoms; the
+      last one also crashed the editor (MuJoCo reported it from a worker thread), so MJForge now
+      compiles on one thread
 
 ## 5. Testing strategy
 

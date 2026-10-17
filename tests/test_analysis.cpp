@@ -358,6 +358,36 @@ TEST_CASE("analysis: predicts MuJoCo's refusals, each rule checked against the c
          x->objtype = x->reftype = FrameObj::Body;
          x->obj = x->ref = b;
        }},
+      {"actuator-reflected", [&](Document& d) {
+         Actuator* x = d.actuator(motor);
+         x->trn = TrnType::Site;
+         x->target = s2;
+         x->damping = 0.5;
+       }},
+      {"inherit-range", [&](Document& d) {
+         Id servo = addActuator(d, ActuatorType::Position, j, "servo");
+         d.actuator(servo)->inheritrange = 1;
+         d.actuator(servo)->trn = TrnType::JointInParent;
+       }},
+      {"inherit-range", [&](Document& d) {
+         Id servo = addActuator(d, ActuatorType::Position, j, "servo");
+         d.actuator(servo)->inheritrange = 1;
+         d.joint(j)->limited = false;
+         d.joint(j)->range = {0, 0};
+       }},
+      {"inherit-range", [&](Document& d) {
+         Id servo = addActuator(d, ActuatorType::IntVelocity, j, "servo");
+         d.actuator(servo)->inheritrange = 1;
+         d.actuator(servo)->trn = TrnType::Tendon;
+         d.actuator(servo)->target = t;
+       }},
+      {"camera-fovy", [&](Document& d) {
+         Camera* c = d.camera(addCamera(d, kWorldId, {{0, 0, 5}, {}}, "top"));
+         c->orthographic = true;
+         c->fovy = 200;
+       }},
+      {"history-size", [&](Document& d) { d.actuator(motor)->nsample = kMaxHistorySamples + 1; }},
+      {"history-size", [&](Document& d) { d.sensor(quat)->nsample = kMaxHistorySamples + 1; }},
       {"light-softness", [&](Document& d) { d.light(light)->softness = 1.5; }},
       {"geom-density", [&](Document& d) { d.geom(g)->density = -10; }},
   };
@@ -388,5 +418,120 @@ TEST_CASE("analysis: predicts MuJoCo's refusals, each rule checked against the c
       INFO(fixed.error);
       CHECK(fixed.ok);
     }
+  }
+}
+
+TEST_CASE("analysis: a delay longer than MuJoCo's history can hold is reported without an impossible fix") {
+  Document doc;
+  Id b = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "arm");
+  Id j = addJoint(doc, b, JointType::Hinge, {}, {0, 1, 0}, "shoulder");
+  addGeom(doc, b, GeomType::Sphere, {0.05, 0, 0}, {});
+  Id motor = addActuator(doc, ActuatorType::Motor, j, "motor");
+  Id sensor = addSensor(doc, SensorType::JointPos, j, "angle");
+  // The sample count saturates instead of overflowing an int.
+  doc.option.timestep = 1e-5;
+  doc.actuator(motor)->delay = 1e6;
+  CHECK(actuatorHistoryNeeded(*doc.actuator(motor), doc.option.timestep) == kMaxHistorySamples + 1);
+  doc.sensor(sensor)->delay = 10;
+  doc.sensor(sensor)->interval = {1e-9, 0};
+  CHECK(sensorHistoryNeeded(*doc.sensor(sensor), doc.option.timestep) == kMaxHistorySamples + 1);
+  doc.sensor(sensor)->interval = {0.01, 0};
+  CHECK(sensorHistoryNeeded(*doc.sensor(sensor), doc.option.timestep) == 1001);
+  // No fix would satisfy the delay: the issue says so and offers none.
+  doc.actuator(motor)->nsample = 100;
+  AnalysisReport r = analyzeModel(doc, nullptr, false);
+  const Issue* i = findCode(r, "delay-history");
+  REQUIRE(i);
+  CHECK(i->severity == Severity::Warning);
+  CHECK_FALSE(i->fix);
+  CHECK(i->detail.find("more than") != std::string::npos);
+  doc.actuator(motor)->nsample = 0;
+  r = analyzeModel(doc, nullptr, false);
+  i = findCode(r, "delay-history");
+  REQUIRE(i);
+  CHECK(i->severity == Severity::Error);
+  CHECK_FALSE(i->fix);
+}
+
+TEST_CASE("analysis: muscles whose length range MuJoCo cannot find (each case checked against the compiler)") {
+  // An arm: upper link on `root`, forearm on a limited elbow; sites on the world, the upper arm and
+  // the forearm for tendons.
+  struct Arm {
+    Document doc;
+    Id root = kNoId, elbow = kNoId, world = kNoId, upper = kNoId, fore = kNoId;
+  };
+  auto makeArm = [](JointType rootType, bool rootLimited) {
+    Arm a;
+    Id u = addBody(a.doc, kWorldId, {{0, 0, 1}, {}}, "upper");
+    a.root = addJoint(a.doc, u, rootType, {}, {0, 1, 0}, "root");
+    if (Joint* j = a.doc.joint(a.root); rootLimited) {
+      j->limited = true;
+      j->range = rootType == JointType::Slide ? Vec2{-0.3, 0.3} : Vec2{-1, 1};
+    }
+    addGeom(a.doc, u, GeomType::Capsule, {0.05, 0.25, 0}, {{0.25, 0, 0}, axisAngle({0, 1, 0}, kPi / 2)});
+    Id f = addBody(a.doc, u, {{0.5, 0, 0}, {}}, "fore");
+    a.elbow = addJoint(a.doc, f, JointType::Hinge, {}, {0, 1, 0}, "elbow");
+    a.doc.joint(a.elbow)->limited = true;
+    a.doc.joint(a.elbow)->range = {-2, 0.1};
+    addGeom(a.doc, f, GeomType::Capsule, {0.05, 0.25, 0}, {{0.25, 0, 0}, axisAngle({0, 1, 0}, kPi / 2)});
+    a.world = addSite(a.doc, kWorldId, {{0, 0, 2}, {}}, "w");
+    a.upper = addSite(a.doc, u, {{0.1, 0, 0.05}, {}}, "s1");
+    a.fore = addSite(a.doc, f, {{0.2, 0, 0.05}, {}}, "s2");
+    return a;
+  };
+  auto muscleOnJoint = [](Arm& a, Id joint) {
+    Id m = addActuator(a.doc, ActuatorType::Motor, joint, "muscle");
+    setActuatorType(a.doc, *a.doc.actuator(m), ActuatorType::Muscle);
+    return m;
+  };
+  auto muscleOnTendon = [](Arm& a, Id s1, Id s2) {
+    Id t = addTendon(a.doc, TendonType::Spatial, "cable");
+    a.doc.tendon(t)->path = {{TendonPoint::Type::Site, s1}, {TendonPoint::Type::Site, s2}};
+    Id m = addActuator(a.doc, ActuatorType::Motor, a.doc.joints[0].id, "muscle");
+    Actuator* x = a.doc.actuator(m);
+    setActuatorType(a.doc, *x, ActuatorType::Muscle);
+    x->trn = TrnType::Tendon;
+    x->target = t;
+    return m;
+  };
+  struct Case {
+    const char* name;
+    bool refused;
+    std::function<void(Arm&)> setup;
+  };
+  JointType hinge = JointType::Hinge, slide = JointType::Slide;
+  std::vector<std::pair<Case, std::pair<JointType, bool>>> cases = {
+      {{"limited hinge", false, [&](Arm& a) { muscleOnJoint(a, a.root); }}, {hinge, true}},
+      {{"unlimited hinge", true, [&](Arm& a) { muscleOnJoint(a, a.root); }}, {hinge, false}},
+      {{"unlimited slide", true, [&](Arm& a) { muscleOnJoint(a, a.root); }}, {slide, false}},
+      {{"ball", true, [&](Arm& a) { muscleOnJoint(a, a.root); }}, {JointType::Ball, false}},
+      {{"free", true, [&](Arm& a) { muscleOnJoint(a, a.root); }}, {JointType::Free, false}},
+      {{"unlimited hinge with a length range", false,
+        [&](Arm& a) { a.doc.actuator(muscleOnJoint(a, a.root))->lengthrange = {-1, 1}; }}, {hinge, false}},
+      {{"tendon over the elbow, free root", false, [&](Arm& a) { muscleOnTendon(a, a.upper, a.fore); }},
+       {JointType::Free, false}},
+      {{"tendon from the world to a free arm", true, [&](Arm& a) { muscleOnTendon(a, a.world, a.fore); }},
+       {JointType::Free, false}},
+      {{"tendon from the world over an unlimited hinge", false, [&](Arm& a) { muscleOnTendon(a, a.world, a.upper); }},
+       {hinge, false}},
+      {{"tendon from the world over an unlimited slide", true, [&](Arm& a) { muscleOnTendon(a, a.world, a.upper); }},
+       {slide, false}},
+      {{"limited tendon from the world to a free arm", false,
+        [&](Arm& a) {
+          muscleOnTendon(a, a.world, a.fore);
+          a.doc.tendons[0].limited = true;
+          a.doc.tendons[0].range = {0.5, 1.5};
+        }},
+       {JointType::Free, false}},
+  };
+  for (auto& [c, root] : cases) {
+    INFO(c.name);
+    Arm a = makeArm(root.first, root.second);
+    c.setup(a);
+    CompileResult cr = compileMjcf(writeMjcf(a.doc));
+    CHECK(cr.ok == !c.refused);
+    AnalysisReport r = analyzeModel(a.doc, nullptr, false);
+    const Issue* i = findCode(r, "muscle-length");
+    CHECK((i != nullptr) == c.refused);
   }
 }

@@ -1260,11 +1260,11 @@ class Writer {
         case SensorObj::Actuator: e.set("actuator", nameOf(s.obj)); break;
         case SensorObj::Site:
           e.set("site", nameOf(s.obj));
-          if (s.type == SensorType::RangeFinder && s.raydata != 1 && s.raydata != 0) {
+          if (s.type == SensorType::RangeFinder) {
             std::string data;
             for (int i = 0; i < int(std::size(kRayData)); ++i)
               if (s.raydata & (1 << i)) data += (data.empty() ? "" : " ") + std::string(kRayData[i].xml);
-            e.set("data", data);
+            if (!data.empty() && data != kRayData[0].xml) e.set("data", data);  // none: MuJoCo's default
           }
           break;
         case SensorObj::Body: e.set("body", nameOf(s.obj)); break;
@@ -1290,11 +1290,11 @@ class Writer {
           if (s.ref != kNoId)
             e.set(s.reftype == FrameObj::Body ? "body2" : s.reftype == FrameObj::XBody ? "subtree2" : "geom2", nameOf(s.ref));
           if (s.connum != 1) e.set("num", std::to_string(std::max(1, s.connum)));
-          if (s.condata != 1 && s.condata != 0) {
+          {
             std::string data;
             for (int i = 0; i < int(std::size(kContactData)); ++i)
               if (s.condata & (1 << i)) data += (data.empty() ? "" : " ") + std::string(kContactData[i].xml);
-            e.set("data", data);
+            if (!data.empty() && data != kContactData[0].xml) e.set("data", data);  // none: MuJoCo's default
           }
           if (s.reduce > 0 && s.reduce < int(std::size(kContactReduce))) e.set("reduce", kContactReduce[s.reduce]);
           break;

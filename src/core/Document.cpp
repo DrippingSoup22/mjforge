@@ -328,10 +328,20 @@ std::vector<Id> Document::subtree(Id b) const {
   return out;
 }
 
-int sensorHistoryNeeded(const Sensor& s, double timestep) {
-  if (s.interval.x > 0) return std::max(1, int(std::ceil(s.delay / s.interval.x - 1e-9)) + 1);
-  return std::max(1, int(std::ceil(s.delay / std::max(timestep, 1e-12) - 1e-9)));
+// ceil(span / step), saturated one beyond MuJoCo's limit: "too many" stays visible without
+// overflowing an int.
+static int historySteps(double span, double step) {
+  double n = std::ceil(span / std::max(step, 1e-12) - 1e-9);
+  if (!(n > 0)) return 0;
+  return n > kMaxHistorySamples ? kMaxHistorySamples + 1 : int(n);
 }
+
+int sensorHistoryNeeded(const Sensor& s, double timestep) {
+  if (s.interval.x > 0) return std::min(historySteps(s.delay, s.interval.x) + 1, kMaxHistorySamples + 1);
+  return std::max(1, historySteps(s.delay, timestep));
+}
+
+int actuatorHistoryNeeded(const Actuator& a, double timestep) { return std::max(1, historySteps(a.delay, timestep)); }
 
 int sensorDim(const Sensor& s) {
   int per = 0;

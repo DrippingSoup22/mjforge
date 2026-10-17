@@ -1301,6 +1301,7 @@ bool importSpec(mjSpec* spec, const std::string& baseDir, Document& out, std::st
   rep = {};
   ModelPtr model;
   try {
+    spec->compiler.usethread = 0;  // see compileMjcf: MuJoCo's worker threads cannot report errors safely
     model = makeModelPtr(mj_compile(spec, nullptr));
   } catch (const std::exception& e) {
     if (error) *error = e.what();

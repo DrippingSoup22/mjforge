@@ -423,11 +423,18 @@ int repairReferences(Document& doc) {
     h.nrow = std::max(h.nrow, 0);
     h.ncol = std::max(h.ncol, 0);
     size_t n = size_t(h.nrow) * size_t(h.ncol);
-    if (h.data && h.data->size() != n) {
+    bool finiteData = !h.data || std::all_of(h.data->begin(), h.data->end(), [](float v) { return std::isfinite(v); });
+    if (h.data && (h.data->size() != n || !finiteData)) {
       auto data = std::make_shared<std::vector<float>>(*h.data);
       data->resize(n, 0.0f);
+      for (float& v : *data)
+        if (!std::isfinite(v)) v = 0;  // MuJoCo refuses elevations it cannot range over
       h.data = std::move(data);
     }
+    // MuJoCo refuses a size that is not positive: half extents, height and base thickness.
+    const double minSize[4] = {1, 1, 0.1, 0.05};
+    for (int i = 0; i < 4; ++i)
+      if (!(h.size[i] > 0) || !std::isfinite(h.size[i])) h.size[i] = minSize[i];
   }
   // Built-in textures are generated at their size by MuJoCo (the inspector's range).
   for (Texture& t : doc.textures) {
@@ -471,6 +478,13 @@ int repairReferences(Document& doc) {
     single(l.range, defLight.range);
     single(l.bulbradius, defLight.bulbradius);
     single(l.softness, defLight.softness);
+  }
+  // Sensor outputs MJForge does not know are dropped; none at all means MuJoCo's default (the first).
+  for (Sensor& x : doc.sensors) {
+    x.condata &= (1 << int(std::size(kContactData))) - 1;
+    x.raydata &= (1 << int(std::size(kRayData))) - 1;
+    if (x.condata == 0) x.condata = 1;
+    if (x.raydata == 0) x.raydata = 1;
   }
   // Masses beyond any real object overflow MuJoCo's inertia computation.
   const Geom defGeom;
