@@ -218,3 +218,21 @@ TEST_CASE("simulator: templates keep standing (no friction creep, ankles hold th
     CHECK(rootHeight(sim) > z - 0.01);
   }
 }
+
+TEST_CASE("simulator: starts from the first keyframe") {
+  Document doc;
+  REQUIRE(makeTemplate("arm", doc));
+  Keyframe k;
+  k.name = "ready";
+  for (const Joint& j : doc.joints)
+    if (j.name == "arm_elbow") k.qpos.push_back({j.id, {1.0}});
+  doc.keyframes.push_back(k);
+  CompileResult cr = compileDoc(doc);
+  Simulator sim;
+  REQUIRE(sim.start(cr.model, cr.map));
+  int elbow = mj_name2id(sim.model(), mjOBJ_JOINT, "arm_elbow");
+  CHECK(sim.data()->qpos[sim.model()->jnt_qposadr[elbow]] == doctest::Approx(1.0));
+  // Hold mode keeps the keyframe pose, not the reference pose.
+  run(sim, 1.0);
+  CHECK(sim.data()->qpos[sim.model()->jnt_qposadr[elbow]] == doctest::Approx(1.0).epsilon(0.05));
+}

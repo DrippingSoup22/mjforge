@@ -10,6 +10,7 @@
 #include "app/Cli.h"
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/Merge.h"
 #include "core/MjcfWriter.h"
 #include "render/Camera.h"
 #include "render/DebugDraw.h"
@@ -54,6 +55,9 @@ struct ViewportState {
   bool showGrid = true, showShadows = true, showJoints = true, showCom = false, showSites = true;
   bool showFrames = false, showLabels = false, showLights = true, showCameras = true, xray = false;
   bool showInertia = false, showContacts = true;
+  // Geom / site groups shown, as in MuJoCo's viewer (0-2 visible; 3-5 often hold collision geoms).
+  bool groupVisible[6] = {true, true, true, false, false, false};
+  bool groupShown(int g) const { return g >= 0 && g < 6 && groupVisible[g]; }
 };
 
 struct Toast {
@@ -96,6 +100,7 @@ class Editor {
   void save();
   void saveAs();
   void openDialog();
+  void importDialog();
   void exportDialog();
   bool exportTo(const std::string& path, ExportOptions::Scope scope, bool split);
   void deleteSelection();
@@ -125,6 +130,7 @@ class Editor {
   void toggleSimulation();  // play / pause; starts when stopped
   void resetSimulation();
   void stepSimulation();
+  void captureKeyframe();  // current simulated pose -> keyframe 0 (the start pose)
   Simulator& simulator() { return sim_; }
 
   const CompileResult& compiled() const { return compiled_; }
@@ -148,6 +154,10 @@ class Editor {
   void drawSimulationPanel();
   void drawSimToolbarButtons();
   void launchSimulation();  // starts from the current compile result
+  // import
+  bool loadAnyFile(const std::string& path, Document& out, std::vector<std::string>* notes, std::string* editorState);
+  void beginImport(const std::string& path);
+  void drawImportModal();
   void drawToasts();
   void drawAboutWindow();
   void handleShortcuts();
@@ -270,6 +280,13 @@ class Editor {
     Vec3 planePoint, planeNormal;
   } simDrag_;
 
+  // import
+  std::unique_ptr<Document> importDoc_;
+  std::string importPath_;
+  std::vector<std::string> importNotes_;
+  MergeOptions importOpt_;
+  bool showImport_ = false;
+
   // dialogs
   FileDialog fileDialog_;
   bool showAbout_ = false;
@@ -287,6 +304,6 @@ class Editor {
   bool focusRename_ = false;
 };
 
-enum FileDialogPurpose { kPurposeOpen = 1, kPurposeSaveAs = 2, kPurposeExport = 3 };
+enum FileDialogPurpose { kPurposeOpen = 1, kPurposeSaveAs = 2, kPurposeExport = 3, kPurposeImport = 4 };
 
 }  // namespace mjf

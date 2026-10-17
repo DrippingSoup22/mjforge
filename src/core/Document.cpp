@@ -160,6 +160,37 @@ std::string Document::nameOf(Id id) const {
   }
 }
 
+std::string Document::displayName(Id id) const {
+  std::string n = nameOf(id);
+  if (!n.empty()) return n;
+  switch (kindOf(id)) {
+    case Kind::Body: return "body";
+    case Kind::Geom: return std::string(enumXml(kGeomTypes, geom(id)->type)) + " geom";
+    case Kind::Joint: return std::string(enumXml(kJointTypes, joint(id)->type)) + " joint";
+    case Kind::Site: return "site";
+    case Kind::Camera: return "camera";
+    case Kind::Light: return std::string(enumXml(kLightTypes, light(id)->type)) + " light";
+    case Kind::Actuator: {
+      const Actuator* a = actuator(id);
+      std::string t = nameOf(a->target);
+      return std::string(toXml(a->type)) + (t.empty() ? "" : " on " + t);
+    }
+    case Kind::Sensor: {
+      const Sensor* s = sensor(id);
+      std::string o = nameOf(s->obj);
+      return std::string(sensorInfo(s->type).xml) + (o.empty() ? "" : " on " + o);
+    }
+    case Kind::Exclude: {
+      const Exclude* e = exclude(id);
+      return "exclude " + displayName(e->body1) + " / " + displayName(e->body2);
+    }
+    case Kind::Material: return "material";
+    case Kind::Texture: return "texture";
+    case Kind::Hfield: return "height field";
+    default: return "";
+  }
+}
+
 void Document::setName(Id id, const std::string& name) {
   switch (kindOf(id)) {
     case Kind::Body: if (id != kWorldId) body(id)->name = name; break;

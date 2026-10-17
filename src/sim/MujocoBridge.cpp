@@ -66,6 +66,7 @@ CompileResult compileMjcf(const std::string& xml, const std::vector<std::pair<st
   try {
     DataPtr d = makeData(m);
     if (d) {
+      if (m->nkey > 0) mj_resetDataKeyframe(m, d.get(), 0);  // the start state
       mj_forward(m, d.get());
       r.nefc0 = d->nefc;
       for (int i = 0; i < d->ncon; ++i) {

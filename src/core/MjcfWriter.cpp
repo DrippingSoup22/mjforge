@@ -90,6 +90,7 @@ class Writer {
     writeContact(root);
     writeActuators(root);
     writeSensors(root);
+    writeKeyframes(root);
 
     std::string out;
     if (opt_.header) {
@@ -444,6 +445,7 @@ class Writer {
 
   void writeJoint(XmlNode& parent, const Joint& j) {
     if (map_) map_->joints.push_back(j.id);
+    writtenJoints_.push_back(&j);
     const Joint d;
     bool angular = j.type == JointType::Hinge || j.type == JointType::Ball;
     bool simpleFree = j.type == JointType::Free && nearly(j.damping, 0.0) && nearly(j.armature, 0.0) &&
@@ -597,6 +599,7 @@ class Writer {
     for (const Actuator& a : doc_.actuators) {
       if (!actuators_.count(a.id)) continue;
       if (map_) map_->actuators.push_back(a.id);
+      writtenActuators_.push_back(a.id);
       XmlNode& e = n.add(toXml(a.type));
       setName(e, a.id);
       switch (a.trn) {
@@ -680,6 +683,58 @@ class Writer {
     if (!n.children.empty()) root.children.push_back(n);
   }
 
+  // Keyframes list every exported joint in compiled order; joints without a value get their
+  // reference position. qpos values are raw MuJoCo state (radians), never converted to degrees.
+  void writeKeyframes(XmlNode& root) {
+    if (doc_.keyframes.empty() || writtenJoints_.empty()) return;
+    // Split scene: the included model file carries the keyframes (its joints come first, MuJoCo
+    // pads the rest with reference positions); a second copy here would misalign and clash.
+    if (opt_.scope == ExportOptions::Scope::Environment && !opt_.includeFile.empty()) return;
+    XmlNode n("keyframe");
+    for (const Keyframe& k : doc_.keyframes) {
+      std::string qpos, qvel, ctrl;
+      bool anyVel = false, anyCtrl = false;
+      auto add = [&](std::string& out, double v) { out += (out.empty() ? "" : " ") + num(v); };
+      for (const Joint* j : writtenJoints_) {
+        int nq = j->type == JointType::Free ? 7 : j->type == JointType::Ball ? 4 : 1;
+        int nv = j->type == JointType::Free ? 6 : j->type == JointType::Ball ? 3 : 1;
+        const std::vector<double>* q = k.jointQpos(j->id);
+        if (q && int(q->size()) == nq) {
+          for (double v : *q) add(qpos, v);
+        } else if (j->type == JointType::Free) {
+          const Body* b = doc_.body(j->body);
+          Vec3 p = b ? b->pos : Vec3{};
+          Quat r = b ? b->quat : Quat{};
+          for (double v : {p.x, p.y, p.z, r.w, r.x, r.y, r.z}) add(qpos, v);
+        } else if (j->type == JointType::Ball) {
+          for (double v : {1.0, 0.0, 0.0, 0.0}) add(qpos, v);
+        } else {
+          add(qpos, j->ref);
+        }
+        const std::vector<double>* dq = nullptr;
+        for (const auto& e : k.qvel) if (e.first == j->id) dq = &e.second;
+        for (int i = 0; i < nv; ++i) {
+          double v = dq && int(dq->size()) == nv ? (*dq)[i] : 0.0;
+          anyVel |= v != 0;
+          add(qvel, v);
+        }
+      }
+      for (Id a : writtenActuators_) {
+        double v = 0;
+        for (const auto& e : k.ctrl) if (e.first == a) v = e.second;
+        anyCtrl |= v != 0;
+        add(ctrl, v);
+      }
+      XmlNode& e = n.add("key");
+      if (!k.name.empty()) e.set("name", k.name);
+      if (k.time != 0) e.set("time", num(k.time));
+      e.set("qpos", qpos);
+      if (anyVel) e.set("qvel", qvel);
+      if (anyCtrl) e.set("ctrl", ctrl);
+    }
+    root.children.push_back(n);
+  }
+
   std::string trimmedVec(const Vec10& v) const {
     int len = 1;
     for (int i = 0; i < 10; ++i) if (!nearly(v[i], 0.0)) len = i + 1;
@@ -716,6 +771,8 @@ class Writer {
     if (!n.children.empty()) root.children.push_back(n);
   }
 
+  std::vector<const Joint*> writtenJoints_;
+  std::vector<Id> writtenActuators_;
   const Document& doc_;
   const ExportOptions& opt_;
   ExportMap* map_;

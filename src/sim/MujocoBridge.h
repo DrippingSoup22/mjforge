@@ -47,7 +47,7 @@ struct CompileResult {
   ExportMap map;
   uint64_t revision = 0;
   double compileMs = 0;
-  // Evaluated at the reference configuration (qpos0) with mj_forward.
+  // Evaluated at the start state (keyframe 0, else qpos0) with mj_forward.
   std::vector<InitialContact> initialContacts;
   int nefc0 = 0;
   std::vector<double> subtreeMass;  // per compiled body

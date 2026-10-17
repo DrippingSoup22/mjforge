@@ -175,12 +175,27 @@ double polygonDistance(const std::vector<Vec2>& poly, const Vec2& q) {
   return worst;
 }
 
+// Moves a model's start pose up by dz: its free joint's value in the first keyframe if it has one,
+// otherwise the body itself.
+void liftStartPose(Document& d, Id root, double dz) {
+  if (!d.keyframes.empty())
+    for (const Joint& j : d.joints)
+      if (j.body == root && j.type == JointType::Free)
+        for (auto& [jid, q] : d.keyframes[0].qpos)
+          if (jid == j.id && q.size() == 7) {
+            q[2] += dz;
+            return;
+          }
+  if (Body* b = d.body(root)) b->pos.z += dz;
+}
+
 class Analyzer {
  public:
   Analyzer(const Document& d, const CompileResult* cr, bool crValid) : doc_(d), cr_(cr), crValid_(crValid) {}
 
   AnalysisReport run() {
-    poses_ = computeBodyPoses(doc_);
+    // Everything is evaluated at the start pose: the first keyframe if there is one.
+    poses_ = computeBodyPoses(doc_, doc_.keyframes.empty() ? nullptr : &doc_.keyframes[0]);
     weld_ = computeWeld(doc_);
     Vec3 g = doc_.option.gravity;
     gmag_ = doc_.option.gravityFlag ? length(g) : 0.0;
@@ -316,8 +331,25 @@ class Analyzer {
         add(Severity::Error, IssueArea::Model, "ctrl-range-order", fmt("Actuator %s: control range lower > upper", quote(a.name).c_str()), "", {a.id});
       if (a.forcelimited && a.forcerange.x > a.forcerange.y)
         add(Severity::Error, IssueArea::Model, "force-range-order", fmt("Actuator %s: force range lower > upper", quote(a.name).c_str()), "", {a.id});
-      if (a.type == ActuatorType::Position && a.ctrllimited && (a.trn == TrnType::Joint)) {
-        const Joint* j = doc_.joint(a.target);
+      const Joint* tj = a.trn == TrnType::Joint ? doc_.joint(a.target) : nullptr;
+      bool degrees = servo && a.ctrllimited && tj && tj->type == JointType::Hinge &&
+                     std::max(std::fabs(a.ctrlrange.x), std::fabs(a.ctrlrange.y)) > 2 * kPi + 0.1;
+      if (degrees) {
+        // MuJoCo converts joint ranges from degrees (compiler angle="degree") but never ctrlrange.
+        Issue& i = add(Severity::Warning, IssueArea::Physics, "ctrl-range-degrees",
+                       fmt("Servo %s: control range [%.4g, %.4g] looks like degrees", quote(a.name).c_str(),
+                           a.ctrlrange.x, a.ctrlrange.y),
+                       "Servo targets are joint angles in radians. MuJoCo converts joint ranges written in degrees "
+                       "(compiler angle=\"degree\") but never converts ctrlrange, a common mistake in imported files.",
+                       {a.id});
+        Id id = a.id;
+        i.fixLabel = "Convert to radians";
+        i.fix = [id](Document& d) {
+          if (Actuator* x = d.actuator(id)) x->ctrlrange = {deg2rad(x->ctrlrange.x), deg2rad(x->ctrlrange.y)};
+        };
+      }
+      if (a.type == ActuatorType::Position && a.ctrllimited && a.trn == TrnType::Joint && !degrees) {
+        const Joint* j = tj;
         double tol = deg2rad(1.0);
         if (j && j->limited && (a.ctrlrange.x < j->range.x - tol || a.ctrlrange.y > j->range.y + tol)) {
           Issue& i = add(Severity::Info, IssueArea::Physics, "target-beyond-limit",
@@ -495,7 +527,7 @@ class Analyzer {
       bool floating = false;
       for (uint32_t ji : doc_.index().bodyJoints[ri]) floating |= doc_.joints[ji].type == JointType::Free;
       if (!floating) continue;  // fixed-base robots don't stand on legs
-      Aabb box = subtreeAabb(doc_, poses_, root.id);
+      Aabb box = subtreeAabb(doc_, poses_, root.id, true);  // feet must be able to touch the ground
       if (!box.valid()) continue;
       double height = box.hi.z - box.lo.z;
       double tol = std::max(0.01, 0.06 * height);
@@ -508,7 +540,7 @@ class Analyzer {
         Aabb own;
         for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
           const Geom& g = doc_.geoms[gi];
-          if (g.type == GeomType::Plane) continue;
+          if (g.type == GeomType::Plane || !geomCollides(g)) continue;
           own.add(primitiveWorldAabb(g.type, g.size, poses_[bi] * Pose{g.pos, g.quat}));
         }
         if (!own.valid() || own.lo.z > box.lo.z + tol) continue;
@@ -631,7 +663,8 @@ class Analyzer {
       double h = dot(comAbove - anchor, -gdir_);
       if (h <= 0) continue;
       double kGravity = mAbove * gmag_ * h;
-      if (g.k >= 1.5 * kGravity) continue;
+      // Torque-controlled ankles (no servo or spring stiffness) are balanced by the policy.
+      if (g.k <= 0 || g.k >= 1.5 * kGravity) continue;
       double kpEach = niceCeil(2.0 * kGravity / g.joints.size());
       Issue& i = add(Severity::Info, IssueArea::Physics, "ankle-balance",
                      fmt("%s can't stand still: its ankles are softer than gravity's tipping pull", quote(root.name).c_str()),
@@ -800,7 +833,7 @@ class Analyzer {
       bool floating = false;
       for (uint32_t ji : doc_.index().bodyJoints[ri]) floating |= doc_.joints[ji].type == JointType::Free;
       if (!floating || floorZ == -kInf) continue;
-      double minZ = subtreeMinZ(doc_, poses_, root.id);
+      double minZ = subtreeMinZ(doc_, poses_, root.id, true);
       if (!std::isfinite(minZ)) continue;
       Id rid = root.id;
       double dz = minZ - floorZ;
@@ -809,13 +842,13 @@ class Analyzer {
                        fmt("%s starts %.0f cm above the floor", quote(root.name).c_str(), dz * 100),
                        "It will fall at the beginning of every episode. Placing it on the floor makes resets cleaner.", {rid});
         i.fixLabel = "Place on floor";
-        i.fix = [rid, dz](Document& d) { if (Body* b = d.body(rid)) b->pos.z -= dz - 0.002; };
+        i.fix = [rid, dz](Document& d) { liftStartPose(d, rid, 0.002 - dz); };
       } else if (dz < -0.002) {
         Issue& i = add(Severity::Warning, IssueArea::Start, "below-floor",
                        fmt("%s starts %.1f cm inside the floor", quote(root.name).c_str(), -dz * 100),
                        "Penetrating contacts at the start pose create large repulsive forces (it gets launched).", {rid});
         i.fixLabel = "Place on floor";
-        i.fix = [rid, dz](Document& d) { if (Body* b = d.body(rid)) b->pos.z -= dz - 0.002; };
+        i.fix = [rid, dz](Document& d) { liftStartPose(d, rid, 0.002 - dz); };
       }
       // Balance: is the COM above the support polygon of the feet touching the floor?
       if (std::fabs(dz) < 0.01) {
@@ -824,7 +857,7 @@ class Analyzer {
           int bi = doc_.bodyIndex(b);
           for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
             const Geom& g = doc_.geoms[gi];
-            if (g.type == GeomType::Plane) continue;
+            if (g.type == GeomType::Plane || !geomCollides(g)) continue;
             Aabb ab = primitiveWorldAabb(g.type, g.size, poses_[bi] * Pose{g.pos, g.quat});
             if (ab.lo.z - floorZ < 0.01) {
               // Use the footprint corners for boxes, the center for round shapes.

@@ -77,7 +77,7 @@ void Editor::drawActuatorsPanel() {
       ImGui::PushID(int(a.id));
       ImGui::TableSetColumnIndex(0);
       bool sel = sel_.contains(a.id);
-      if (ImGui::Selectable(a.name.empty() ? "(unnamed)" : a.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
+      if (ImGui::Selectable(doc_.displayName(a.id).c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
         select(a.id, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl);
       if (ImGui::BeginPopupContextItem("##ctx")) {
         if (ImGui::MenuItem("Delete")) {
@@ -155,7 +155,7 @@ void Editor::drawSensorsPanel() {
       ImGui::TableNextRow();
       ImGui::PushID(int(s.id));
       ImGui::TableSetColumnIndex(0);
-      if (ImGui::Selectable(s.name.empty() ? "(unnamed)" : s.name.c_str(), sel_.contains(s.id), ImGuiSelectableFlags_SpanAllColumns))
+      if (ImGui::Selectable(doc_.displayName(s.id).c_str(), sel_.contains(s.id), ImGuiSelectableFlags_SpanAllColumns))
         select(s.id, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl);
       if (ImGui::BeginPopupContextItem("##ctx")) {
         if (ImGui::MenuItem("Delete")) {
@@ -283,7 +283,7 @@ void Editor::drawIssuesPanel() {
           break;
         }
         std::string nm = doc_.nameOf(id);
-        std::string lbl = std::string(kindName(doc_.kindOf(id))) + ": " + (nm.empty() ? "(unnamed)" : nm);
+        std::string lbl = nm.empty() ? doc_.displayName(id) : std::string(kindName(doc_.kindOf(id))) + ": " + nm;
         ImGui::PushID(int(id));
         if (ImGui::SmallButton(lbl.c_str())) {
           sel_.set(id);
@@ -482,11 +482,49 @@ void Editor::drawScenePanel() {
     o.solver = Solver::Newton;
     o.iterations = 20;
     o.ls_iterations = 20;
-    o.cone = Cone::Pyramidal;
   }
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("4 ms step, implicitfast, Newton with modest iteration caps. MJWarp exits early once all worlds "
                       "converge, so caps matter less than nconmax/njmax. Check stability in the preview.");
+
+  ImGui::SeparatorText("Keyframes");
+  if (doc_.keyframes.empty()) {
+    ImGui::TextWrapped("None: simulations start from the reference pose. To set a start pose, simulate, pose the "
+                       "model (Manual sliders, or let it settle) and press 'Save pose as keyframe' in the Simulation "
+                       "panel.");
+  }
+  for (size_t k = 0; k < doc_.keyframes.size(); ++k) {
+    ImGui::PushID(int(k));
+    Keyframe& kf = doc_.keyframes[k];
+    ImGui::SetNextItemWidth(150 * scale_);
+    std::string kname = kf.name;
+    if (ImGui::InputText("##kname", &kname)) {
+      change();
+      kf.name = kname;
+    }
+    ImGui::SameLine();
+    if (k == 0) {
+      ImGui::TextColored(pal::v4(pal::kOk), "start pose");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Simulations (and the analysis) start here. Training code usually resets to keyframe 0 too:\n"
+                          "mujoco.mj_resetDataKeyframe(m, d, 0)");
+    } else if (ImGui::SmallButton("Make start pose")) {
+      checkpoint("Reorder keyframes");
+      std::rotate(doc_.keyframes.begin(), doc_.keyframes.begin() + k, doc_.keyframes.begin() + k + 1);
+      ImGui::PopID();
+      break;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Delete")) {
+      checkpoint("Delete keyframe");
+      doc_.keyframes.erase(doc_.keyframes.begin() + k);
+      ImGui::PopID();
+      break;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu joints%s", kf.qpos.size(), kf.ctrl.empty() ? "" : ", controls");
+    ImGui::PopID();
+  }
   ImGui::End();
 }
 

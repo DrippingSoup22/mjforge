@@ -274,6 +274,21 @@ struct Hfield {
   std::shared_ptr<const std::vector<float>> data;  // normalized to [0, 1], copy-on-write
 };
 
+// A named state (MJCF <key>). Values are stored per joint and actuator, so keyframes survive
+// structural edits: joints without an entry use their reference position. The first keyframe is
+// the start state of simulations (MuJoCo resets to key 0 in MJForge and most training code).
+struct Keyframe {
+  std::string name;
+  double time = 0;
+  std::vector<std::pair<Id, std::vector<double>>> qpos;  // joint -> 1 (hinge/slide), 4 (ball) or 7 (free) values
+  std::vector<std::pair<Id, std::vector<double>>> qvel;  // joint -> 1, 3 or 6 values
+  std::vector<std::pair<Id, double>> ctrl;               // actuator -> control
+  const std::vector<double>* jointQpos(Id joint) const {
+    for (const auto& e : qpos) if (e.first == joint) return &e.second;
+    return nullptr;
+  }
+};
+
 struct OptionSettings {
   double timestep = 0.002;
   Vec3 gravity{0, 0, -9.81};
@@ -356,6 +371,7 @@ class Document {
   std::vector<Material> materials;
   std::vector<Texture> textures;
   std::vector<Hfield> hfields;
+  std::vector<Keyframe> keyframes;  // keyframes[0] is the start state
 
   Id nextId = 2;
   Id newId() { return nextId++; }
@@ -399,6 +415,8 @@ class Document {
 
   // Name of any element ("" if unnamed / unknown). World body is "world".
   std::string nameOf(Id id) const;
+  // The name, or a description such as "box geom" or "motor on hip" for unnamed elements.
+  std::string displayName(Id id) const;
   void setName(Id id, const std::string& name);
   // The body an element is attached to (bodies return their parent).
   Id ownerBody(Id id) const;

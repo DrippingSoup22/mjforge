@@ -101,7 +101,7 @@ void Editor::buildScene(std::vector<DrawItem>& items) {
     const Body& b = doc_.bodies[bi];
     for (uint32_t gi : ix.bodyGeoms[bi]) {
       const Geom& g = doc_.geoms[gi];
-      if (g.hidden) continue;
+      if (g.hidden || !vp_.groupShown(g.group)) continue;
       DrawItem it;
       it.pose = poses_[bi] * Pose{g.pos, g.quat};
       it.size = g.size;
@@ -127,7 +127,7 @@ void Editor::buildScene(std::vector<DrawItem>& items) {
     if (vp_.showSites) {
       for (uint32_t si : ix.bodySites[bi]) {
         const Site& s = doc_.sites[si];
-        if (s.hidden) continue;
+        if (s.hidden || !vp_.groupShown(s.group)) continue;
         DrawItem it;
         it.shape = shapeOf(s.type);
         it.pose = poses_[bi] * Pose{s.pos, s.quat};
@@ -366,7 +366,7 @@ Id Editor::pick(const Ray& ray, double* tHit) {
     if (b.hidden) continue;
     for (uint32_t gi : ix.bodyGeoms[bi]) {
       const Geom& g = doc_.geoms[gi];
-      if (g.hidden || g.locked) continue;
+      if (g.hidden || g.locked || !vp_.groupShown(g.group)) continue;
       Pose p = poses_[bi] * Pose{g.pos, g.quat};
       double t;
       if (g.type == GeomType::Hfield) {
@@ -387,7 +387,7 @@ Id Editor::pick(const Ray& ray, double* tHit) {
     if (vp_.showSites) {
       for (uint32_t si : ix.bodySites[bi]) {
         const Site& s = doc_.sites[si];
-        if (s.hidden) continue;
+        if (s.hidden || !vp_.groupShown(s.group)) continue;
         double t = rayPrimitive(ray, s.type, s.size, poses_[bi] * Pose{s.pos, s.quat});
         if (t >= 0 && t <= best + 1e-6) {
           best = t;

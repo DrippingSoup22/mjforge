@@ -188,8 +188,11 @@ void Editor::outlinerLeaf(Id id, const char* name, int iconIdx, unsigned int col
     ImGui::PopID();
     return;
   }
-  std::string label = std::string("      ") + (name && *name ? name : "(unnamed)");
+  bool named = name && *name;
+  std::string label = std::string("      ") + (named ? std::string(name) : doc_.displayName(id));
+  if (!named) ImGui::PushStyleColor(ImGuiCol_Text, pal::kTextDim);
   ImGui::TreeNodeEx("##leaf", fl, "%s", label.c_str());
+  if (!named) ImGui::PopStyleColor();
   ImVec2 mn = ImGui::GetItemRectMin();
   iconAt(mn, ImGui::GetTreeNodeToLabelSpacing() - h * 0.2f, Icon(iconIdx), color);
   if (ImGui::IsItemClicked(0) && !ImGui::IsItemToggledOpen()) select(id, ImGui::GetIO().KeyShift, ImGui::GetIO().KeyCtrl);

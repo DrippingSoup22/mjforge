@@ -184,6 +184,34 @@ void Editor::stepSimulation() {
   sim_.stepOnce();
 }
 
+void Editor::captureKeyframe() {
+  if (!sim_.active()) return;
+  const mjModel* m = sim_.model();
+  const mjData* d = sim_.data();
+  const ExportMap& map = sim_.map();
+  Keyframe k;
+  int n = 1;
+  auto taken = [&](const std::string& name) {
+    for (const Keyframe& x : doc_.keyframes) if (x.name == name) return true;
+    return false;
+  };
+  do k.name = "pose" + std::to_string(n++); while (taken(k.name));
+  for (int j = 0; j < m->njnt && j < int(map.joints.size()); ++j) {
+    if (!doc_.joint(map.joints[j])) continue;
+    int t = m->jnt_type[j];
+    int nq = t == mjJNT_FREE ? 7 : t == mjJNT_BALL ? 4 : 1;
+    const mjtNum* q = d->qpos + m->jnt_qposadr[j];
+    k.qpos.push_back({map.joints[j], std::vector<double>(q, q + nq)});
+  }
+  // Position servos aim at the captured pose.
+  for (int i = 0; i < m->nu && i < int(map.actuators.size()); ++i)
+    if (sim_.drive(i).kind == ActuatorDrive::Position && doc_.actuator(map.actuators[i]))
+      k.ctrl.push_back({map.actuators[i], d->actuator_length[i]});
+  checkpoint("Save keyframe");
+  doc_.keyframes.insert(doc_.keyframes.begin(), k);
+  notify("Saved '" + k.name + "' as the start pose (Scene panel lists keyframes)", pal::kOk, 4);
+}
+
 bool Editor::movesInSimulation(Id element) const {
   Id b = doc_.kindOf(element) == Kind::Body ? element : doc_.ownerBody(element);
   while (b != kNoId && b != kWorldId) {
@@ -434,7 +462,12 @@ void Editor::drawSimulationPanel() {
     ImGui::SetNextItemWidth(140 * s);
     ImGui::Combo("##pattern", &sim_.sine.pattern, "All in phase\0Alternating\0Traveling wave\0");
   }
+  if (ImGui::SmallButton("Save pose as keyframe")) captureKeyframe();
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Stores the current pose as a keyframe and makes it the start pose of every simulation (and of "
+                      "the exported model: key 0). Position servos get matching targets.");
   if (sim_.mode == CtrlMode::Manual) {
+    ImGui::SameLine();
     if (ImGui::SmallButton("Reset sliders to the start pose"))
       for (int i = 0; i < nu; ++i) sim_.manual[i] = sim_.drive(i).holdCtrl;
     ImGui::SameLine();

@@ -98,6 +98,7 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a == "demo") showDemo_ = true;
     else if (a.rfind("focus:", 0) == 0) pendingFocus_.push_back(a.substr(6));
     else if (a == "play") startSimulation(false);
+    else if (a.rfind("import:", 0) == 0) beginImport(a.substr(7));
     else if (a.rfind("sim:", 0) == 0) {
       // Start paused and fast-forward: deterministic screenshots of the simulation.
       cliSimSeconds_ = std::max(1e-9, std::atof(a.c_str() + 4));
@@ -211,16 +212,15 @@ void Editor::newDocument(const std::string& templateId) {
 
 bool Editor::openPath(const std::string& path) {
   Document d;
-  std::string err, editorState;
-  if (!loadProject(d, path, &err, &editorState)) {
-    notify("Open failed: " + err, pal::kError, 6);
-    return false;
-  }
+  std::string editorState;
+  std::vector<std::string> notes;
+  if (!loadAnyFile(path, d, &notes, &editorState)) return false;
+  bool mjcf = fs::path(path).extension() != ".mjforge";
   stopSimulation();
   doc_ = std::move(d);
   history_.clear();
   sel_.clear();
-  path_ = path;
+  path_ = mjcf ? std::string() : path;  // MJCF opens as a new, unsaved project
   modified_ = false;
   ++editRevision_;
   compileDueTime_ = 0;
@@ -230,6 +230,7 @@ bool Editor::openPath(const std::string& path) {
   addRecent(path);
   setTitle();
   notify("Opened " + fs::path(path).filename().string(), pal::kOk);
+  for (const std::string& n : notes) notify(n, pal::kWarning, 8);
   return true;
 }
 
@@ -259,7 +260,7 @@ void Editor::saveAs() {
 }
 
 void Editor::openDialog() {
-  fileDialog_.open(FileDialog::Mode::Open, "Open project", {".mjforge"}, lastDir_, "", kPurposeOpen);
+  fileDialog_.open(FileDialog::Mode::Open, "Open project or MJCF", {".mjforge", ".xml"}, lastDir_, "", kPurposeOpen);
 }
 
 void Editor::exportDialog() { showExport_ = true; }
@@ -438,7 +439,10 @@ void Editor::frame() {
   drawOutliner();
   drawScenePanel();
   drawInspector();
-  if (focusInspector_ > 0 && --focusInspector_ == 0) ImGui::SetWindowFocus("Inspector");
+  // Deferred focus requests wait while a modal is open: focusing a window would close it.
+  bool modalOpen = ImGui::GetTopMostPopupModal() != nullptr;
+  if (modalOpen) {
+  } else if (focusInspector_ > 0 && --focusInspector_ == 0) ImGui::SetWindowFocus("Inspector");
   else if (focusInspector_ == 0 && frameCount_ > 3 && !pendingFocus_.empty()) {
     // One window per frame: tab selection only follows the last focused window of a frame.
     ImGui::SetWindowFocus(pendingFocus_.front().c_str());
@@ -456,6 +460,7 @@ void Editor::frame() {
     switch (fileDialog_.purpose()) {
       case kPurposeOpen: openPath(p); break;
       case kPurposeSaveAs: savePath(p); break;
+      case kPurposeImport: beginImport(p); break;
       case kPurposeExport:
         exportTo(p, exportScope_ == 1 ? ExportOptions::Scope::Models
                     : exportScope_ == 2 ? ExportOptions::Scope::Environment
@@ -497,6 +502,7 @@ void Editor::frame() {
     if (ImGui::Button("Cancel", ImVec2(100 * scale_, 0))) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
   }
+  drawImportModal();
   drawAboutWindow();
   if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
   drawToasts();
@@ -561,6 +567,9 @@ void Editor::drawMenuBar() {
     if (ImGui::MenuItem("Save", "Ctrl+S")) save();
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveAs();
     ImGui::Separator();
+    if (ImGui::MenuItem("Import into scene...", "Ctrl+I")) importDialog();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Bring the models and/or the environment of another project or MJCF file into this one.");
     if (ImGui::MenuItem("Export MJCF...", "Ctrl+E")) exportDialog();
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
@@ -612,7 +621,17 @@ void Editor::drawMenuBar() {
     ImGui::MenuItem("Lights", nullptr, &vp_.showLights);
     ImGui::MenuItem("Cameras", nullptr, &vp_.showCameras);
     ImGui::MenuItem("Names", "L", &vp_.showLabels);
-    ImGui::MenuItem("Initial contacts", nullptr, &vp_.showContacts);
+    ImGui::MenuItem("Contacts", nullptr, &vp_.showContacts);
+    if (ImGui::BeginMenu("Geom groups")) {
+      ImGui::TextDisabled("Like MuJoCo's viewer: groups 0-2 shown, 3-5 hidden.");
+      ImGui::TextDisabled("Imported robots often keep collision geoms in group 3.");
+      for (int g = 0; g < 6; ++g) {
+        char label[32];
+        std::snprintf(label, sizeof label, "Group %d", g);
+        ImGui::MenuItem(label, nullptr, &vp_.groupVisible[g]);
+      }
+      ImGui::EndMenu();
+    }
     ImGui::Separator();
     if (ImGui::MenuItem("Frame selection", "F")) focusSelection();
     if (ImGui::MenuItem("Frame all", "Home")) frameAll();
@@ -810,6 +829,7 @@ void Editor::handleShortcuts() {
   if (ctrl && pressed(ImGuiKey_Y)) { redo(); return; }
   if (ctrl && pressed(ImGuiKey_S)) { shift ? saveAs() : save(); return; }
   if (ctrl && pressed(ImGuiKey_O)) { openDialog(); return; }
+  if (ctrl && pressed(ImGuiKey_I)) { importDialog(); return; }
   if (ctrl && pressed(ImGuiKey_E)) { exportDialog(); return; }
   if (ctrl && pressed(ImGuiKey_Q)) { quit_ = true; return; }
   if (ctrl && pressed(ImGuiKey_D)) { duplicateSelection(); return; }

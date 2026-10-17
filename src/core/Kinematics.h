@@ -1,4 +1,4 @@
-// Forward kinematics of the document at its reference configuration, and mass properties.
+// Forward kinematics of the document (reference configuration or a keyframe) and mass properties.
 #pragma once
 
 #include <vector>
@@ -9,6 +9,8 @@ namespace mjf {
 
 // World poses of all bodies, indexed like doc.bodies.
 std::vector<Pose> computeBodyPoses(const Document& doc);
+// ... with the joints at the positions of a keyframe (joints without a value stay at reference).
+std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key);
 // World pose of a single body (walks up the parents).
 Pose bodyWorldPose(const Document& doc, Id body);
 // World pose of any spatial element (body, geom, joint, site, camera, light).
@@ -51,9 +53,11 @@ MassProps bodyMassProps(const Document& doc, const std::vector<Pose>& poses, Id 
 MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, Id body);
 MassAccumulator subtreeAccumulator(const Document& doc, const std::vector<Pose>& poses, Id body);
 
-// World AABB of a body subtree's geoms (excluding planes/hfields).
-Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body);
+// Whether a geom takes part in collisions at all (visual-only geoms have contype = conaffinity = 0).
+inline bool geomCollides(const Geom& g) { return g.contype != 0 || g.conaffinity != 0; }
+// World AABB of a body subtree's geoms (excluding planes/hfields; optionally only colliding geoms).
+Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body, bool collidingOnly = false);
 // Lowest world z of a subtree's geoms (+inf if none).
-double subtreeMinZ(const Document& doc, const std::vector<Pose>& poses, Id body);
+double subtreeMinZ(const Document& doc, const std::vector<Pose>& poses, Id body, bool collidingOnly = false);
 
 }  // namespace mjf

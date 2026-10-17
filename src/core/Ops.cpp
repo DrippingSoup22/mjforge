@@ -292,6 +292,14 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
   for (Material& m : doc.materials) if (del.count(m.texture)) m.texture = kNoId;
   for (Camera& c : doc.cameras) if (del.count(c.target)) c.target = kNoId;
   for (Light& l : doc.lights) if (del.count(l.target)) l.target = kNoId;
+  for (Keyframe& k : doc.keyframes) {
+    auto drop = [&](auto& v) {
+      v.erase(std::remove_if(v.begin(), v.end(), [&](const auto& e) { return del.count(e.first) > 0; }), v.end());
+    };
+    drop(k.qpos);
+    drop(k.qvel);
+    drop(k.ctrl);
+  }
   doc.touch();
 }
 
@@ -495,6 +503,19 @@ CopyResult copyElements(Document& doc, const std::vector<Id>& ids, const RenameF
   }
   for (Camera& c : doc.cameras) if (r.remap.count(c.id) && r.remap.count(c.target)) c.target = mapId(c.target);
   for (Light& l : doc.lights) if (r.remap.count(l.id) && r.remap.count(l.target)) l.target = mapId(l.target);
+  // Copies start in the same keyframe poses as the originals.
+  for (Keyframe& k : doc.keyframes) {
+    auto copyEntries = [&](auto& v) {
+      size_t n = v.size();
+      for (size_t i = 0; i < n; ++i) {
+        auto it = r.remap.find(v[i].first);
+        if (it != r.remap.end()) v.push_back({it->second, v[i].second});
+      }
+    };
+    copyEntries(k.qpos);
+    copyEntries(k.qvel);
+    copyEntries(k.ctrl);
+  }
   doc.touch();
   return r;
 }
@@ -509,6 +530,13 @@ std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3&
       Body* b = doc.body(top);
       Pose parentWorld = bodyWorldPose(doc, b->parent);
       b->pos += rotate(conj(parentWorld.quat), worldOffset);
+      // Free bodies: keyframe positions are world positions, shift them too.
+      for (const Joint& j : doc.joints)
+        if (j.body == top && j.type == JointType::Free)
+          for (Keyframe& key : doc.keyframes)
+            for (auto& [jid, q] : key.qpos)
+              if (jid == j.id && q.size() == 7)
+                for (int i = 0; i < 3; ++i) q[i] += worldOffset[i];
     } else {
       Id owner = doc.ownerBody(top);
       Pose ownerWorld = bodyWorldPose(doc, owner);
@@ -534,14 +562,16 @@ void placeOnFloor(Document& doc, Id root, double floorZ, double clearance) {
 std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance) {
   std::vector<Id> out;
   auto poses = computeBodyPoses(doc);
-  Aabb box = subtreeAabb(doc, poses, root);
+  // Visual-only geoms never touch the ground; ignore them unless nothing collides.
+  bool colliding = subtreeAabb(doc, poses, root, true).valid();
+  Aabb box = subtreeAabb(doc, poses, root, colliding);
   if (!box.valid()) return out;
   if (tolerance < 0) tolerance = std::max(0.004, 0.02 * (box.hi.z - box.lo.z));
   for (Id b : doc.subtree(root)) {
     int bi = doc.bodyIndex(b);
     for (uint32_t gi : doc.index().bodyGeoms[bi]) {
       const Geom& g = doc.geoms[gi];
-      if (g.type == GeomType::Plane) continue;
+      if (g.type == GeomType::Plane || (colliding && !geomCollides(g))) continue;
       Aabb gb = primitiveWorldAabb(g.type, g.size, poses[bi] * Pose{g.pos, g.quat});
       if (gb.lo.z <= box.lo.z + tolerance) out.push_back(g.id);
     }

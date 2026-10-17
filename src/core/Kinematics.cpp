@@ -23,6 +23,42 @@ std::vector<Pose> computeBodyPoses(const Document& doc) {
   return poses;
 }
 
+std::vector<Pose> computeBodyPoses(const Document& doc, const Keyframe* key) {
+  if (!key) return computeBodyPoses(doc);
+  const DocIndex& ix = doc.index();
+  std::vector<Pose> poses(doc.bodies.size());
+  for (uint32_t bi : ix.dfsOrder) {
+    if (bi == 0) continue;
+    const Body& b = doc.bodies[bi];
+    int pi = doc.bodyIndex(b.parent);
+    Pose p = (pi >= 0 ? poses[pi] : Pose{}) * Pose{b.pos, b.quat};
+    // Joints move the body frame in order, rotating about their anchors (as mj_kinematics does).
+    for (uint32_t ji : ix.bodyJoints[bi]) {
+      const Joint& j = doc.joints[ji];
+      const std::vector<double>* q = key->jointQpos(j.id);
+      if (!q) continue;
+      const std::vector<double>& v = *q;
+      auto aboutAnchor = [&](const Quat& r) { return Pose{j.pos, {}} * Pose{{}, r} * Pose{-j.pos, {}}; };
+      switch (j.type) {
+        case JointType::Free:
+          if (v.size() == 7) p = Pose{{v[0], v[1], v[2]}, normalize(Quat{v[3], v[4], v[5], v[6]})};
+          break;
+        case JointType::Ball:
+          if (v.size() == 4) p = p * aboutAnchor(normalize(Quat{v[0], v[1], v[2], v[3]}));
+          break;
+        case JointType::Hinge:
+          if (v.size() == 1) p = p * aboutAnchor(axisAngle(normalize(j.axis), v[0] - j.ref));
+          break;
+        case JointType::Slide:
+          if (v.size() == 1) p = p * Pose{normalize(j.axis) * (v[0] - j.ref), {}};
+          break;
+      }
+    }
+    poses[bi] = p;
+  }
+  return poses;
+}
+
 Pose bodyWorldPose(const Document& doc, Id body) {
   Pose p;
   std::vector<const Body*> chain;
@@ -160,7 +196,7 @@ MassProps subtreeMassProps(const Document& doc, const std::vector<Pose>& poses, 
   return {acc.mass(), acc.com(), acc.inertiaAboutCom()};
 }
 
-Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body) {
+Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body, bool collidingOnly) {
   Aabb box;
   const DocIndex& ix = doc.index();
   for (Id b : doc.subtree(body)) {
@@ -169,14 +205,15 @@ Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body) {
     for (uint32_t gi : ix.bodyGeoms[bi]) {
       const Geom& g = doc.geoms[gi];
       if (g.type == GeomType::Plane || g.type == GeomType::Hfield) continue;
+      if (collidingOnly && !geomCollides(g)) continue;
       box.add(primitiveWorldAabb(g.type, g.size, bp * Pose{g.pos, g.quat}));
     }
   }
   return box;
 }
 
-double subtreeMinZ(const Document& doc, const std::vector<Pose>& poses, Id body) {
-  Aabb box = subtreeAabb(doc, poses, body);
+double subtreeMinZ(const Document& doc, const std::vector<Pose>& poses, Id body, bool collidingOnly) {
+  Aabb box = subtreeAabb(doc, poses, body, collidingOnly);
   return box.valid() ? box.lo.z : std::numeric_limits<double>::infinity();
 }
 

@@ -253,6 +253,21 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
     hf.push_back(o);
   }
   root["hfields"] = hf;
+  json keys = json::array();
+  for (const Keyframe& k : doc.keyframes) {
+    json o;
+    o["name"] = k.name;
+    o["time"] = k.time;
+    json q = json::array(), v = json::array(), c = json::array();
+    for (const auto& [id, vals] : k.qpos) q.push_back({id, vals});
+    for (const auto& [id, vals] : k.qvel) v.push_back({id, vals});
+    for (const auto& [id, val] : k.ctrl) c.push_back({id, val});
+    o["qpos"] = q;
+    o["qvel"] = v;
+    o["ctrl"] = c;
+    keys.push_back(o);
+  }
+  root["keyframes"] = keys;
   if (!editorStateJson.empty()) {
     json e = json::parse(editorStateJson, nullptr, false);
     if (!e.is_discarded()) root["editor"] = e;
@@ -301,6 +316,23 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         if (item.contains("data") && item["data"].is_array())
           h.data = std::make_shared<const std::vector<float>>(item["data"].get<std::vector<float>>());
         doc.hfields.push_back(std::move(h));
+      }
+    }
+    if (root.contains("keyframes") && root["keyframes"].is_array()) {
+      for (const auto& item : root["keyframes"]) {
+        Keyframe k;
+        k.name = item.value("name", std::string());
+        k.time = item.value("time", 0.0);
+        auto pairs = [&](const char* key, auto& out) {
+          if (!item.contains(key) || !item[key].is_array()) return;
+          for (const auto& e : item[key])
+            if (e.is_array() && e.size() == 2)
+              out.push_back({e[0].get<Id>(), e[1].get<typename std::decay_t<decltype(out)>::value_type::second_type>()});
+        };
+        pairs("qpos", k.qpos);
+        pairs("qvel", k.qvel);
+        pairs("ctrl", k.ctrl);
+        doc.keyframes.push_back(std::move(k));
       }
     }
     // The world body must be first and have the reserved ID.

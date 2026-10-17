@@ -10,6 +10,7 @@
 #include "core/MjcfWriter.h"
 #include "core/ProjectIO.h"
 #include "core/Templates.h"
+#include "sim/MjcfImport.h"
 #include "sim/MujocoBridge.h"
 
 namespace mjf {
@@ -17,14 +18,14 @@ namespace mjf {
 const char* cliUsage() {
   return "MJForge " MJFORGE_VERSION " - visual MuJoCo / MuJoCo Warp model & environment editor\n"
          "\n"
-         "Usage: mjforge [file.mjforge] [options]\n"
+         "Usage: mjforge [file.mjforge | model.xml] [options]\n"
          "\n"
          "Headless commands:\n"
          "  --export <out.xml>     Export the project to MJCF and exit\n"
          "  --scope <s>            Export scope: all | models | environment (default all)\n"
          "  --angle <u>            Angle unit in the MJCF: radian | degree (default radian)\n"
          "  --validate             Compile with MuJoCo, print a report and exit (non-zero on errors)\n"
-         "  --save <out.mjforge>   Save the project (useful with --template)\n"
+         "  --save <out.mjforge>   Save the project (with --template, or to convert an MJCF file)\n"
          "\n"
          "GUI options:\n"
          "  --template <name>      Start from a built-in template\n"
@@ -79,7 +80,16 @@ int runHeadless(const CliOptions& cli) {
   Document doc;
   std::string err;
   if (!cli.input.empty()) {
-    if (!loadProject(doc, cli.input, &err)) {
+    std::string ext = cli.input.size() > 4 ? cli.input.substr(cli.input.size() - 4) : "";
+    bool ok;
+    if (ext == ".xml") {
+      ImportReport rep;
+      ok = importMjcfFile(cli.input, doc, &err, &rep);
+      for (const std::string& n : rep.notes) std::printf("NOTE   %s\n", n.c_str());
+    } else {
+      ok = loadProject(doc, cli.input, &err);
+    }
+    if (!ok) {
       std::fprintf(stderr, "Failed to open %s: %s\n", cli.input.c_str(), err.c_str());
       return 1;
     }
