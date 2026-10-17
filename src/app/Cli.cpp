@@ -8,6 +8,7 @@
 
 #include "core/MjcfWriter.h"
 #include "core/ProjectIO.h"
+#include "core/Templates.h"
 #include "sim/MujocoBridge.h"
 
 namespace mjf {
@@ -22,6 +23,7 @@ const char* cliUsage() {
          "  --scope <s>            Export scope: all | models | environment (default all)\n"
          "  --angle <u>            Angle unit in the MJCF: radian | degree (default radian)\n"
          "  --validate             Compile with MuJoCo, print a report and exit (non-zero on errors)\n"
+         "  --save <out.mjforge>   Save the project (useful with --template)\n"
          "\n"
          "GUI options:\n"
          "  --template <name>      Start from a built-in template\n"
@@ -47,6 +49,7 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
     if (a == "-h" || a == "--help") o.help = true;
     else if (a == "--validate") o.validate = true;
     else if (a == "--export") { if (!(v = need(i, "--export"))) return false; o.exportPath = v; }
+    else if (a == "--save") { if (!(v = need(i, "--save"))) return false; o.savePath = v; }
     else if (a == "--scope") { if (!(v = need(i, "--scope"))) return false; o.scope = v; }
     else if (a == "--angle") { if (!(v = need(i, "--angle"))) return false; o.angle = v; }
     else if (a == "--screenshot") { if (!(v = need(i, "--screenshot"))) return false; o.screenshot = v; }
@@ -72,15 +75,28 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
 }
 
 int runHeadless(const CliOptions& cli) {
-  if (cli.input.empty()) {
-    std::fprintf(stderr, "A project file is required for headless commands.\n");
-    return 2;
-  }
   Document doc;
   std::string err;
-  if (!loadProject(doc, cli.input, &err)) {
-    std::fprintf(stderr, "Failed to open %s: %s\n", cli.input.c_str(), err.c_str());
-    return 1;
+  if (!cli.input.empty()) {
+    if (!loadProject(doc, cli.input, &err)) {
+      std::fprintf(stderr, "Failed to open %s: %s\n", cli.input.c_str(), err.c_str());
+      return 1;
+    }
+  } else if (!cli.templateName.empty()) {
+    if (!makeTemplate(cli.templateName, doc)) {
+      std::fprintf(stderr, "Unknown template: %s\n", cli.templateName.c_str());
+      return 2;
+    }
+  } else {
+    std::fprintf(stderr, "A project file or --template is required for headless commands.\n");
+    return 2;
+  }
+  if (!cli.savePath.empty()) {
+    if (!saveProject(doc, cli.savePath, &err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("Saved %s\n", cli.savePath.c_str());
   }
   ExportOptions opt;
   opt.scope = cli.scope == "models" ? ExportOptions::Scope::Models
