@@ -237,6 +237,8 @@ void Editor::inspectBody(Body& b) {
     if (props::real("Gravity comp.", &b.gravcomp, 0, O(D("body.gravcomp"), nullptr, 0.01, 0, 1)))
       applyToSelected<Body>([&](Body& o) { o.gravcomp = b.gravcomp; });
     if (b.parent == kWorldId) props::checkbox("Mocap", &b.mocap, false, D("body.mocap"));
+    if (doc_.isTreeRoot(b.id) || b.sleep != SleepPolicy::Auto)
+      props::combo("Sleep", &b.sleep, kSleepPolicies, SleepPolicy::Auto, D("body.sleep"));
   }
   props::end();
 
@@ -315,6 +317,11 @@ void Editor::inspectMesh(Geom& g) {
   }
   props::endRow();
   if (users > 1) props::info("", "Shared by %d geoms.", users);
+  if (props::combo("Inertia from", &ma->inertia, kMeshInertias, MeshInertia::Legacy, D("mesh.inertia"))) doc_.touch();
+  int hull = ma->maxhullvert > 3 ? ma->maxhullvert : 0;
+  if (props::integer("Hull vertex limit", &hull, 0, O("Maximum vertices of the convex hull used for collisions (0: no limit). "
+                                                       "Fewer vertices collide faster.", nullptr, 0.5, 0, 100000)))
+    ma->maxhullvert = hull >= 4 ? hull : -1;
 }
 
 void Editor::inspectGeom(Geom& g) {
@@ -408,6 +415,31 @@ void Editor::inspectGeom(Geom& g) {
     if (g.contype == 0 && g.conaffinity == 0) props::info("", "Collisions disabled for this geom (visual only).");
     if (props::integer("Priority", &g.priority, 0, O(D("geom.priority"), nullptr, 0.1, -100, 100)))
       applyToSelected<Geom>([&](Geom& o) { o.priority = g.priority; });
+  }
+  if (props::section("Sticky & moving surface", g.adhesion != 0 || g.surfacevel != Vec6{})) {
+    if (props::real("Adhesion", &g.adhesion, 0, O(D("geom.adhesion"), "N", 0.1, 0, 1e9)))
+      applyToSelected<Geom>([&](Geom& o) { o.adhesion = g.adhesion; });
+    Vec3 lin{g.surfacevel[0], g.surfacevel[1], g.surfacevel[2]}, angv{g.surfacevel[3], g.surfacevel[4], g.surfacevel[5]};
+    bool sv = props::vec3("Surface velocity", &lin, Vec3{}, O("Conveyor belts and treadmills: the speed (in the geom's frame) "
+                                                              "that touching objects are carried at, while the geom stays put.",
+                                                              "m/s", 0.01));
+    sv |= props::vec3("Surface spin", &angv, Vec3{}, O("Turntables: angular velocity of the surface about the geom's origin, "
+                                                       "in the geom's frame.", "rad/s", 0.01));
+    if (sv) {
+      Vec6 v{{lin.x, lin.y, lin.z, angv.x, angv.y, angv.z}};
+      g.surfacevel = v;
+      applyToSelected<Geom>([&](Geom& o) { o.surfacevel = v; });
+    }
+  }
+  if (g.body != kWorldId && props::section("Fluid forces", g.fluidEllipsoid)) {
+    if (props::checkbox("Ellipsoid model", &g.fluidEllipsoid, false, D("geom.fluidshape")))
+      applyToSelected<Geom>([&](Geom& o) { o.fluidEllipsoid = g.fluidEllipsoid; });
+    if (g.fluidEllipsoid) {
+      if (props::vec5("Coefficients", &g.fluidcoef, Vec5{{0.5, 0.25, 1.5, 1.0, 1.0}}, O(D("geom.fluidcoef"), nullptr, 0.01, 0, 100)))
+        applyToSelected<Geom>([&](Geom& o) { o.fluidcoef = g.fluidcoef; });
+      if (doc_.option.density <= 0 && doc_.option.viscosity <= 0)
+        props::info("", "No effect yet: set Scene > Environment > Medium density.");
+    }
   }
   if (props::section("Solver (advanced)", false)) {
     if (props::vec2("solref", &g.solref, kDefaultSolref, O(D("geom.solref"), nullptr, 0.001)))
@@ -815,40 +847,103 @@ void Editor::inspectSensor(Sensor& s) {
       if (sensorInfo(s.type).obj != before) s.obj = kNoId;
     }
     const SensorInfo& info = sensorInfo(s.type);
+    auto objects = [&](FrameObj t) {
+      switch (t) {
+        case FrameObj::Body:
+        case FrameObj::XBody: return listOfAny(doc_.bodies);
+        case FrameObj::Geom: return listOfAny(doc_.geoms);
+        case FrameObj::Site: return listOfAny(doc_.sites);
+        case FrameObj::Camera: return listOfAny(doc_.cameras);
+      }
+      return std::vector<std::pair<Id, std::string>>{};
+    };
+    // Changing an object's type clears the object (it would be of the wrong kind).
+    auto typed = [&](const char* typeLabel, FrameObj* t, const auto& table, FrameObj def, const char* label, Id* obj,
+                     bool allowNone, const char* noneLabel, const char* tip) {
+      FrameObj before = *t;
+      props::combo(typeLabel, t, table, def, tip);
+      if (*t != before) *obj = kNoId;
+      props::element(label, obj, objects(*t), allowNone, tip, noneLabel);
+    };
+    static constexpr EnumEntry<FrameObj> kGeomOrBody[] = {{FrameObj::Geom, "geom", "Geom"}, {FrameObj::Body, "body", "Body (all its geoms)"}};
+    static constexpr EnumEntry<FrameObj> kContact1[] = {
+        {FrameObj::Geom, "geom1", "Geom"}, {FrameObj::Body, "body1", "Body"},
+        {FrameObj::XBody, "subtree1", "Body and its children"}, {FrameObj::Site, "site", "Inside a site volume"}};
+    static constexpr EnumEntry<FrameObj> kContact2[] = {
+        {FrameObj::Geom, "geom2", "Geom"}, {FrameObj::Body, "body2", "Body"}, {FrameObj::XBody, "subtree2", "Body and its children"}};
     switch (info.obj) {
       case SensorObj::Joint: props::element("Joint", &s.obj, listOf(doc_.joints), false); break;
       case SensorObj::Actuator: props::element("Actuator", &s.obj, listOfAny(doc_.actuators), false); break;
-      case SensorObj::Site: props::element("Site", &s.obj, listOfAny(doc_.sites), false); break;
+      case SensorObj::Site:
+        props::element("Site", &s.obj, listOfAny(doc_.sites), false);
+        if (s.type == SensorType::RangeFinder)
+          for (int i = 0; i < int(std::size(kRayData)); ++i) {
+            bool on = (s.raydata & (1 << i)) != 0;
+            std::string label = std::string("Report ") + kRayData[i].xml;
+            if (props::checkbox(label.c_str(), &on, i == 0, kRayData[i].label))
+              s.raydata = on ? s.raydata | (1 << i) : s.raydata & ~(1 << i);
+          }
+        break;
       case SensorObj::Body: props::element("Body", &s.obj, listOfAny(doc_.bodies), false); break;
       case SensorObj::Tendon: props::element("Tendon", &s.obj, listOfAny(doc_.tendons), false); break;
-      case SensorObj::Frame: {
-        props::combo("Object type", &s.objtype, kFrameObjs, FrameObj::Site);
-        std::vector<std::pair<Id, std::string>> items;
-        switch (s.objtype) {
-          case FrameObj::Body:
-          case FrameObj::XBody: items = listOfAny(doc_.bodies); break;
-          case FrameObj::Geom: items = listOfAny(doc_.geoms); break;
-          case FrameObj::Site: items = listOfAny(doc_.sites); break;
-          case FrameObj::Camera: items = listOfAny(doc_.cameras); break;
+      case SensorObj::Frame:
+        typed("Object type", &s.objtype, kFrameObjs, FrameObj::Site, "Object", &s.obj, false, "(none)", nullptr);
+        typed("Reference type", &s.reftype, kFrameObjs, FrameObj::Site, "Reference", &s.ref, true, "(world)",
+              "Optional frame in which the quantity is expressed.");
+        break;
+      case SensorObj::GeomPair:
+        typed("First is a", &s.objtype, kGeomOrBody, FrameObj::Geom, "First", &s.obj, false, "(none)", nullptr);
+        typed("Second is a", &s.reftype, kGeomOrBody, FrameObj::Geom, "Second", &s.ref, false, "(none)", nullptr);
+        props::info("Search distance", "%s", s.cutoff > 0 ? "the Cutoff below" : "0: set Cutoff to the largest distance of interest");
+        break;
+      case SensorObj::Contact: {
+        typed("Match first", &s.objtype, kContact1, FrameObj::Geom, "First", &s.obj, true, "(any contact)",
+              "Contacts involving this object (or inside this site). Leave empty to match any contact.");
+        typed("Match second", &s.reftype, kContact2, FrameObj::Geom, "Second", &s.ref, true, "(anything)",
+              "Optionally, the other object of the contact (the floor for foot contacts).");
+        int slots = s.connum;
+        if (props::integer("Contacts reported", &slots, 1, O("Number of slots: matched contacts beyond this are dropped "
+                                                             "(see Reduce), missing ones read as zeros.", nullptr, 0.1, 1, 64)))
+          s.connum = std::clamp(slots, 1, 64);
+        std::vector<std::string> reduce = {"Unsorted (fastest)", "Smallest distance first", "Largest force first",
+                                           "Net force (one slot)"};
+        props::comboIndex("Reduce", &s.reduce, reduce, 0, "Which matched contacts fill the slots.");
+        for (int i = 0; i < int(std::size(kContactData)); ++i) {
+          bool on = (s.condata & (1 << i)) != 0;
+          std::string label = std::string("Report ") + kContactData[i].xml;
+          if (props::checkbox(label.c_str(), &on, i == 0, kContactData[i].label))
+            s.condata = on ? s.condata | (1 << i) : s.condata & ~(1 << i);
         }
-        props::element("Object", &s.obj, items, false);
-        props::combo("Reference type", &s.reftype, kFrameObjs, FrameObj::Site, "Optional frame in which the quantity is expressed.");
-        std::vector<std::pair<Id, std::string>> refs;
-        switch (s.reftype) {
-          case FrameObj::Body:
-          case FrameObj::XBody: refs = listOfAny(doc_.bodies); break;
-          case FrameObj::Geom: refs = listOfAny(doc_.geoms); break;
-          case FrameObj::Site: refs = listOfAny(doc_.sites); break;
-          case FrameObj::Camera: refs = listOfAny(doc_.cameras); break;
-        }
-        props::element("Reference", &s.ref, refs, true);
         break;
       }
-      default: break;
+      case SensorObj::Inside:
+        typed("Object type", &s.objtype, kFrameObjs, FrameObj::Site, "Object", &s.obj, false, "(none)",
+              "The frame origin of this object is tested (or its whole shape with Enclosed).");
+        props::element("Site volume", &s.ref, listOfAny(doc_.sites), false, "The site whose shape defines the volume.");
+        props::checkbox("Enclosed", &s.enclosed, false,
+                        "Measure how far the whole object juts out of the site instead of testing its origin.");
+        break;
+      case SensorObj::CamProj:
+        props::element("Site", &s.obj, listOfAny(doc_.sites), false, "The point to project.");
+        props::element("Camera", &s.ref, listOfAny(doc_.cameras), false, "Pixel coordinates in this camera's image.");
+        break;
+      case SensorObj::None: break;
     }
-    props::info("Output size", "%d value%s", info.dim, info.dim > 1 ? "s" : "");
+    int dim = sensorDim(s);
+    props::info("Output size", "%d value%s", dim, dim > 1 ? "s" : "");
     props::real("Noise (std)", &s.noise, 0, O(D("sensor.noise"), nullptr, 0.001, 0, 1e6));
     props::real("Cutoff", &s.cutoff, 0, O(D("sensor.cutoff"), nullptr, 0.01, 0, 1e9));
+  }
+  if (props::section("Latency and rate", s.delay > 0 || s.nsample > 0 || s.interval.x > 0)) {
+    props::real("Delay", &s.delay, 0, O(D("sensor.delay"), "s", 0.001, 0, 10));
+    props::integer("History samples", &s.nsample, 0, O(D("sensor.nsample"), nullptr, 0.2, 0, 100000));
+    std::vector<std::string> interp = {"Zero-order hold", "Linear", "Cubic"};
+    props::comboIndex("Interpolation", &s.interp, interp, 0, D("sensor.interp"));
+    props::vec2("Period, phase", &s.interval, Vec2{0, 0}, O(D("sensor.interval"), "s", 0.001, 0, 100));
+    if (s.delay > 0 || s.interval.x > 0) {
+      int need = int(std::ceil(std::max(s.delay, s.interval.x) / std::max(1e-9, doc_.option.timestep) - 1e-9)) + 1;
+      props::info("Samples needed", "%d (delay or period / timestep + 1)", need);
+    }
   }
   props::end();
 }
@@ -881,8 +976,19 @@ void Editor::inspectTexture(Texture& t) {
     props::color3("Color 2", &t.rgb2, {0.5, 0.5, 0.5}, D("texture.rgb2"));
     props::combo("Mark", &t.mark, kTextureMarks, TextureMark::None, D("texture.mark"));
     if (t.mark != TextureMark::None) props::color3("Mark color", &t.markrgb, {0, 0, 0}, D("texture.markrgb"));
-    props::integer("Width", &t.width, 512, O(D("texture.width"), "px", 1, 1, 8192));
-    props::integer("Height", &t.height, 512, O(D("texture.height"), "px", 1, 1, 8192));
+    if (t.builtin != TextureBuiltin::None) {
+      props::integer("Width", &t.width, 512, O(D("texture.width"), "px", 1, 1, 8192));
+      props::integer("Height", &t.height, 512, O(D("texture.height"), "px", 1, 1, 8192));
+    } else {
+      props::text("Image file", &t.file, "PNG file (absolute path). Exports copy it next to the model.");
+      if (t.type != TextureType::TwoD) {
+        props::integer("Grid rows", &t.gridsize[0], 1, O(D("texture.gridsize"), nullptr, 0.1, 1, 12));
+        props::integer("Grid columns", &t.gridsize[1], 1, O(D("texture.gridsize"), nullptr, 0.1, 1, 12));
+        props::text("Grid layout", &t.gridlayout, D("texture.gridlayout"));
+        if (t.file.empty())
+          for (int i = 0; i < 6; ++i) props::text(kCubeFileAttrs[i], &t.cubefiles[i], "Image of one cube face.");
+      }
+    }
   }
   props::end();
 }
@@ -927,6 +1033,7 @@ void Editor::inspectPair(ContactPair& c) {
                   nullptr, 0.005, 0, 100));
     props::real("Margin", &c.margin, 0, O(D("pair.margin"), "m", 0.001, 0, 10));
     props::real("Gap", &c.gap, 0, O(D("pair.gap"), "m", 0.001, 0, 10));
+    props::real("Adhesion", &c.adhesion, 0, O(D("pair.adhesion"), "N", 0.1, 0, 1e9));
   }
   if (props::section("Solver (advanced)", false)) {
     props::vec2("Solref", &c.solref, kDefaultSolref, O(D("pair.solref"), nullptr, 0.001));

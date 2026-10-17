@@ -29,6 +29,11 @@ using DataPtr = std::unique_ptr<mjData, DataDeleter>;
 void installMujocoErrorHandlers();
 // Warnings emitted by MuJoCo on the calling thread since the last call.
 std::vector<std::string> takeMujocoWarnings();
+// Loads MuJoCo's plugin libraries (SDF shapes, elasticity, PID, touch grid) from the
+// "mujoco_plugin" folder next to the executable, so models that use them can be opened. The
+// editor imports what it supports and reports the plugin parts it drops. Returns the number of
+// libraries loaded; call once at startup.
+int loadMujocoPlugins();
 
 ModelPtr makeModelPtr(mjModel* m);
 DataPtr makeData(const mjModel* m);

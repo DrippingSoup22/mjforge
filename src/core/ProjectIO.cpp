@@ -1,10 +1,13 @@
 #include "core/ProjectIO.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -40,25 +43,35 @@ MJF_ENUM_TABLE(InertiaFromGeom, kInertiaFromGeom)
 MJF_ENUM_TABLE(Role, kRoles)
 MJF_ENUM_TABLE(EqualityType, kEqualityTypes)
 MJF_ENUM_TABLE(TendonType, kTendonTypes)
+MJF_ENUM_TABLE(SleepPolicy, kSleepPolicies)
+MJF_ENUM_TABLE(MeshInertia, kMeshInertias)
 #undef MJF_ENUM_TABLE
 
 // ---------------------------------------------------------------- archives
+// JSON has no infinity or NaN (nlohmann would write null and the file could not be reopened):
+// infinite values are stored as +-1e300, which MuJoCo also reads as unbounded.
+double finite(double v) { return std::isnan(v) ? 0.0 : std::isinf(v) ? (v > 0 ? 1e300 : -1e300) : v; }
+
 struct Saver {
   json& j;
-  void operator()(const char* k, double& v) { j[k] = v; }
+  void operator()(const char* k, double& v) { j[k] = finite(v); }
   void operator()(const char* k, int& v) { j[k] = v; }
   void operator()(const char* k, uint32_t& v) { j[k] = v; }
   void operator()(const char* k, bool& v) { j[k] = v; }
   void operator()(const char* k, std::string& v) { j[k] = v; }
-  void operator()(const char* k, std::vector<double>& v) { j[k] = v; }
-  void operator()(const char* k, Vec2& v) { j[k] = {v.x, v.y}; }
-  void operator()(const char* k, Vec3& v) { j[k] = {v.x, v.y, v.z}; }
-  void operator()(const char* k, Vec4& v) { j[k] = {v.x, v.y, v.z, v.w}; }
-  void operator()(const char* k, Quat& v) { j[k] = {v.w, v.x, v.y, v.z}; }
-  void operator()(const char* k, Color& v) { j[k] = {v.r, v.g, v.b, v.a}; }
+  void operator()(const char* k, std::vector<double>& v) {
+    json a = json::array();
+    for (double x : v) a.push_back(finite(x));
+    j[k] = a;
+  }
+  void operator()(const char* k, Vec2& v) { j[k] = {finite(v.x), finite(v.y)}; }
+  void operator()(const char* k, Vec3& v) { j[k] = {finite(v.x), finite(v.y), finite(v.z)}; }
+  void operator()(const char* k, Vec4& v) { j[k] = {finite(v.x), finite(v.y), finite(v.z), finite(v.w)}; }
+  void operator()(const char* k, Quat& v) { j[k] = {finite(v.w), finite(v.x), finite(v.y), finite(v.z)}; }
+  void operator()(const char* k, Color& v) { j[k] = {finite(v.r), finite(v.g), finite(v.b), finite(v.a)}; }
   template <int N> void operator()(const char* k, VecN<N>& v) {
     json a = json::array();
-    for (int i = 0; i < N; ++i) a.push_back(v[i]);
+    for (int i = 0; i < N; ++i) a.push_back(finite(v[i]));
     j[k] = a;
   }
   void operator()(const char* k, SensorType& v) { j[k] = sensorInfo(v).xml; }
@@ -84,7 +97,8 @@ struct Loader {
   template <class T> void arr(const char* k, T* dst, int n) {
     auto it = j.find(k);
     if (it == j.end() || !it->is_array()) return;
-    for (int i = 0; i < n && i < int(it->size()); ++i) dst[i] = (*it)[i].template get<T>();
+    for (int i = 0; i < n && i < int(it->size()); ++i)
+      if ((*it)[i].is_number()) dst[i] = (*it)[i].template get<T>();  // null (old files): keep the default
   }
   void operator()(const char* k, Vec2& v) { double a[2] = {v.x, v.y}; arr(k, a, 2); v = {a[0], a[1]}; }
   void operator()(const char* k, Vec3& v) { double a[3] = {v.x, v.y, v.z}; arr(k, a, 3); v = {a[0], a[1], a[2]}; }
@@ -159,7 +173,7 @@ template <class T> std::vector<T> readNumbers(const json& j) {
 // ---------------------------------------------------------------- field lists
 template <class V> void visit(V& v, Body& b) {
   v("id", b.id); v("name", b.name); v("parent", b.parent); v("pos", b.pos); v("quat", b.quat);
-  v("mocap", b.mocap); v("gravcomp", b.gravcomp); v("hasInertial", b.hasInertial); v("mass", b.mass);
+  v("mocap", b.mocap); v("gravcomp", b.gravcomp); v("sleep", b.sleep); v("hasInertial", b.hasInertial); v("mass", b.mass);
   v("ipos", b.ipos); v("iquat", b.iquat); v("diaginertia", b.diaginertia); v("role", b.role);
   v("hidden", b.hidden); v("locked", b.locked); v("expanded", b.expanded);
   v("generator", b.generator); v("genParams", b.genParams);
@@ -169,7 +183,8 @@ template <class V> void visit(V& v, Geom& g) {
   v("pos", g.pos); v("quat", g.quat); v("contype", g.contype); v("conaffinity", g.conaffinity);
   v("condim", g.condim); v("priority", g.priority); v("friction", g.friction); v("solmix", g.solmix);
   v("solref", g.solref); v("solimp", g.solimp); v("margin", g.margin); v("gap", g.gap);
-  v("density", g.density); v("mass", g.mass); v("shellinertia", g.shellinertia); v("rgba", g.rgba);
+  v("adhesion", g.adhesion); v("surfacevel", g.surfacevel); v("fluidEllipsoid", g.fluidEllipsoid);
+  v("fluidcoef", g.fluidcoef); v("density", g.density); v("mass", g.mass); v("shellinertia", g.shellinertia); v("rgba", g.rgba);
   v("material", g.material); v("group", g.group); v("hfield", g.hfield); v("mesh", g.mesh); v("hidden", g.hidden);
   v("locked", g.locked);
 }
@@ -215,6 +230,8 @@ template <class V> void visit(V& v, Actuator& a) {
 template <class V> void visit(V& v, Sensor& s) {
   v("id", s.id); v("name", s.name); v("type", s.type); v("obj", s.obj); v("objtype", s.objtype);
   v("ref", s.ref); v("reftype", s.reftype); v("noise", s.noise); v("cutoff", s.cutoff);
+  v("condata", s.condata); v("raydata", s.raydata); v("connum", s.connum); v("reduce", s.reduce); v("enclosed", s.enclosed);
+  v("delay", s.delay); v("nsample", s.nsample); v("interp", s.interp); v("interval", s.interval);
 }
 template <class V> void visit(V& v, Exclude& e) {
   v("id", e.id); v("name", e.name); v("body1", e.body1); v("body2", e.body2);
@@ -222,7 +239,7 @@ template <class V> void visit(V& v, Exclude& e) {
 template <class V> void visit(V& v, ContactPair& p) {
   v("id", p.id); v("name", p.name); v("geom1", p.geom1); v("geom2", p.geom2); v("condim", p.condim);
   v("friction", p.friction); v("solref", p.solref); v("solreffriction", p.solreffriction); v("solimp", p.solimp);
-  v("margin", p.margin); v("gap", p.gap);
+  v("margin", p.margin); v("gap", p.gap); v("adhesion", p.adhesion);
 }
 template <class V> void visit(V& v, Equality& e) {
   v("id", e.id); v("name", e.name); v("type", e.type); v("obj1", e.obj1); v("obj2", e.obj2); v("anchor", e.anchor);
@@ -242,7 +259,9 @@ const char* const kTendonPointNames[] = {"site", "geom", "pulley"};
 template <class V> void visit(V& v, Texture& t) {
   v("id", t.id); v("name", t.name); v("type", t.type); v("builtin", t.builtin); v("rgb1", t.rgb1);
   v("rgb2", t.rgb2); v("mark", t.mark); v("markrgb", t.markrgb); v("random", t.random);
-  v("width", t.width); v("height", t.height); v("file", t.file);
+  v("width", t.width); v("height", t.height); v("file", t.file); v("gridrows", t.gridsize[0]);
+  v("gridcols", t.gridsize[1]); v("gridlayout", t.gridlayout); v("hflip", t.hflip); v("vflip", t.vflip);
+  for (int i = 0; i < 6; ++i) v(kCubeFileAttrs[i], t.cubefiles[i]);
 }
 template <class V> void visit(V& v, Material& m) {
   v("id", m.id); v("name", m.name); v("rgba", m.rgba); v("texture", m.texture); v("texrepeat", m.texrepeat);
@@ -258,7 +277,10 @@ template <class V> void visit(V& v, OptionSettings& o) {
   v("integrator", o.integrator); v("cone", o.cone); v("jacobian", o.jacobian); v("solver", o.solver);
   v("iterations", o.iterations); v("tolerance", o.tolerance); v("ls_iterations", o.ls_iterations);
   v("ls_tolerance", o.ls_tolerance); v("noslip_iterations", o.noslip_iterations);
-  v("ccd_iterations", o.ccd_iterations);
+  v("ccd_iterations", o.ccd_iterations); v("sleep_tolerance", o.sleep_tolerance);
+  v("noslip_tolerance", o.noslip_tolerance); v("ccd_tolerance", o.ccd_tolerance); v("o_margin", o.o_margin);
+  v("o_solref", o.o_solref); v("o_solimp", o.o_solimp); v("o_friction", o.o_friction);
+  v("disableactuator", o.disableactuator); v("memory", o.memory);
   v("flag_constraint", o.constraint); v("flag_equality", o.equality); v("flag_frictionloss", o.frictionloss);
   v("flag_limit", o.limit); v("flag_contact", o.contact); v("flag_spring", o.spring); v("flag_damper", o.damper);
   v("flag_gravity", o.gravityFlag); v("flag_clampctrl", o.clampctrl); v("flag_warmstart", o.warmstart);
@@ -297,6 +319,60 @@ template <class T> void loadArray(const json& root, const char* key, std::vector
     Loader l{item};
     visit(l, obj);
     out.push_back(std::move(obj));
+  }
+}
+
+// Damaged or hand-edited files: elements on missing bodies go to the world, parent cycles are
+// broken, and mesh / height field arrays are made consistent, so every later step can trust them.
+void repairReferences(Document& doc) {
+  std::unordered_map<Id, size_t> bodyAt;
+  for (size_t i = 0; i < doc.bodies.size(); ++i) bodyAt[doc.bodies[i].id] = i;
+  auto isBody = [&](Id id) { return bodyAt.count(id) > 0; };
+  for (size_t i = 1; i < doc.bodies.size(); ++i) {
+    Body& b = doc.bodies[i];
+    if (!isBody(b.parent) || b.parent == b.id) b.parent = kWorldId;
+    // Walk up; reaching this body again means a cycle that never reaches the world.
+    std::unordered_set<Id> seen{b.id};
+    for (Id p = b.parent; p != kWorldId;) {
+      if (!seen.insert(p).second) {
+        b.parent = kWorldId;
+        break;
+      }
+      p = doc.bodies[bodyAt[p]].parent;
+    }
+  }
+  auto onBody = [&](auto& vec) {
+    for (auto& e : vec)
+      if (!isBody(e.body)) e.body = kWorldId;
+  };
+  onBody(doc.geoms);
+  onBody(doc.joints);
+  onBody(doc.sites);
+  onBody(doc.cameras);
+  onBody(doc.lights);
+  for (MeshAsset& m : doc.meshes) {
+    if (!m.vert || !m.face) continue;
+    size_t nv = m.vert->size() / 3;
+    if (m.vert->size() % 3) m.vert = std::make_shared<const std::vector<float>>(m.vert->begin(), m.vert->begin() + long(nv * 3));
+    bool bad = m.face->size() % 3 != 0;
+    for (int f : *m.face) bad |= f < 0 || size_t(f) >= nv;
+    if (!bad) continue;
+    auto faces = std::make_shared<std::vector<int>>();
+    for (size_t t = 0; t + 2 < m.face->size(); t += 3) {
+      int a = (*m.face)[t], b = (*m.face)[t + 1], c = (*m.face)[t + 2];
+      if (a >= 0 && b >= 0 && c >= 0 && size_t(a) < nv && size_t(b) < nv && size_t(c) < nv) faces->insert(faces->end(), {a, b, c});
+    }
+    m.face = std::move(faces);
+  }
+  for (Hfield& h : doc.hfields) {
+    h.nrow = std::max(h.nrow, 0);
+    h.ncol = std::max(h.ncol, 0);
+    size_t n = size_t(h.nrow) * size_t(h.ncol);
+    if (h.data && h.data->size() != n) {
+      auto data = std::make_shared<std::vector<float>>(*h.data);
+      data->resize(n, 0.0f);
+      h.data = std::move(data);
+    }
   }
 }
 
@@ -341,7 +417,7 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
   json hf = json::array();
   for (Hfield& h : doc.hfields) {
     json o = saveObject(h);
-    o["data"] = h.data ? json(*h.data) : json::array();
+    o["data"] = h.data ? toBase64(*h.data) : std::string();  // float32, base64
     hf.push_back(o);
   }
   root["hfields"] = hf;
@@ -351,6 +427,8 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
     o["id"] = m.id;
     o["name"] = m.name;
     o["source"] = m.source;
+    o["inertia"] = toXml(m.inertia);
+    o["maxhullvert"] = m.maxhullvert;
     o["vertex"] = m.vert ? toBase64(*m.vert) : std::string();  // float32, base64
     o["face"] = m.face ? toBase64(*m.face) : std::string();    // int32, base64
     meshes.push_back(o);
@@ -384,11 +462,13 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     if (error) *error = "Not a valid JSON document.";
     return false;
   }
-  if (root.value("format", "") != "mjforge") {
+  auto format = root.find("format");
+  if (format == root.end() || !format->is_string() || format->get<std::string>() != "mjforge") {
     if (error) *error = "Not an MJForge project (missing \"format\": \"mjforge\").";
     return false;
   }
-  int version = root.value("version", 0);
+  auto ver = root.find("version");
+  int version = ver != root.end() && ver->is_number_integer() ? ver->get<int>() : 0;
   if (version > kProjectFormatVersion) {
     if (error) *error = "Project was saved by a newer MJForge (format version " + std::to_string(version) + ").";
     return false;
@@ -440,8 +520,7 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         Hfield h;
         Loader l{item};
         visit(l, h);
-        if (item.contains("data") && item["data"].is_array())
-          h.data = std::make_shared<const std::vector<float>>(item["data"].get<std::vector<float>>());
+        if (item.contains("data")) h.data = std::make_shared<const std::vector<float>>(readNumbers<float>(item["data"]));
         doc.hfields.push_back(std::move(h));
       }
     }
@@ -451,6 +530,8 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         m.id = item.value("id", Id(0));
         m.name = item.value("name", std::string());
         m.source = item.value("source", std::string());
+        m.inertia = enumParseOr(kMeshInertias, item.value("inertia", std::string()), MeshInertia::Legacy);
+        m.maxhullvert = item.value("maxhullvert", -1);
         if (item.contains("vertex")) m.vert = std::make_shared<const std::vector<float>>(readNumbers<float>(item["vertex"]));
         if (item.contains("face")) m.face = std::make_shared<const std::vector<int>>(readNumbers<int>(item["face"]));
         doc.meshes.push_back(std::move(m));
@@ -486,14 +567,34 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     world.role = Role::Environment;
     doc.bodies.insert(doc.bodies.begin(), world);
 
+    // Every element needs its own ID: references are by ID.
     Id maxId = kWorldId;
-    auto scan = [&](const auto& vec) { for (const auto& e : vec) maxId = std::max(maxId, e.id); };
+    std::unordered_set<Id> ids;
+    std::string dup;
+    auto scan = [&](const auto& vec) {
+      for (const auto& e : vec) {
+        maxId = std::max(maxId, e.id);
+        if ((e.id == kNoId || !ids.insert(e.id).second) && dup.empty()) dup = std::to_string(e.id);
+      }
+    };
     scan(doc.bodies); scan(doc.geoms); scan(doc.joints); scan(doc.sites); scan(doc.cameras); scan(doc.lights);
     scan(doc.actuators); scan(doc.sensors); scan(doc.excludes); scan(doc.materials); scan(doc.textures);
     scan(doc.pairs); scan(doc.equalities); scan(doc.tendons);
     scan(doc.hfields);
     scan(doc.meshes);
-    doc.nextId = std::max<Id>(root.value("nextId", 0u), maxId + 1);
+    if (!dup.empty()) {
+      if (error) *error = "Malformed project: element ID " + dup + " is missing or used twice.";
+      return false;
+    }
+    if (maxId >= Id(1) << 30) {
+      if (error) *error = "Malformed project: element IDs out of range.";
+      return false;
+    }
+    auto next = root.find("nextId");
+    Id stored = next != root.end() && next->is_number_unsigned() && next->get<uint64_t>() < (uint64_t(1) << 30)
+                    ? Id(next->get<uint64_t>()) : 0;
+    doc.nextId = std::max<Id>(stored, maxId + 1);
+    repairReferences(doc);
     doc.touch();
     if (editorStateJson) *editorStateJson = root.contains("editor") ? root["editor"].dump() : std::string();
     out = std::move(doc);

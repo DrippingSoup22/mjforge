@@ -2,7 +2,23 @@
 
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <iterator>
 #include <stdexcept>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace mjf {
 
@@ -21,6 +37,39 @@ void warningHandler(const char* msg) {
 void installMujocoErrorHandlers() {
   mju_user_error = errorHandler;
   mju_user_warning = warningHandler;
+}
+
+namespace {
+std::filesystem::path executableDir() {
+#if defined(_WIN32)
+  wchar_t buf[4096];
+  DWORD n = GetModuleFileNameW(nullptr, buf, DWORD(std::size(buf)));
+  if (n == 0 || n >= std::size(buf)) return {};
+  return std::filesystem::path(std::wstring(buf, n)).parent_path();
+#elif defined(__APPLE__)
+  char buf[4096];
+  uint32_t size = sizeof buf;
+  if (_NSGetExecutablePath(buf, &size) != 0) return {};
+  std::error_code ec;
+  std::filesystem::path p = std::filesystem::canonical(buf, ec);
+  return (ec ? std::filesystem::path(buf) : p).parent_path();
+#else
+  char buf[4096];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+  if (n <= 0) return {};
+  return std::filesystem::path(std::string(buf, size_t(n))).parent_path();
+#endif
+}
+int g_pluginLibraries = 0;
+}  // namespace
+
+int loadMujocoPlugins() {
+  std::filesystem::path dir = executableDir() / "mujoco_plugin";
+  std::error_code ec;
+  if (dir.empty() || !std::filesystem::is_directory(dir, ec)) return 0;
+  g_pluginLibraries = 0;
+  mj_loadAllPluginLibraries(dir.string().c_str(), [](const char*, int, int count) { g_pluginLibraries += count > 0; });
+  return g_pluginLibraries;
 }
 
 std::vector<std::string> takeMujocoWarnings() {

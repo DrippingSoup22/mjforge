@@ -285,12 +285,15 @@ class Merger {
       ++res_.elements;
     }
     for (const Sensor& ss : src_.sensors) {
-      bool global = sensorInfo(ss.type).obj == SensorObj::None;
+      SensorObj kind = sensorInfo(ss.type).obj;
+      // A contact sensor without objects watches every contact, like a global sensor.
+      bool global = kind == SensorObj::None || (kind == SensorObj::Contact && !ss.obj && !ss.ref);
       bool ok = true;
       Sensor s = ss;
       s.obj = mapOpt(ss.obj, &ok);
       s.ref = mapOpt(ss.ref, &ok);
-      if (!ok || (global && !opt_.models) || (!global && !s.obj)) continue;
+      bool anchored = s.obj || (kind == SensorObj::Contact && s.ref);
+      if (!ok || (global && !opt_.models) || (!global && !anchored)) continue;
       s.id = dst_.newId();
       s.name = name(Kind::Sensor, s.name);
       dst_.sensors.push_back(s);

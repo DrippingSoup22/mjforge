@@ -174,13 +174,15 @@ Id addSensor(Document& doc, SensorType type, Id obj, const std::string& name) {
   s.id = doc.newId();
   s.type = type;
   s.obj = obj;
-  if (sensorInfo(type).obj == SensorObj::Frame) {
+  SensorObj kind = sensorInfo(type).obj;
+  if (kind == SensorObj::Frame || kind == SensorObj::GeomPair || kind == SensorObj::Contact || kind == SensorObj::Inside) {
     switch (doc.kindOf(obj)) {
       case Kind::Body: s.objtype = FrameObj::Body; break;
       case Kind::Geom: s.objtype = FrameObj::Geom; break;
       case Kind::Camera: s.objtype = FrameObj::Camera; break;
-      default: s.objtype = FrameObj::Site; break;
+      default: s.objtype = kind == SensorObj::GeomPair ? FrameObj::Geom : FrameObj::Site; break;
     }
+    if (kind == SensorObj::GeomPair || kind == SensorObj::Contact) s.reftype = FrameObj::Geom;
   }
   std::string base = name;
   if (base.empty()) {
@@ -217,6 +219,7 @@ void pairParamsFromGeoms(const Document& doc, ContactPair& c) {
     c.friction = Vec5{{g.friction.x, g.friction.x, g.friction.y, g.friction.z, g.friction.z}};
     c.solref = g.solref;
     c.solimp = g.solimp;
+    c.adhesion = g.adhesion;
   } else {
     c.condim = std::max(a->condim, b->condim);
     double s = std::max(a->friction.x, b->friction.x), t = std::max(a->friction.y, b->friction.y),
@@ -224,8 +227,10 @@ void pairParamsFromGeoms(const Document& doc, ContactPair& c) {
     c.friction = Vec5{{s, s, t, r, r}};
     double wa = a->solmix, wb = b->solmix;
     double mix = wa + wb > 1e-15 ? wa / (wa + wb) : 0.5;
-    for (int i = 0; i < 2; ++i) c.solref[i] = mix * a->solref[i] + (1 - mix) * b->solref[i];
+    bool standard = a->solref[0] > 0 && b->solref[0] > 0;  // direct (negative) solref: elementwise minimum
+    for (int i = 0; i < 2; ++i) c.solref[i] = standard ? mix * a->solref[i] + (1 - mix) * b->solref[i] : std::min(a->solref[i], b->solref[i]);
     for (int i = 0; i < 5; ++i) c.solimp[i] = mix * a->solimp[i] + (1 - mix) * b->solimp[i];
+    c.adhesion = a->adhesion + b->adhesion;
   }
   c.margin = std::max(a->margin, b->margin);
   c.gap = std::max(a->gap, b->gap);

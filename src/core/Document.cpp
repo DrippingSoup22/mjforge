@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <iterator>
 
 namespace mjf {
 
@@ -280,14 +281,39 @@ std::vector<Id> Document::subtree(Id b) const {
   if (bi < 0) return out;
   const DocIndex& ix = index();
   std::vector<uint32_t> stack{uint32_t(bi)};
+  std::vector<char> visited(bodies.size(), 0);  // a damaged parent cycle must not loop forever
   while (!stack.empty()) {
     uint32_t cur = stack.back();
     stack.pop_back();
+    if (visited[cur]) continue;
+    visited[cur] = 1;
     out.push_back(bodies[cur].id);
     const auto& ch = ix.childBodies[cur];
     for (auto it = ch.rbegin(); it != ch.rend(); ++it) stack.push_back(*it);
   }
   return out;
+}
+
+int sensorDim(const Sensor& s) {
+  int per = 0;
+  if (s.type == SensorType::RangeFinder) {
+    for (int i = 0; i < int(std::size(kRayData)); ++i)
+      if (s.raydata & (1 << i)) per += kRayData[i].dim;
+    return std::max(1, per);
+  }
+  if (s.type != SensorType::Contact) return sensorInfo(s.type).dim;
+  for (int i = 0; i < int(std::size(kContactData)); ++i)
+    if (s.condata & (1 << i)) per += kContactData[i].dim;
+  return std::max(1, s.connum) * std::max(1, per);
+}
+
+bool Document::isTreeRoot(Id b) const {
+  if (b == kWorldId || bodyDofs(b) == 0) return false;
+  for (const Body* x = body(b); x && x->parent != kWorldId && x->parent != kNoId;) {
+    x = body(x->parent);
+    if (x && bodyDofs(x->id) > 0) return false;
+  }
+  return true;
 }
 
 int Document::bodyDofs(Id b) const {

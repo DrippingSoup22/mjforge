@@ -25,11 +25,13 @@ struct ExportOptions {
   bool writeOption = true;          // <option> block
   bool writeVisual = true;          // <visual> block
   bool header = true;               // generator comment
-  int precision = 9;                // significant digits for numbers
+  int precision = 0;                // significant digits for numbers; 0: shortest exact text
   // Only for files written to disk (writeMjcf with `files`): meshes with more vertices than this
   // become binary STL files in `assetDir` (relative to the MJCF file) instead of inline vertex data,
   // and texture images are copied there, so the export is self-contained.
   size_t externalMeshVertices = size_t(-1);
+  // Same for height fields with more samples than this: MuJoCo's binary format (exact values).
+  size_t externalHfieldSamples = size_t(-1);
   std::string assetDir = "assets";
 };
 
@@ -48,14 +50,18 @@ std::string writeMjcf(const Document& doc, const ExportOptions& opt = {}, Export
 
 // Binary STL of a triangle mesh.
 std::string meshToStl(const MeshAsset& mesh);
+// MuJoCo's binary height field file: int32 nrow, int32 ncol, then float32 rows from the -Y edge.
+std::string hfieldToBin(const Hfield& hfield);
 
 // Writes an MJCF file plus its asset files into `<assetStem>_assets/` next to the XML (assetStem
 // defaults to the file's stem): meshes with more than 1000 vertices as binary STL (smaller ones
-// stay inline) and copies of texture images. `written` (optional) receives the written paths.
+// stay inline), height fields over 64x64 samples as binary files, and copies of texture images.
+// `written` (optional) receives the written paths.
 bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOptions& opt, std::string* error,
                     const std::string& assetStem = "", std::vector<std::string>* written = nullptr);
 
 // Number formatting used by the writer (exposed for tests and the UI).
+// precision <= 0 gives the shortest text that reads back as exactly v.
 std::string formatNumber(double v, int precision = 9);
 
 }  // namespace mjf

@@ -366,20 +366,69 @@ class Analyzer {
         }
       }
     }
+    auto isKind = [&](FrameObj t, Id id) {
+      switch (t) {
+        case FrameObj::Body:
+        case FrameObj::XBody: return doc_.body(id) != nullptr;
+        case FrameObj::Geom: return doc_.geom(id) != nullptr;
+        case FrameObj::Site: return doc_.site(id) != nullptr;
+        case FrameObj::Camera: return doc_.camera(id) != nullptr;
+      }
+      return false;
+    };
     for (const Sensor& s : doc_.sensors) {
       SensorObj o = sensorInfo(s.type).obj;
       bool ok = true;
+      bool bodyOrGeom1 = s.objtype == FrameObj::Body || s.objtype == FrameObj::Geom;
+      bool bodyOrGeom2 = s.reftype == FrameObj::Body || s.reftype == FrameObj::Geom;
       switch (o) {
         case SensorObj::Joint: ok = doc_.joint(s.obj) != nullptr; break;
         case SensorObj::Actuator: ok = doc_.actuator(s.obj) != nullptr; break;
         case SensorObj::Site: ok = doc_.site(s.obj) != nullptr; break;
         case SensorObj::Body: ok = doc_.body(s.obj) != nullptr; break;
-        case SensorObj::Frame: ok = doc_.exists(s.obj); break;
+        case SensorObj::Frame: ok = isKind(s.objtype, s.obj) && (s.ref == kNoId || isKind(s.reftype, s.ref)); break;
         case SensorObj::Tendon: ok = doc_.tendon(s.obj) != nullptr; break;
+        case SensorObj::GeomPair: ok = bodyOrGeom1 && bodyOrGeom2 && isKind(s.objtype, s.obj) && isKind(s.reftype, s.ref); break;
+        case SensorObj::Contact:
+          ok = (s.obj == kNoId || (s.objtype != FrameObj::Camera && isKind(s.objtype, s.obj))) &&
+               (s.ref == kNoId || (s.reftype != FrameObj::Camera && s.reftype != FrameObj::Site && isKind(s.reftype, s.ref)));
+          break;
+        case SensorObj::Inside: ok = isKind(s.objtype, s.obj) && doc_.site(s.ref) && !(s.enclosed && s.objtype == FrameObj::Camera); break;
+        case SensorObj::CamProj: ok = doc_.site(s.obj) && doc_.camera(s.ref); break;
         case SensorObj::None: break;
       }
       if (!ok) add(Severity::Error, IssueArea::Model, "sensor-target", fmt("Sensor %s has no valid target", quote(s.name).c_str()),
                    "Choose what this sensor is attached to in the inspector.", {s.id});
+      if ((s.delay > 0 || s.interval.x > 0) && s.nsample <= 0) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "sensor-history",
+                       fmt("Sensor %s has a delay or update period but no history buffer", quote(s.name).c_str()),
+                       "Delayed and slower-rate sensor values are read from the sensor's history: it needs at least "
+                       "delay / timestep samples.", {s.id});
+        Id id = s.id;
+        int need = std::max(2, int(std::ceil(std::max(s.delay, s.interval.x) / doc_.option.timestep - 1e-9)) + 1);
+        i.fixLabel = fmt("Keep %d samples", need);
+        i.fix = [id, need](Document& d) { if (Sensor* x = d.sensor(id)) x->nsample = need; };
+      }
+      if (s.type == SensorType::Contact) {
+        constexpr int kVel = (1 << 7) | (1 << 8);  // linvel, angvel
+        if (s.condata == 0)
+          add(Severity::Error, IssueArea::Model, "contact-sensor-data", fmt("Contact sensor %s reports no data", quote(s.name).c_str()),
+              "Tick at least one field (found, force, ...).", {s.id});
+        if ((s.condata & kVel) && s.reduce == 3)
+          add(Severity::Error, IssueArea::Model, "contact-sensor-netforce",
+              fmt("Contact sensor %s: velocities cannot be combined with net force", quote(s.name).c_str()),
+              "MuJoCo refuses relative velocities with reduce=\"netforce\".", {s.id});
+        if (s.condata & kVel) {
+          Issue& i = add(Severity::Error, IssueArea::MJWarp, "mjw-contact-sensor-vel",
+                         fmt("Contact sensor %s reports velocities, which MuJoCo Warp does not support", quote(s.name).c_str()),
+                         "MuJoCo Warp raises NotImplementedError for contact sensor linvel / angvel.", {s.id});
+          Id id = s.id;
+          i.fixLabel = "Drop the velocity fields";
+          i.fix = [id](Document& d) {
+            if (Sensor* x = d.sensor(id)) x->condata = (x->condata & ~kVel) ? x->condata & ~kVel : 1;
+          };
+        }
+      }
     }
     for (const Exclude& e : doc_.excludes)
       if (!doc_.body(e.body1) || !doc_.body(e.body2))
@@ -401,8 +450,21 @@ class Analyzer {
         add(Severity::Error, IssueArea::Model, "mocap-joint", fmt("Mocap body %s cannot have joints", quote(b->name).c_str()),
             "Mocap bodies are moved kinematically; remove the joint or turn off mocap.", {j.id, b->id});
       if (j.limited && (j.type == JointType::Hinge || j.type == JointType::Slide) && j.range.x >= j.range.y) {
-        add(Severity::Error, IssueArea::Model, "joint-range", fmt("Joint %s: lower limit is not below the upper limit", quote(j.name).c_str()),
-            "MuJoCo accepts this but the joint cannot move. Set range = [min, max].", {j.id});
+        Issue& i = add(Severity::Error, IssueArea::Model, "joint-range",
+                       fmt("Joint %s: lower limit is not below the upper limit", quote(j.name).c_str()),
+                       "MuJoCo refuses a limited joint with an empty range. Set range = [min, max], or turn the limit off.", {j.id});
+        Id id = j.id;
+        i.fixLabel = "Turn the limit off";
+        i.fix = [id](Document& d) { if (Joint* x = d.joint(id)) x->limited = false; };
+      }
+      if (j.limited && j.type == JointType::Ball && j.range.x == 0 && j.range.y <= 0) {
+        Issue& i = add(Severity::Warning, IssueArea::Physics, "ball-locked",
+                       fmt("Ball joint %s is limited to a 0 degree cone", quote(j.name).c_str()),
+                       "The limit constraint fights every rotation, so the joint is locked (and softly at that). Give it a "
+                       "maximum angle, or remove the joint if the parts should be rigid.", {j.id});
+        Id id = j.id;
+        i.fixLabel = "Turn the limit off";
+        i.fix = [id](Document& d) { if (Joint* x = d.joint(id)) x->limited = false; };
       }
       if (j.type == JointType::Ball && j.limited && j.range.x != 0) {
         Issue& i = add(Severity::Error, IssueArea::Model, "ball-range", fmt("Ball joint %s: range must start at 0", quote(j.name).c_str()),
@@ -410,6 +472,40 @@ class Analyzer {
         Id id = j.id;
         i.fixLabel = "Set lower bound to 0";
         i.fix = [id](Document& d) { if (Joint* x = d.joint(id)) x->range.x = 0; };
+      }
+    }
+    for (const Body& b : doc_.bodies) {
+      if (b.sleep == SleepPolicy::Auto) continue;
+      if (!doc_.isTreeRoot(b.id)) {
+        Issue& i = add(Severity::Warning, IssueArea::Model, "sleep-not-root",
+                       fmt("Sleep policy of body %s is ignored", quote(b.name).c_str()),
+                       "Only the first moving body of a kinematic tree (a body with joints whose parents are static) takes a "
+                       "sleep policy; it applies to the whole tree. The export leaves it out here.", {b.id});
+        Id id = b.id;
+        i.fixLabel = "Reset to auto";
+        i.fix = [id](Document& d) { if (Body* x = d.body(id)) x->sleep = SleepPolicy::Auto; };
+      } else if (!doc_.option.sleep) {
+        Issue& i = add(Severity::Info, IssueArea::Model, "sleep-disabled",
+                       fmt("Body %s has a sleep policy but sleeping is off", quote(b.name).c_str()),
+                       "Sleep policies only matter when the sleep flag is enabled (Scene > Flags > Sleep).", {b.id});
+        i.fixLabel = "Enable sleeping";
+        i.fix = [](Document& d) { d.option.sleep = true; };
+      }
+    }
+    if (doc_.option.density <= 0 && doc_.option.viscosity <= 0) {
+      std::vector<Id> fluid;
+      for (const Geom& g : doc_.geoms)
+        if (g.fluidEllipsoid) fluid.push_back(g.id);
+      if (!fluid.empty()) {
+        Issue& i = add(Severity::Info, IssueArea::Physics, "fluid-no-medium",
+                       fmt("%zu geom(s) use the fluid model, but the medium has no density or viscosity", fluid.size()),
+                       "The ellipsoid fluid forces scale with Scene > Environment > Medium density / viscosity, which are 0.",
+                       fluid);
+        i.fixLabel = "Use air";
+        i.fix = [](Document& d) {
+          d.option.density = 1.2;
+          d.option.viscosity = 1.8e-5;
+        };
       }
     }
     for (const Geom& g : doc_.geoms) {
@@ -1126,6 +1222,20 @@ class Analyzer {
           a->armature = 0;
         }
       };
+    }
+    if (opt.disableactuator != 0) {
+      std::vector<Id> affected;
+      for (const Actuator& a : doc_.actuators)
+        if (a.group >= 0 && a.group < 31 && (opt.disableactuator & (1 << a.group))) affected.push_back(a.id);
+      if (!affected.empty()) {
+        Issue& i = add(Severity::Warning, IssueArea::MJWarp, "mjw-actuatorgroupdisable",
+                       fmt("MuJoCo Warp ignores disabled actuator groups (%zu actuator(s) would still act)", affected.size()),
+                       "MuJoCo turns these actuators off (option actuatorgroupdisable), MuJoCo Warp 3.16 does not read the "
+                       "setting, so trained policies would see different dynamics. Remove the actuators instead, or zero "
+                       "their controls in your environment.", affected);
+        i.fixLabel = "Enable all actuator groups";
+        i.fix = [](Document& d) { d.option.disableactuator = 0; };
+      }
     }
     if (opt.sleep && opt.solver != Solver::Newton) {
       Issue& i = add(Severity::Error, IssueArea::MJWarp, "mjw-sleep", "Sleeping requires the Newton solver in MuJoCo Warp", "");

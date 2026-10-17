@@ -10,6 +10,7 @@
 
 int main(int argc, char** argv) {
   mjf::installMujocoErrorHandlers();
+  mjf::loadMujocoPlugins();
   mjf::CliOptions cli;
   std::string err;
   if (!mjf::parseCli(argc, argv, cli, err)) {

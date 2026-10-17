@@ -137,7 +137,7 @@ void Editor::drawSensorsPanel() {
   ImGui::SameLine();
   ImGui::TextDisabled("%zu sensors", doc_.sensors.size());
   int total = 0;
-  for (const Sensor& s : doc_.sensors) total += sensorInfo(s.type).dim;
+  for (const Sensor& s : doc_.sensors) total += sensorDim(s);
   ImGui::SameLine();
   ImGui::TextDisabled("(%d values in sensordata)", total);
   ImGuiTableFlags fl = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
@@ -168,10 +168,12 @@ void Editor::drawSensorsPanel() {
       ImGui::TextUnformatted(info.xml);
       ImGui::TableSetColumnIndex(2);
       if (info.obj == SensorObj::None) ImGui::TextDisabled("-");
-      else if (!doc_.exists(s.obj)) ImGui::TextColored(pal::v4(pal::kError), "(missing)");
-      else ImGui::TextUnformatted(doc_.nameOf(s.obj).c_str());
+      else if (info.obj == SensorObj::Contact && !s.obj && !s.ref) ImGui::TextDisabled("(any contact)");
+      else if (s.obj && !doc_.exists(s.obj)) ImGui::TextColored(pal::v4(pal::kError), "(missing)");
+      else if (s.ref) ImGui::Text("%s / %s", s.obj ? doc_.displayName(s.obj).c_str() : "any", doc_.displayName(s.ref).c_str());
+      else ImGui::TextUnformatted(doc_.displayName(s.obj).c_str());
       ImGui::TableSetColumnIndex(3);
-      ImGui::Text("%d", info.dim);
+      ImGui::Text("%d", sensorDim(s));
       ImGui::TableSetColumnIndex(4);
       ImGui::Text("%.3g", s.noise);
       ImGui::PopID();
@@ -414,6 +416,33 @@ void Editor::drawScenePanel() {
       props::combo("Friction cone", &o.cone, kCones, od.cone, D("option.cone"));
       props::real("Impedance ratio", &o.impratio, od.impratio, O(D("option.impratio"), nullptr, 0.05, 1e-4, 1000));
       props::combo("Jacobian", &o.jacobian, kJacobians, od.jacobian, D("option.jacobian"));
+      if (o.sleep) props::real("Sleep tolerance", &o.sleep_tolerance, od.sleep_tolerance, O(D("option.sleep_tolerance"), "m/s", 1e-4, 0, 10, "%.3g"));
+      props::text("Arena memory", &o.memory, D("size.memory"));
+    }
+    if (props::section("Solver details", false)) {
+      props::real("Line-search tol.", &o.ls_tolerance, od.ls_tolerance, O(D("option.ls_tolerance"), nullptr, 1e-4, 0, 1, "%.3g"));
+      props::integer("CCD iterations", &o.ccd_iterations, od.ccd_iterations, O(D("option.ccd_iterations"), nullptr, 0.2, 0, 10000));
+      props::real("CCD tolerance", &o.ccd_tolerance, od.ccd_tolerance, O(D("option.ccd_tolerance"), nullptr, 1e-7, 0, 1, "%.3g"));
+      props::integer("Noslip iterations", &o.noslip_iterations, od.noslip_iterations,
+                     O(D("option.noslip_iterations"), nullptr, 0.2, 0, 10000));
+      if (o.noslip_iterations > 0)
+        props::real("Noslip tolerance", &o.noslip_tolerance, od.noslip_tolerance, O(D("option.noslip_tolerance"), nullptr, 1e-7, 0, 1, "%.3g"));
+      props::vec3("Magnetic field", &o.magnetic, od.magnetic, O(D("option.magnetic"), "T", 0.01));
+      props::checkbox("Override contacts", &o.override_, false, D("flag.override"));
+      if (o.override_) {
+        props::real("Override margin", &o.o_margin, od.o_margin, O(D("option.o_margin"), "m", 0.0005, 0, 10));
+        props::vec2("Override solref", &o.o_solref, od.o_solref, O(D("option.o_solref"), nullptr, 0.001));
+        props::vec5("Override solimp", &o.o_solimp, od.o_solimp, O(D("option.o_solimp"), nullptr, 0.001));
+        props::vec5("Override friction", &o.o_friction, od.o_friction, O(D("option.o_friction"), nullptr, 0.001, 0, 100));
+      }
+    }
+    if (props::section("Actuator groups", o.disableactuator != 0)) {
+      for (int g = 0; g < 6; ++g) {
+        bool on = (o.disableactuator & (1 << g)) == 0;
+        std::string label = "Group " + std::to_string(g) + " active";
+        if (props::checkbox(label.c_str(), &on, true, D("option.actuatorgroupdisable")))
+          o.disableactuator = on ? o.disableactuator & ~(1 << g) : o.disableactuator | (1 << g);
+      }
     }
     if (props::section("Environment")) {
       props::vec3("Gravity", &o.gravity, od.gravity, O(D("option.gravity"), "m/s^2", 0.01));

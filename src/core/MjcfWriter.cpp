@@ -1,10 +1,14 @@
 #include "core/MjcfWriter.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
@@ -16,8 +20,18 @@ namespace mjf {
 std::string formatNumber(double v, int precision) {
   if (std::isnan(v)) return "0";
   if (std::isinf(v)) return v > 0 ? "1e+300" : "-1e+300";
-  if (std::fabs(v) < 1e-12) return "0";
+  // Below MuJoCo's mjMINVAL (1e-15) values are rounding noise (cos 90 deg = 6e-17).
+  if (std::fabs(v) < 1e-15) return "0";
   char buf[64];
+  if (precision <= 0) {
+    // The shortest of 15-17 significant digits that reads back as exactly v: hand-entered values
+    // stay short ("0.1") and computed ones round-trip bit for bit.
+    for (int p = 15; p <= 17; ++p) {
+      std::snprintf(buf, sizeof buf, "%.*g", p, v);
+      if (std::strtod(buf, nullptr) == v) break;
+    }
+    return buf;
+  }
   std::snprintf(buf, sizeof buf, "%.*g", precision, v);
   return buf;
 }
@@ -49,7 +63,10 @@ std::string escapeXml(const std::string& s) {
       case '<': o += "&lt;"; break;
       case '>': o += "&gt;"; break;
       case '"': o += "&quot;"; break;
-      default: o += c; break;
+      default:
+        // Control characters other than tab / newline are not allowed in XML at all.
+        if ((unsigned char)c >= 0x20 || c == '\t' || c == '\n' || c == '\r') o += c;
+        break;
     }
   }
   return o;
@@ -180,12 +197,17 @@ class Writer {
   }
   bool worldContent() const { return opt_.scope != ExportOptions::Scope::Models; }
   bool bodyIncluded(Id b) const { return b == kWorldId || bodies_.count(b) > 0; }
-  // Elements attached to the world are only exported with environment content.
-  bool attachedIncluded(Id body) const { return body == kWorldId ? worldContent() : bodies_.count(body) > 0; }
+  // Elements attached to the world are only exported with environment content. Elements on a
+  // missing body count as world elements, as in the document index.
+  bool attachedIncluded(Id body) const {
+    if (body != kWorldId && !doc_.body(body)) body = kWorldId;
+    return body == kWorldId ? worldContent() : bodies_.count(body) > 0;
+  }
 
   void selectContent() {
-    for (const Body& b : doc_.bodies) {
-      if (b.id == kWorldId || b.parent != kWorldId) continue;
+    // Top-level bodies as the index sees them (a body with a missing parent hangs from the world).
+    for (uint32_t ci : doc_.index().childBodies[0]) {
+      const Body& b = doc_.bodies[ci];
       if (!includeRoot(b)) continue;
       for (Id id : doc_.subtree(b.id)) bodies_.insert(id);
     }
@@ -226,9 +248,12 @@ class Writer {
       const SensorInfo& info = sensorInfo(s.type);
       bool ok = true;
       if (info.obj == SensorObj::Actuator) ok = actuators_.count(s.obj) > 0;
+      else if (info.obj == SensorObj::Contact) ok = s.obj == kNoId || elementIncluded(s.obj);  // no object: any contact
       else if (info.obj != SensorObj::None) ok = s.obj != kNoId && elementIncluded(s.obj);
       else ok = worldContent() || opt_.scope == ExportOptions::Scope::Models;
       if (ok && s.ref != kNoId) ok = elementIncluded(s.ref);
+      bool needsRef = info.obj == SensorObj::GeomPair || info.obj == SensorObj::Inside || info.obj == SensorObj::CamProj;
+      if (needsRef && s.ref == kNoId) ok = false;
       if (ok) sensors_.insert(s.id);
     }
     // Assets referenced by exported geoms/sites (+ skyboxes with environment content).
@@ -343,6 +368,19 @@ class Writer {
     if (!nearly(o.ls_tolerance, d.ls_tolerance)) n.set("ls_tolerance", num(o.ls_tolerance));
     if (o.noslip_iterations != d.noslip_iterations) n.set("noslip_iterations", std::to_string(o.noslip_iterations));
     if (o.ccd_iterations != d.ccd_iterations) n.set("ccd_iterations", std::to_string(o.ccd_iterations));
+    if (!nearly(o.noslip_tolerance, d.noslip_tolerance)) n.set("noslip_tolerance", num(o.noslip_tolerance));
+    if (!nearly(o.ccd_tolerance, d.ccd_tolerance)) n.set("ccd_tolerance", num(o.ccd_tolerance));
+    if (!nearly(o.o_margin, d.o_margin)) n.set("o_margin", num(o.o_margin));
+    if (!nearly(o.o_solref, d.o_solref)) n.set("o_solref", vec(o.o_solref));
+    if (!nearly(o.o_solimp, d.o_solimp)) n.set("o_solimp", vec(o.o_solimp));
+    if (!nearly(o.o_friction, d.o_friction)) n.set("o_friction", vec(o.o_friction));
+    if (!nearly(o.sleep_tolerance, d.sleep_tolerance)) n.set("sleep_tolerance", num(o.sleep_tolerance));
+    if (o.disableactuator != 0) {
+      std::string groups;
+      for (int g = 0; g < 31; ++g)
+        if (o.disableactuator & (1 << g)) groups += (groups.empty() ? "" : " ") + std::to_string(g);
+      n.set("actuatorgroupdisable", groups);
+    }
 
     XmlNode flag("flag");
     auto f = [&](const char* name, bool v, bool def) {
@@ -375,6 +413,7 @@ class Writer {
     f("invdiscrete", o.invdiscrete, d.invdiscrete);
     if (!flag.attrs.empty()) n.children.push_back(flag);
     if (!n.attrs.empty() || !n.children.empty()) root.children.push_back(n);
+    if (!o.memory.empty()) root.add("size").set("memory", o.memory);
   }
 
   void writeVisual(XmlNode& root) {
@@ -416,24 +455,34 @@ class Writer {
         }
         e.set("width", std::to_string(t.width));
         e.set("height", std::to_string(t.height));
-      } else if (!t.file.empty()) {
+      } else {
+        bool cube = t.file.empty() && t.type != TextureType::TwoD;
+        bool ok = !t.file.empty();
+        if (cube)
+          for (const std::string& f : t.cubefiles) ok |= !f.empty();
         std::error_code ec;
-        std::string image;
-        if (!std::filesystem::is_regular_file(t.file, ec)) {
+        if (ok && !cube) ok = std::filesystem::is_regular_file(t.file, ec);
+        if (ok && cube)
+          for (const std::string& f : t.cubefiles) ok &= f.empty() || std::filesystem::is_regular_file(f, ec);
+        if (!ok) {
           // A missing image would stop MuJoCo from loading the model; a flat color keeps it usable
           // (the analysis reports the missing file).
           e.set("builtin", "flat");
           e.set("rgb1", vec(t.rgb1));
           e.set("width", "16");
           e.set("height", "16");
-        } else if (files_ && readTextFile(t.file, image)) {
-          std::filesystem::path src(t.file);
-          std::string path = opt_.assetDir + "/" + assetFileName(src.stem().string(), src.extension().string());
-          files_->push_back({path, std::move(image)});
-          e.set("file", path);
+        } else if (!cube) {
+          e.set("file", imageFile(t.file));
+          if (t.gridsize[0] != 1 || t.gridsize[1] != 1) {
+            e.set("gridsize", std::to_string(t.gridsize[0]) + " " + std::to_string(t.gridsize[1]));
+            if (!t.gridlayout.empty()) e.set("gridlayout", t.gridlayout);
+          }
         } else {
-          e.set("file", t.file);
+          for (int i = 0; i < 6; ++i)
+            if (!t.cubefiles[i].empty()) e.set(kCubeFileAttrs[i], imageFile(t.cubefiles[i]));
         }
+        if (ok && t.hflip) e.set("hflip", "true");
+        if (ok && t.vflip) e.set("vflip", "true");
       }
     }
     for (const Material& m : doc_.materials) {
@@ -456,6 +505,8 @@ class Writer {
       // recentering is a no-op. Big meshes go to STL files, small ones inline (no files needed).
       XmlNode& e = n.add("mesh");
       setName(e, m.id);
+      if (m.inertia != MeshInertia::Legacy) e.set("inertia", toXml(m.inertia));
+      if (m.maxhullvert > 3) e.set("maxhullvert", std::to_string(m.maxhullvert));
       if (files_ && m.vertexCount() > opt_.externalMeshVertices) {
         std::string path = opt_.assetDir + "/" + assetFileName(nameOf(m.id), ".stl");
         files_->push_back({path, meshToStl(m)});
@@ -480,6 +531,16 @@ class Writer {
       if (!hfields_.count(h.id)) continue;
       XmlNode& e = n.add("hfield");
       setName(e, h.id);
+      bool complete = h.data && h.data->size() == size_t(h.nrow) * size_t(h.ncol) && h.nrow > 0 && h.ncol > 0;
+      if (files_ && complete && h.data->size() > opt_.externalHfieldSamples) {
+        // Big terrains go to MuJoCo's binary height field format: exact float32 values and no
+        // multi-megabyte attribute for the XML parser.
+        std::string path = opt_.assetDir + "/" + assetFileName(nameOf(h.id), ".bin");
+        files_->push_back({path, hfieldToBin(h)});
+        e.set("file", path);
+        e.set("size", vec(h.size));
+        continue;
+      }
       e.set("nrow", std::to_string(h.nrow));
       e.set("ncol", std::to_string(h.ncol));
       e.set("size", vec(h.size));
@@ -488,7 +549,7 @@ class Writer {
         s.reserve(h.data->size() * 6);
         for (size_t i = 0; i < h.data->size(); ++i) {
           if (i) s += ' ';
-          s += formatNumber((*h.data)[i], 4);
+          s += formatNumber((*h.data)[i], 6);
         }
         e.set("elevation", s);
       }
@@ -515,11 +576,13 @@ class Writer {
   void writeBody(XmlNode& parent, const Body& b) {
     const DocIndex& ix = doc_.index();
     int bi = doc_.bodyIndex(b.id);
+    if (bi < 0) return;
     XmlNode& n = parent.add("body");
     setName(n, b.id);
     setPose(n, b.pos, b.quat);
     if (b.mocap) n.set("mocap", "true");
     if (!nearly(b.gravcomp, 0.0)) n.set("gravcomp", num(b.gravcomp));
+    if (b.sleep != SleepPolicy::Auto && doc_.isTreeRoot(b.id)) n.set("sleep", toXml(b.sleep));
     if (map_) map_->bodies.push_back(b.id);
 
     if (b.hasInertial) {
@@ -559,13 +622,7 @@ class Writer {
     }
     if (j.type != JointType::Free) {
       Vec2 r = angular ? Vec2{ang(j.range.x), ang(j.range.y)} : j.range;
-      if (j.limited) {
-        if (!doc_.compiler.autolimits) n.set("limited", "true");
-        n.set("range", vec(r));
-      } else if (!nearly(j.range, Vec2{})) {
-        n.set("limited", "false");
-        n.set("range", vec(r));
-      }
+      writeLimited(n, "limited", "range", j.limited, r);
     }
     if (!nearly(j.ref, 0.0)) n.set("ref", num(angular ? ang(j.ref) : j.ref));
     if (!nearly(j.springref, 0.0)) n.set("springref", num(angular ? ang(j.springref) : j.springref));
@@ -578,10 +635,7 @@ class Writer {
     if (!nearly(j.solimplimit, d.solimplimit)) n.set("solimplimit", vec(j.solimplimit));
     if (!nearly(j.solreffriction, d.solreffriction)) n.set("solreffriction", vec(j.solreffriction));
     if (!nearly(j.solimpfriction, d.solimpfriction)) n.set("solimpfriction", vec(j.solimpfriction));
-    if (j.actuatorfrclimited) {
-      if (!doc_.compiler.autolimits) n.set("actuatorfrclimited", "true");
-      n.set("actuatorfrcrange", vec(j.actuatorfrcrange));
-    }
+    writeLimited(n, "actuatorfrclimited", "actuatorfrcrange", j.actuatorfrclimited, j.actuatorfrcrange);
     if (j.actuatorgravcomp) n.set("actuatorgravcomp", "true");
     if (j.group != 0) n.set("group", std::to_string(j.group));
   }
@@ -611,6 +665,12 @@ class Writer {
     if (!nearly(g.solimp, d.solimp)) n.set("solimp", vec(g.solimp));
     if (!nearly(g.margin, d.margin)) n.set("margin", num(g.margin));
     if (!nearly(g.gap, d.gap)) n.set("gap", num(g.gap));
+    if (!nearly(g.adhesion, 0.0)) n.set("adhesion", num(g.adhesion));
+    if (!nearly(g.surfacevel, Vec6{})) n.set("surfacevel", vec(g.surfacevel));
+    if (g.fluidEllipsoid) {
+      n.set("fluidshape", "ellipsoid");
+      if (!nearly(g.fluidcoef, d.fluidcoef)) n.set("fluidcoef", vec(g.fluidcoef));
+    }
     if (g.body != kWorldId) {  // mass of static geoms is irrelevant
       if (g.mass >= 0) n.set("mass", num(g.mass));
       else if (!nearly(g.density, d.density)) n.set("density", num(g.density));
@@ -690,6 +750,7 @@ class Writer {
       x.set("solimp", vec(c.solimp));
       x.set("margin", num(c.margin));
       x.set("gap", num(c.gap));
+      x.set("adhesion", num(c.adhesion));
     }
     if (!n.children.empty()) root.children.push_back(n);
   }
@@ -775,9 +836,11 @@ class Writer {
     if (!n.children.empty()) root.children.push_back(n);
   }
 
+  // With autolimits MuJoCo only infers "limited" from a range with lower < upper, so an empty range
+  // (a ball joint locked by its limit, or a mistake the analysis reports) needs the attribute.
   void writeLimited(XmlNode& n, const char* lim, const char* rng, bool limited, const Vec2& range) {
     if (limited) {
-      if (!doc_.compiler.autolimits) n.set(lim, "true");
+      if (!doc_.compiler.autolimits || !(range.x < range.y)) n.set(lim, "true");
       n.set(rng, vec(range));
     } else if (!nearly(range, Vec2{})) {
       n.set(lim, "false");
@@ -950,7 +1013,15 @@ class Writer {
       switch (info.obj) {
         case SensorObj::Joint: e.set("joint", nameOf(s.obj)); break;
         case SensorObj::Actuator: e.set("actuator", nameOf(s.obj)); break;
-        case SensorObj::Site: e.set("site", nameOf(s.obj)); break;
+        case SensorObj::Site:
+          e.set("site", nameOf(s.obj));
+          if (s.type == SensorType::RangeFinder && s.raydata != 1 && s.raydata != 0) {
+            std::string data;
+            for (int i = 0; i < int(std::size(kRayData)); ++i)
+              if (s.raydata & (1 << i)) data += (data.empty() ? "" : " ") + std::string(kRayData[i].xml);
+            e.set("data", data);
+          }
+          break;
         case SensorObj::Body: e.set("body", nameOf(s.obj)); break;
         case SensorObj::Tendon: e.set("tendon", nameOf(s.obj)); break;
         case SensorObj::Frame:
@@ -961,12 +1032,58 @@ class Writer {
             e.set("refname", nameOf(s.ref));
           }
           break;
+        case SensorObj::GeomPair:
+          e.set(s.objtype == FrameObj::Body ? "body1" : "geom1", nameOf(s.obj));
+          e.set(s.reftype == FrameObj::Body ? "body2" : "geom2", nameOf(s.ref));
+          break;
+        case SensorObj::Contact: {
+          if (s.obj != kNoId) {
+            const char* a = s.objtype == FrameObj::Site ? "site" : s.objtype == FrameObj::Body ? "body1"
+                            : s.objtype == FrameObj::XBody ? "subtree1" : "geom1";
+            e.set(a, nameOf(s.obj));
+          }
+          if (s.ref != kNoId)
+            e.set(s.reftype == FrameObj::Body ? "body2" : s.reftype == FrameObj::XBody ? "subtree2" : "geom2", nameOf(s.ref));
+          if (s.connum != 1) e.set("num", std::to_string(std::max(1, s.connum)));
+          if (s.condata != 1 && s.condata != 0) {
+            std::string data;
+            for (int i = 0; i < int(std::size(kContactData)); ++i)
+              if (s.condata & (1 << i)) data += (data.empty() ? "" : " ") + std::string(kContactData[i].xml);
+            e.set("data", data);
+          }
+          if (s.reduce > 0 && s.reduce < int(std::size(kContactReduce))) e.set("reduce", kContactReduce[s.reduce]);
+          break;
+        }
+        case SensorObj::Inside:
+          e.set("objtype", toXml(s.objtype));
+          e.set("objname", nameOf(s.obj));
+          e.set("site", nameOf(s.ref));
+          if (s.enclosed) e.set("enclosed", "true");
+          break;
+        case SensorObj::CamProj:
+          e.set("site", nameOf(s.obj));
+          e.set("camera", nameOf(s.ref));
+          break;
         case SensorObj::None: break;
       }
       if (!nearly(s.noise, 0.0)) e.set("noise", num(s.noise));
       if (!nearly(s.cutoff, 0.0)) e.set("cutoff", num(s.cutoff));
+      if (s.nsample > 0) e.set("nsample", std::to_string(s.nsample));
+      if (s.interp == 1 || s.interp == 2) e.set("interp", s.interp == 1 ? "linear" : "cubic");
+      if (s.delay > 0) e.set("delay", num(s.delay));
+      if (!nearly(s.interval, Vec2{})) e.set("interval", vec(s.interval));
     }
     if (!n.children.empty()) root.children.push_back(n);
+  }
+
+  // An image used by a texture: copied next to the model when exporting files, else referenced.
+  std::string imageFile(const std::string& file) {
+    std::string image;
+    if (!files_ || !readTextFile(file, image)) return file;
+    std::filesystem::path src(file);
+    std::string path = opt_.assetDir + "/" + assetFileName(src.stem().string(), src.extension().string());
+    files_->push_back({path, std::move(image)});
+    return path;
   }
 
   // File names are restricted to portable characters and kept unique after that.
@@ -1005,6 +1122,7 @@ bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOp
   fs::path p(path);
   ExportOptions opt = optIn;
   opt.externalMeshVertices = 1000;
+  opt.externalHfieldSamples = 64 * 64;
   opt.assetDir = (assetStem.empty() ? p.stem().string() : assetStem) + "_assets";
   std::vector<ExportFile> files;
   std::string xml = writeMjcf(doc, opt, nullptr, &files);
@@ -1026,6 +1144,18 @@ bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOp
   return true;
 }
 
+std::string hfieldToBin(const Hfield& h) {
+  size_t nrow = size_t(std::max(h.nrow, 0)), ncol = size_t(std::max(h.ncol, 0));
+  std::string out(8 + nrow * ncol * 4, '\0');
+  int32_t dims[2] = {int32_t(nrow), int32_t(ncol)};
+  std::memcpy(&out[0], dims, 8);
+  if (!h.data || h.data->size() != nrow * ncol) return out;
+  // Documents keep MJCF's row order (first row = +Y edge); the binary format starts at -Y.
+  for (size_t r = 0; r < nrow; ++r)
+    std::memcpy(&out[8 + r * ncol * 4], h.data->data() + (nrow - 1 - r) * ncol, ncol * 4);
+  return out;
+}
+
 std::string meshToStl(const MeshAsset& mesh) {
   // Binary STL (little endian): 80-byte header, triangle count, then per triangle the normal, three
   // vertices and a 16-bit attribute word.
@@ -1040,8 +1170,11 @@ std::string meshToStl(const MeshAsset& mesh) {
   char* p = &out[84];
   for (size_t t = 0; t < ntri; ++t, p += 50) {
     float tri[12] = {};
-    for (int k = 0; k < 3; ++k)
-      for (int c = 0; c < 3; ++c) tri[3 + 3 * k + c] = v[3 * size_t(f[3 * t + k]) + c];
+    for (int k = 0; k < 3; ++k) {
+      size_t vi = size_t(f[3 * t + k]);
+      if (3 * vi + 2 >= v.size()) continue;  // damaged index: degenerate triangle instead of a bad read
+      for (int c = 0; c < 3; ++c) tri[3 + 3 * k + c] = v[3 * vi + c];
+    }
     Vec3 a{tri[3], tri[4], tri[5]}, b{tri[6], tri[7], tri[8]}, c{tri[9], tri[10], tri[11]};
     Vec3 nrm = normalize(cross(b - a, c - a), {0, 0, 1});
     tri[0] = float(nrm.x);

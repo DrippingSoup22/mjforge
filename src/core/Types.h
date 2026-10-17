@@ -71,8 +71,10 @@ enum class TendonType : uint8_t { Fixed = 0, Spatial = 1 };
 inline constexpr EnumEntry<TendonType> kTendonTypes[] = {
     {TendonType::Fixed, "fixed", "Fixed (joint combination)"}, {TendonType::Spatial, "spatial", "Spatial (path)"}};
 
-// What kind of object a sensor is attached to.
-enum class SensorObj : uint8_t { None, Joint, Actuator, Site, Body, Tendon, Frame };
+// What kind of object a sensor is attached to. GeomPair: two geoms or bodies (collision sensors);
+// Contact: optional first and second contact criteria; Inside: a frame object and a site volume;
+// CamProj: a site and a camera.
+enum class SensorObj : uint8_t { None, Joint, Actuator, Site, Body, Tendon, Frame, GeomPair, Contact, Inside, CamProj };
 
 enum class SensorType : uint8_t {
   JointPos, JointVel, BallQuat, BallAngVel, JointLimitPos, JointLimitVel, JointLimitFrc, JointActuatorFrc,
@@ -81,7 +83,10 @@ enum class SensorType : uint8_t {
   FramePos, FrameQuat, FrameXAxis, FrameYAxis, FrameZAxis, FrameLinVel, FrameAngVel, FrameLinAcc, FrameAngAcc,
   SubtreeCom, SubtreeLinVel, SubtreeAngMom,
   TendonPos, TendonVel,
-  Clock, EPotential, EKinetic
+  Clock, EPotential, EKinetic,
+  // Added later; project files store the XML names, so the order here is free.
+  TendonActuatorFrc, TendonLimitPos, TendonLimitVel, TendonLimitFrc,
+  Distance, Normal, FromTo, Contact, InsideSite, CamProjection
 };
 struct SensorInfo {
   SensorType value;
@@ -110,6 +115,12 @@ inline constexpr SensorInfo kSensorTypes[] = {
     {SensorType::Magnetometer, "magnetometer", "Magnetometer", SensorObj::Site, 3},
     {SensorType::Touch, "touch", "Touch (contact normal force)", SensorObj::Site, 1},
     {SensorType::RangeFinder, "rangefinder", "Range finder (distance along site z)", SensorObj::Site, 1},
+    {SensorType::Contact, "contact", "Contact (found, force, ... in fixed slots)", SensorObj::Contact, 1},
+    {SensorType::Distance, "distance", "Distance between two geoms/bodies", SensorObj::GeomPair, 1},
+    {SensorType::Normal, "normal", "Normal between two geoms/bodies", SensorObj::GeomPair, 3},
+    {SensorType::FromTo, "fromto", "Closest points of two geoms/bodies", SensorObj::GeomPair, 6},
+    {SensorType::InsideSite, "insidesite", "Inside a site volume (1/0)", SensorObj::Inside, 1},
+    {SensorType::CamProjection, "camprojection", "Site position in a camera image", SensorObj::CamProj, 2},
     {SensorType::FramePos, "framepos", "Frame position", SensorObj::Frame, 3},
     {SensorType::FrameQuat, "framequat", "Frame orientation", SensorObj::Frame, 4},
     {SensorType::FrameXAxis, "framexaxis", "Frame x-axis", SensorObj::Frame, 3},
@@ -124,6 +135,10 @@ inline constexpr SensorInfo kSensorTypes[] = {
     {SensorType::SubtreeAngMom, "subtreeangmom", "Subtree angular momentum", SensorObj::Body, 3},
     {SensorType::TendonPos, "tendonpos", "Tendon length", SensorObj::Tendon, 1},
     {SensorType::TendonVel, "tendonvel", "Tendon velocity", SensorObj::Tendon, 1},
+    {SensorType::TendonActuatorFrc, "tendonactuatorfrc", "Tendon actuator force", SensorObj::Tendon, 1},
+    {SensorType::TendonLimitPos, "tendonlimitpos", "Tendon limit position", SensorObj::Tendon, 1},
+    {SensorType::TendonLimitVel, "tendonlimitvel", "Tendon limit velocity", SensorObj::Tendon, 1},
+    {SensorType::TendonLimitFrc, "tendonlimitfrc", "Tendon limit force", SensorObj::Tendon, 1},
     {SensorType::Clock, "clock", "Simulation time", SensorObj::None, 1},
     {SensorType::EPotential, "e_potential", "Potential energy", SensorObj::None, 1},
     {SensorType::EKinetic, "e_kinetic", "Kinetic energy", SensorObj::None, 1}};
@@ -132,16 +147,41 @@ inline const SensorInfo& sensorInfo(SensorType t) {
   return kSensorTypes[0];
 }
 
+// Contact sensor data fields (MJCF data="..."), in the order MuJoCo requires, with their sizes.
+struct ContactDataInfo { const char* xml; const char* label; int dim; };
+inline constexpr ContactDataInfo kContactData[] = {
+    {"found", "Found (number of matches)", 1}, {"force", "Force (contact frame)", 3}, {"torque", "Torque (contact frame)", 3},
+    {"dist", "Penetration distance", 1}, {"pos", "Position", 3}, {"normal", "Normal", 3}, {"tangent", "Tangent", 3},
+    {"linvel", "Relative linear velocity", 3}, {"angvel", "Relative angular velocity", 3}};
+inline constexpr const char* kContactReduce[] = {"none", "mindist", "maxforce", "netforce"};
+// Range finder outputs (MJCF data="...").
+inline constexpr ContactDataInfo kRayData[] = {
+    {"dist", "Distance (-1: no hit)", 1}, {"dir", "Ray direction", 3}, {"origin", "Ray origin", 3},
+    {"point", "Hit point", 3}, {"normal", "Surface normal at the hit", 3}, {"depth", "Depth along the view axis", 1}};
+
 // Object types a frame sensor can observe.
 enum class FrameObj : uint8_t { Body, XBody, Geom, Site, Camera };
 inline constexpr EnumEntry<FrameObj> kFrameObjs[] = {
     {FrameObj::Body, "body", "Body (inertial frame)"}, {FrameObj::XBody, "xbody", "Body (body frame)"},
     {FrameObj::Geom, "geom", "Geom"}, {FrameObj::Site, "site", "Site"}, {FrameObj::Camera, "camera", "Camera"}};
 
-enum class Integrator : uint8_t { Euler = 0, RK4 = 1, Implicit = 2, ImplicitFast = 3 };
+enum class Integrator : uint8_t { Euler = 0, RK4 = 1, Implicit = 2, ImplicitFast = 3, Discrete = 4 };
 inline constexpr EnumEntry<Integrator> kIntegrators[] = {
     {Integrator::Euler, "Euler", "Euler (semi-implicit)"}, {Integrator::RK4, "RK4", "Runge-Kutta 4"},
-    {Integrator::Implicit, "implicit", "Implicit"}, {Integrator::ImplicitFast, "implicitfast", "Implicit fast"}};
+    {Integrator::Implicit, "implicit", "Implicit"}, {Integrator::ImplicitFast, "implicitfast", "Implicit fast"},
+    {Integrator::Discrete, "discrete", "Discrete (implicit contacts)"}};
+
+// Body sleep policy (root bodies of moving trees). Values are the MJCF order, not mjtSleepPolicy.
+enum class SleepPolicy : uint8_t { Auto, Never, Allowed, Init };
+inline constexpr EnumEntry<SleepPolicy> kSleepPolicies[] = {
+    {SleepPolicy::Auto, "auto", "Auto"}, {SleepPolicy::Never, "never", "Never sleep"},
+    {SleepPolicy::Allowed, "allowed", "Allowed to sleep"}, {SleepPolicy::Init, "init", "Start asleep"}};
+
+// How MuJoCo computes a mesh's volume, center and inertia. Values match mjtMeshInertia.
+enum class MeshInertia : uint8_t { Convex = 0, Exact = 1, Legacy = 2, Shell = 3 };
+inline constexpr EnumEntry<MeshInertia> kMeshInertias[] = {
+    {MeshInertia::Convex, "convex", "Convex hull"}, {MeshInertia::Exact, "exact", "Exact (closed mesh)"},
+    {MeshInertia::Legacy, "legacy", "Legacy (MuJoCo default)"}, {MeshInertia::Shell, "shell", "Surface (thin shell)"}};
 
 enum class Cone : uint8_t { Pyramidal = 0, Elliptic = 1 };
 inline constexpr EnumEntry<Cone> kCones[] = {{Cone::Pyramidal, "pyramidal", "Pyramidal"}, {Cone::Elliptic, "elliptic", "Elliptic"}};
@@ -230,5 +270,7 @@ inline const char* toXml(SensorType v) { return sensorInfo(v).xml; }
 inline const char* toXml(TriBool v) { return enumXml(kTriBools, v); }
 inline const char* toXml(InertiaFromGeom v) { return enumXml(kInertiaFromGeom, v); }
 inline const char* toXml(AngleUnit v) { return enumXml(kAngleUnits, v); }
+inline const char* toXml(SleepPolicy v) { return enumXml(kSleepPolicies, v); }
+inline const char* toXml(MeshInertia v) { return enumXml(kMeshInertias, v); }
 
 }  // namespace mjf

@@ -11,6 +11,8 @@
 # Outputs:
 #   mujoco::mujoco                IMPORTED SHARED target
 #   MJFORGE_MUJOCO_RUNTIME_FILE   shared library to copy next to the executable
+#   MJFORGE_MUJOCO_PLUGIN_DIR     folder of MuJoCo's plugin libraries (SDF, elasticity, ...) if found;
+#                                 copied to <executable dir>/mujoco_plugin and loaded at startup
 #   MJFORGE_MUJOCO_VERSION_FOUND  version string parsed from mujoco.h
 
 set(MJFORGE_MUJOCO_VERSION "3.16.0" CACHE STRING "MuJoCo release to download if no local copy is found")
@@ -141,12 +143,32 @@ if(APPLE)
 endif()
 get_filename_component(MJFORGE_MUJOCO_RUNTIME_SUBDIR "${MJFORGE_MUJOCO_RUNTIME_SUBPATH}" DIRECTORY)
 
-# Copies the MuJoCo runtime next to a target's executable after it is built.
+# Plugin libraries: "plugin/" in the Python package, "bin/mujoco_plugin/" in release archives.
+get_filename_component(_mj_lib_dir "${_mj_lib}" DIRECTORY)
+set(MJFORGE_MUJOCO_PLUGIN_DIR "")
+foreach(_cand "${_mj_lib_dir}/plugin" "${_mj_lib_dir}/mujoco_plugin" "${_mj_lib_dir}/../bin/mujoco_plugin"
+        "${_mj_lib_dir}/../lib/mujoco_plugin")
+  if(NOT MJFORGE_MUJOCO_PLUGIN_DIR AND IS_DIRECTORY "${_cand}")
+    get_filename_component(MJFORGE_MUJOCO_PLUGIN_DIR "${_cand}" ABSOLUTE)
+  endif()
+endforeach()
+
+# Copies the MuJoCo runtime (and its plugin libraries) next to a target's executable after it is built.
 function(mjforge_copy_mujoco_runtime target)
   add_custom_command(TARGET ${target} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/${MJFORGE_MUJOCO_RUNTIME_SUBDIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${MJFORGE_MUJOCO_RUNTIME_FILE}"
             "$<TARGET_FILE_DIR:${target}>/${MJFORGE_MUJOCO_RUNTIME_SUBPATH}"
     VERBATIM)
+  if(MJFORGE_MUJOCO_PLUGIN_DIR)
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory "${MJFORGE_MUJOCO_PLUGIN_DIR}" "$<TARGET_FILE_DIR:${target}>/mujoco_plugin"
+      VERBATIM)
+  endif()
 endfunction()
 message(STATUS "MJForge: MuJoCo ${MJFORGE_MUJOCO_VERSION_FOUND} from ${_mj_source}: ${_mj_lib}")
+if(MJFORGE_MUJOCO_PLUGIN_DIR)
+  message(STATUS "MJForge: MuJoCo plugins from ${MJFORGE_MUJOCO_PLUGIN_DIR}")
+else()
+  message(STATUS "MJForge: no MuJoCo plugin folder found (models using plugins will not import)")
+endif()

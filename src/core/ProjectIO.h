@@ -7,7 +7,7 @@
 
 namespace mjf {
 
-constexpr int kProjectFormatVersion = 1;
+constexpr int kProjectFormatVersion = 2;  // 2: height field data as base64
 
 std::string projectToJson(const Document& doc, const std::string& editorStateJson = "");
 // Replaces `doc` on success. `editorStateJson` (optional) receives the "editor" object.

@@ -6,3 +6,4 @@
 .DS_Store
 imgui.ini
 __pycache__/
+MUJOCO_LOG.TXT

@@ -135,12 +135,20 @@ TEST_CASE("analysis: MJWarp incompatibilities are errors with fixes") {
 TEST_CASE("analysis: silent MuJoCo mistakes and start pose") {
   Document doc;
   REQUIRE(makeTemplate("quadruped", doc));
-  // Inverted range (MuJoCo accepts it) and a model floating in the air.
+  // An empty limited range: with autolimits MuJoCo would silently drop such a limit, so the export
+  // says limited="true" and MuJoCo refuses the model; the analysis names the joint and fixes it.
   doc.joints[1].limited = true;
   doc.joints[1].range = {0.5, -0.5};
+  CHECK_FALSE(compileMjcf(writeMjcf(doc)).ok);
+  AnalysisReport r0 = analyzeModel(doc, nullptr, false);
+  const Issue* jr = findCode(r0, "joint-range");
+  REQUIRE(jr);
+  REQUIRE(jr->fix);
+  jr->fix(doc);
+  // A model floating in the air.
   doc.bodies[1].pos.z += 0.3;
   AnalysisReport r = analyzeCompiled(doc);
-  CHECK(countCode(r, "joint-range") == 1);
+  CHECK(countCode(r, "joint-range") == 0);
   const Issue* fl = findCode(r, "floating");
   REQUIRE(fl);
   REQUIRE(fl->fix);

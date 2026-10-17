@@ -48,6 +48,7 @@ struct Body {
   Quat quat;
   bool mocap = false;
   double gravcomp = 0;
+  SleepPolicy sleep = SleepPolicy::Auto;  // top-level moving bodies only
   // Explicit <inertial>. When false, MuJoCo infers mass and inertia from the geoms.
   bool hasInertial = false;
   double mass = 1.0;
@@ -82,6 +83,11 @@ struct Geom {
   Vec5 solimp = kDefaultSolimp;
   double margin = 0;
   double gap = 0;
+  double adhesion = 0;  // contacts can pull with up to this force (sticky surfaces, magnets with gap)
+  Vec6 surfacevel{};    // surface velocity seen by contacts: linear, angular (conveyors, turntables)
+  // Geom-level fluid model (needs option density/viscosity): ellipsoid approximation.
+  bool fluidEllipsoid = false;
+  Vec5 fluidcoef{{0.5, 0.25, 1.5, 1.0, 1.0}};
   // Mass. If mass >= 0 it overrides density.
   double density = 1000.0;
   double mass = -1.0;
@@ -239,7 +245,22 @@ struct Sensor {
   FrameObj reftype = FrameObj::Site;
   double noise = 0;
   double cutoff = 0;
+  // Contact sensor: matched by obj (site / geom / body / subtree, kNoId = any) and ref (geom /
+  // body / subtree); reports `connum` slots of the fields in `condata` (bits of kContactData).
+  int condata = 1;
+  int raydata = 1;  // rangefinder outputs: bits of kRayData (distance by default)
+  int connum = 1;
+  int reduce = 0;  // index into kContactReduce
+  bool enclosed = false;  // insidesite: whole object inside instead of its frame origin
+  // Latency and sample rate: a history of `nsample` values read `delay` seconds late; the value is
+  // recomputed every `interval[0]` seconds (0: every step) with phase interval[1].
+  double delay = 0;
+  int nsample = 0;
+  int interp = 0;  // 0 zero-order hold, 1 linear, 2 cubic
+  Vec2 interval{0, 0};
 };
+// Number of values a sensor writes to sensordata.
+int sensorDim(const Sensor& s);
 
 struct Exclude {
   Id id = kNoId;
@@ -262,6 +283,7 @@ struct ContactPair {
   Vec5 solimp = kDefaultSolimp;
   double margin = 0;
   double gap = 0;
+  double adhesion = 0;
 };
 
 // Equality constraint (<equality>): a ball-joint connection or a weld between two bodies (or two
@@ -339,7 +361,16 @@ struct Texture {
   int width = 512;
   int height = 512;
   std::string file;  // used when builtin == None
+  // Cube / skybox from one image: grid of faces (rows, columns) and which face is in each cell,
+  // row-major with L R F B U D for the faces and '.' for unused cells (MJCF gridlayout).
+  int gridsize[2] = {1, 1};
+  std::string gridlayout;
+  // Cube / skybox from six images (used when builtin == None and file is empty).
+  std::string cubefiles[6];  // right left up down front back
+  bool hflip = false, vflip = false;
 };
+// MJCF attribute names of Texture::cubefiles.
+inline constexpr const char* kCubeFileAttrs[6] = {"fileright", "fileleft", "fileup", "filedown", "filefront", "fileback"};
 
 struct Material {
   Id id = kNoId;
@@ -388,6 +419,8 @@ struct MeshAsset {
   std::shared_ptr<const std::vector<float>> vert;  // x y z per vertex, copy-on-write
   std::shared_ptr<const std::vector<int>> face;    // three vertex indices per triangle
   std::string source;                              // file it was loaded from (information only)
+  MeshInertia inertia = MeshInertia::Legacy;       // how MuJoCo computes volume and inertia
+  int maxhullvert = -1;                            // vertex limit of the collision hull (-1: none)
   size_t vertexCount() const { return vert ? vert->size() / 3 : 0; }
   size_t faceCount() const { return face ? face->size() / 3 : 0; }
   Aabb bounds() const;  // in the mesh frame
@@ -410,7 +443,17 @@ struct OptionSettings {
   int ls_iterations = 50;
   double ls_tolerance = 0.01;
   int noslip_iterations = 0;
+  double noslip_tolerance = 1e-6;
   int ccd_iterations = 35;
+  double ccd_tolerance = 1e-6;
+  double sleep_tolerance = 1e-3;
+  // Contact parameters forced on every contact while the override flag is enabled.
+  double o_margin = 0;
+  Vec2 o_solref = kDefaultSolref;
+  Vec5 o_solimp = kDefaultSolimp;
+  Vec5 o_friction{{1, 1, 0.005, 0.0001, 0.0001}};
+  int disableactuator = 0;  // bit g set: actuators of group g produce no force (actuatorgroupdisable)
+  std::string memory;       // <size memory>: arena size such as "100M" ("" = MuJoCo's estimate)
   // <flag> settings: true means enabled.
   bool constraint = true, equality = true, frictionloss = true, limit = true, contact = true;
   bool spring = true, damper = true, gravityFlag = true, clampctrl = true, warmstart = true;
@@ -441,7 +484,7 @@ struct VisualSettings {
   // <visual><quality>
   int shadowsize = 4096;
   // <visual><rgba haze>
-  Color haze{0.15f, 0.25f, 0.35f, 1.0f};
+  Color haze{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 // Lookup tables rebuilt whenever the document structure changes.
@@ -544,6 +587,9 @@ class Document {
   std::vector<Id> subtree(Id body) const;
   // Number of degrees of freedom the joints of a body add.
   int bodyDofs(Id body) const;
+  // First moving body of a kinematic tree: it has joints and every ancestor is static. Only these
+  // bodies accept a sleep policy.
+  bool isTreeRoot(Id body) const;
 
   // Unique name for the given kind, derived from base ("leg" -> "leg", "leg_2", ...).
   std::string uniqueName(Kind kind, const std::string& base) const;

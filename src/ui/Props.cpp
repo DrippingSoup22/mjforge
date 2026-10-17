@@ -424,11 +424,12 @@ bool comboIndex(const char* label, int* index, const std::vector<std::string>& i
   return changed;
 }
 
-bool element(const char* label, Id* id, const std::vector<std::pair<Id, std::string>>& items, bool allowNone, const char* tip) {
+bool element(const char* label, Id* id, const std::vector<std::pair<Id, std::string>>& items, bool allowNone, const char* tip,
+             const char* noneLabel) {
   bool reset = false;
   beginRow(label, false, tip, &reset);
   bool changed = false;
-  std::string cur = "(none)";
+  std::string cur = noneLabel;
   for (const auto& [i, n] : items) if (i == *id) cur = n.empty() ? "(unnamed)" : n;
   if (ImGui::BeginCombo("##v", cur.c_str(), ImGuiComboFlags_HeightLarge)) {
     static ImGuiTextFilter filter;
@@ -437,7 +438,7 @@ bool element(const char* label, Id* id, const std::vector<std::pair<Id, std::str
       filter.Clear();
     }
     filter.Draw("##filter", -1);
-    if (allowNone && ImGui::Selectable("(none)", *id == kNoId) && *id != kNoId) {
+    if (allowNone && ImGui::Selectable(noneLabel, *id == kNoId) && *id != kNoId) {
       notifyChange();
       *id = kNoId;
       changed = true;

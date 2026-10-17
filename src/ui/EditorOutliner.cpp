@@ -100,10 +100,40 @@ void Editor::drawElementContextMenu(Id id) {
   }
   if (k == Kind::Site && ImGui::BeginMenu("Add sensor")) {
     for (const auto& s : kSensorTypes) {
-      if (s.obj != SensorObj::Site && s.obj != SensorObj::Frame) continue;
+      if (s.obj != SensorObj::Site && s.obj != SensorObj::Frame && s.value != SensorType::Contact &&
+          s.value != SensorType::CamProjection)
+        continue;
       if (ImGui::MenuItem(s.label)) {
         checkpoint("Add sensor");
         sel_.set(addSensor(doc_, s.value, id));
+      }
+      if (s.value == SensorType::Contact && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Contacts inside this site's volume (a foot pad, a gripper finger)");
+    }
+    ImGui::EndMenu();
+  }
+  // Contact and distance sensors start from a geom or body; the inspector picks the second object.
+  if ((k == Kind::Geom || k == Kind::Body) && id != kWorldId && ImGui::BeginMenu("Add sensor")) {
+    for (SensorType t : {SensorType::Contact, SensorType::Distance, SensorType::FramePos, SensorType::FrameQuat,
+                         SensorType::FrameLinVel, SensorType::FrameAngVel}) {
+      if (ImGui::MenuItem(sensorInfo(t).label)) {
+        checkpoint("Add sensor");
+        sel_.set(addSensor(doc_, t, id));
+      }
+    }
+    if (k == Kind::Body)
+      for (SensorType t : {SensorType::SubtreeCom, SensorType::SubtreeLinVel})
+        if (ImGui::MenuItem(sensorInfo(t).label)) {
+          checkpoint("Add sensor");
+          sel_.set(addSensor(doc_, t, id));
+        }
+    ImGui::EndMenu();
+  }
+  if (k == Kind::Tendon && ImGui::BeginMenu("Add sensor")) {
+    for (SensorType t : {SensorType::TendonPos, SensorType::TendonVel, SensorType::TendonActuatorFrc, SensorType::TendonLimitFrc}) {
+      if (ImGui::MenuItem(sensorInfo(t).label)) {
+        checkpoint("Add sensor");
+        sel_.set(addSensor(doc_, t, id));
       }
     }
     ImGui::EndMenu();

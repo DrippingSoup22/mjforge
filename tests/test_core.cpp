@@ -18,6 +18,7 @@ using namespace mjf;
 
 int main(int argc, char** argv) {
   installMujocoErrorHandlers();
+  loadMujocoPlugins();
   doctest::Context ctx(argc, argv);
   return ctx.run();
 }

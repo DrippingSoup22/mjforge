@@ -63,7 +63,7 @@ bool combo(const char* label, E* v, const EnumEntry<E> (&table)[N], E def, const
 bool comboIndex(const char* label, int* index, const std::vector<std::string>& items, int def, const char* tip = nullptr);
 // Element picker: lists (id, name) pairs. kNoId means "none" when allowNone.
 bool element(const char* label, Id* id, const std::vector<std::pair<Id, std::string>>& items, bool allowNone,
-             const char* tip = nullptr);
+             const char* tip = nullptr, const char* noneLabel = "(none)");
 
 // Internal helpers used by the templates.
 bool beginRow(const char* label, bool modified, const char* tip, bool* resetClicked, const char* unit = nullptr);

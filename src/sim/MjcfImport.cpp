@@ -1,9 +1,13 @@
 #include "sim/MjcfImport.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <unordered_map>
 
 #include "sim/MujocoBridge.h"
@@ -55,7 +59,13 @@ struct SpecHolder {
 };
 
 Vec3 v3(const mjtNum* v) { return {v[0], v[1], v[2]}; }
-Vec3 v3f(const float* v) { return {v[0], v[1], v[2]}; }
+// A float as the decimal it was written as (0.1f -> 0.1, not 0.100000001).
+double fromFloat(float f) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.7g", f);
+  return std::strtod(buf, nullptr);
+}
+Vec3 v3f(const float* v) { return {fromFloat(v[0]), fromFloat(v[1]), fromFloat(v[2])}; }
 Quat q4(const mjtNum* q) { return {q[0], q[1], q[2], q[3]}; }
 Color c4(const float* c) { return {c[0], c[1], c[2], c[3]}; }
 Vec2 v2(const mjtNum* v) { return {v[0], v[1]}; }
@@ -118,7 +128,27 @@ bool sensorTypeFrom(int t, SensorType* out) {
     case mjSENS_CLOCK: *out = SensorType::Clock; return true;
     case mjSENS_E_POTENTIAL: *out = SensorType::EPotential; return true;
     case mjSENS_E_KINETIC: *out = SensorType::EKinetic; return true;
+    case mjSENS_TENDONACTFRC: *out = SensorType::TendonActuatorFrc; return true;
+    case mjSENS_TENDONLIMITPOS: *out = SensorType::TendonLimitPos; return true;
+    case mjSENS_TENDONLIMITVEL: *out = SensorType::TendonLimitVel; return true;
+    case mjSENS_TENDONLIMITFRC: *out = SensorType::TendonLimitFrc; return true;
+    case mjSENS_GEOMDIST: *out = SensorType::Distance; return true;
+    case mjSENS_GEOMNORMAL: *out = SensorType::Normal; return true;
+    case mjSENS_GEOMFROMTO: *out = SensorType::FromTo; return true;
+    case mjSENS_CONTACT: *out = SensorType::Contact; return true;
+    case mjSENS_INSIDESITE: *out = SensorType::InsideSite; return true;
+    case mjSENS_CAMPROJECTION: *out = SensorType::CamProjection; return true;
     default: return false;
+  }
+}
+
+// MJCF names of the sensor types the editor does not support (for import notes).
+const char* unsupportedSensorName(int t) {
+  switch (t) {
+    case mjSENS_TACTILE: return "tactile";
+    case mjSENS_USER: return "user";
+    case mjSENS_PLUGIN: return "plugin";
+    default: return "other";
   }
 }
 
@@ -173,7 +203,7 @@ class Builder {
     d.density = o.density;
     d.viscosity = o.viscosity;
     d.impratio = o.impratio;
-    d.integrator = Integrator(o.integrator);
+    d.integrator = o.integrator >= 0 && o.integrator <= int(Integrator::Discrete) ? Integrator(o.integrator) : Integrator::Euler;
     d.cone = Cone(o.cone);
     d.jacobian = Jacobian(o.jacobian);
     d.solver = Solver(o.solver);
@@ -183,6 +213,18 @@ class Builder {
     d.ls_tolerance = o.ls_tolerance;
     d.noslip_iterations = o.noslip_iterations;
     d.ccd_iterations = o.ccd_iterations;
+    d.noslip_tolerance = o.noslip_tolerance;
+    d.ccd_tolerance = o.ccd_tolerance;
+    d.sleep_tolerance = o.sleep_tolerance;
+    d.o_margin = o.o_margin;
+    d.o_solref = v2(o.o_solref);
+    d.o_solimp = v5(o.o_solimp);
+    for (int k = 0; k < 5; ++k) d.o_friction[k] = o.o_friction[k];
+    d.disableactuator = o.disableactuator;
+    if (spec_->memory > 0) {  // -1: MuJoCo estimates the arena size
+      size_t bytes = size_t(spec_->memory), mb = bytes >> 20;
+      d.memory = (mb << 20) == bytes ? std::to_string(mb) + "M" : std::to_string(bytes);
+    }
     auto off = [&](int flag) { return (o.disableflags & flag) == 0; };
     auto on = [&](int flag) { return (o.enableflags & flag) != 0; };
     d.constraint = off(mjDSBL_CONSTRAINT);
@@ -251,17 +293,30 @@ class Builder {
       x.width = t->width > 0 ? t->width : m_->tex_width[id];
       x.height = t->height > 0 ? t->height : m_->tex_height[id];
       if (x.builtin == TextureBuiltin::None) {
-        std::string file = specString(t->file);
-        if (file.empty()) {
-          note("Texture '" + x.name + "' uses per-face files and was replaced by a flat color");
-          x.builtin = TextureBuiltin::Flat;
-        } else {
+        auto absolutePath = [&](const std::string& file) {
           fs::path p = fs::path(file);
           if (p.is_relative()) p = fs::path(baseDir_) / specString(spec_->compiler.texturedir) / p;
           std::error_code ec;
           fs::path abs = fs::absolute(p, ec);  // exports can be written anywhere
-          x.file = (ec ? p : abs).lexically_normal().string();
+          return (ec ? p : abs).lexically_normal().string();
+        };
+        // Per-face files (fileright, ...) live in an mjStringVec: a C++ container of the MuJoCo
+        // library's own standard library (libc++ in the official builds), unreadable from here.
+        std::string file = specString(t->file);
+        if (!file.empty()) {
+          x.file = absolutePath(file);
+          x.gridsize[0] = std::max(1, t->gridsize[0]);
+          x.gridsize[1] = std::max(1, t->gridsize[1]);
+          size_t n = 0;
+          while (n < sizeof t->gridlayout && t->gridlayout[n]) ++n;
+          x.gridlayout.assign(t->gridlayout, n);
+        } else {
+          note("Texture '" + x.name + "' uses per-face image files and was replaced by a flat color (set the six "
+               "files in its inspector)");
+          x.builtin = TextureBuiltin::Flat;
         }
+        x.hflip = t->hflip;
+        x.vflip = t->vflip;
       }
       texIds_[id] = x.id;
       doc_.textures.push_back(x);
@@ -310,8 +365,15 @@ class Builder {
     bodyIds_.assign(m_->nbody, kNoId);
     bodyIds_[0] = kWorldId;
     std::vector<uint8_t> explicitInertial(m_->nbody, 0);
+    std::vector<SleepPolicy> sleep(m_->nbody, SleepPolicy::Auto);
     forEachSpec(spec_, mjOBJ_BODY, [&](mjsElement* el, int id) {
-      if (id < m_->nbody) explicitInertial[id] = mjs_asBody(el)->explicitinertial;
+      if (id >= m_->nbody) return;
+      const mjsBody* b = mjs_asBody(el);
+      explicitInertial[id] = b->explicitinertial;
+      sleep[id] = b->sleep == mjSLEEP_NEVER     ? SleepPolicy::Never
+                  : b->sleep == mjSLEEP_ALLOWED ? SleepPolicy::Allowed
+                  : b->sleep == mjSLEEP_INIT    ? SleepPolicy::Init
+                                                : SleepPolicy::Auto;
     });
     // SDF geoms become boxes, and mesh inertia depends on mesh options that are not edited here
     // (inertia="shell", refpos, ...): keep the exact compiled inertia of their bodies.
@@ -326,6 +388,7 @@ class Builder {
       x.quat = q4(m_->body_quat + 4 * b);
       x.mocap = m_->body_mocapid[b] >= 0;
       x.gravcomp = m_->body_gravcomp[b];
+      x.sleep = sleep[b];
       if (explicitInertial[b] && m_->body_mass[b] > 0) {
         x.hasInertial = true;
         x.mass = m_->body_mass[b];
@@ -378,7 +441,6 @@ class Builder {
   }
 
   void geoms() {
-    int adhesive = 0;
     std::vector<double> density(m_->ngeom, 1000.0), mass(m_->ngeom, -1.0);
     std::vector<uint8_t> shell(m_->ngeom, 0);
     forEachSpec(spec_, mjOBJ_GEOM, [&](mjsElement* el, int id) {
@@ -422,7 +484,12 @@ class Builder {
       x.solimp = v5(m_->geom_solimp + mjNIMP * g);
       x.margin = m_->geom_margin[g];
       x.gap = m_->geom_gap[g];
-      adhesive += m_->geom_adhesion[g] != 0;
+      x.adhesion = m_->geom_adhesion[g];
+      for (int k = 0; k < 6; ++k) x.surfacevel[k] = m_->geom_surfacevel[6 * g + k];
+      const mjtNum* fluid = m_->geom_fluid + mjNFLUID * g;  // [ellipsoid flag, 5 coefficients, ...]
+      x.fluidEllipsoid = fluid[0] > 0;
+      if (x.fluidEllipsoid)
+        for (int k = 0; k < 5; ++k) x.fluidcoef[k] = fluid[1 + k];
       x.density = density[g];
       x.mass = mass[g];
       x.shellinertia = shell[g];
@@ -437,7 +504,6 @@ class Builder {
     if (rep_.approximatedGeoms > 0)
       note(std::to_string(rep_.approximatedGeoms) +
            " SDF geom(s) were replaced by their bounding boxes (bodies keep their exact mass and inertia)");
-    if (adhesive) note(std::to_string(adhesive) + " geom(s) with contact adhesion: adhesion was not imported");
   }
 
   Id meshAsset(int mesh) {
@@ -447,6 +513,12 @@ class Builder {
     a.id = doc_.newId();
     a.name = objName(m_, mjOBJ_MESH, mesh);
     if (a.name.empty()) a.name = "mesh_" + std::to_string(mesh);
+    forEachSpec(spec_, mjOBJ_MESH, [&](mjsElement* el, int id) {
+      if (id != mesh) return;
+      const mjsMesh* sm = mjs_asMesh(el);
+      a.inertia = MeshInertia(std::clamp<int>(sm->inertia, 0, int(MeshInertia::Shell)));
+      a.maxhullvert = sm->maxhullvert > 3 ? sm->maxhullvert : -1;
+    });
     int va = m_->mesh_vertadr[mesh], vn = m_->mesh_vertnum[mesh];
     int fa = m_->mesh_faceadr[mesh], fn = m_->mesh_facenum[mesh];
     std::vector<float> vert;
@@ -525,9 +597,13 @@ class Builder {
       if (id < na) specs[id] = mjs_asActuator(el);
     });
     actIds_.assign(na, kNoId);
-    int skipped = 0, nonlinear = 0;
+    int skipped = 0, nonlinear = 0, plugins = 0;
     for (int i = 0; i < na; ++i) {
       const mjsActuator* s = specs[i];
+      if (m_->actuator_plugin[i] >= 0) {  // e.g. the PID plugin: its force law cannot be represented
+        ++plugins;
+        continue;
+      }
       Actuator x;
       x.id = doc_.newId();
       x.name = objName(m_, mjOBJ_ACTUATOR, i);
@@ -649,6 +725,7 @@ class Builder {
     if (skipped)
       note(std::to_string(skipped) + " actuator(s) of types the editor does not support (DC motor, PID, orientation) were not imported");
     if (nonlinear) note(std::to_string(nonlinear) + " nonlinear actuator damping term(s) were dropped (linear terms kept)");
+    if (plugins) note(std::to_string(plugins) + " plugin actuator(s) (such as the PID plugin) were not imported");
   }
 
   static bool generalFrom(Actuator& x, const mjsActuator* s) {
@@ -681,36 +758,103 @@ class Builder {
   }
 
   void sensors() {
-    int skipped = 0;
+    std::vector<const mjsSensor*> specs(m_->nsensor, nullptr);
+    forEachSpec(spec_, mjOBJ_SENSOR, [&](mjsElement* el, int id) {
+      if (id < m_->nsensor) specs[id] = mjs_asSensor(el);
+    });
+    std::map<std::string, int> skipped;  // reason -> count
     for (int i = 0; i < m_->nsensor; ++i) {
       Sensor x;
-      if (!sensorTypeFrom(m_->sensor_type[i], &x.type)) {
-        ++skipped;
+      int type = m_->sensor_type[i];
+      if (!sensorTypeFrom(type, &x.type)) {
+        ++skipped[std::string(unsupportedSensorName(type)) + " sensors"];
         continue;
       }
       x.id = doc_.newId();
       x.name = objName(m_, mjOBJ_SENSOR, i);
       int ot = m_->sensor_objtype[i], rt = m_->sensor_reftype[i];
+      int oid = m_->sensor_objid[i], rid = m_->sensor_refid[i];
+      const int* prm = m_->sensor_intprm + mjNSENS * i;
       SensorObj kind = sensorInfo(x.type).obj;
-      if (kind == SensorObj::Frame) {
-        if (!frameObjFrom(ot, &x.objtype)) {
-          ++skipped;
-          continue;
-        }
-        if (m_->sensor_refid[i] >= 0 && frameObjFrom(rt, &x.reftype)) x.ref = objectId(rt, m_->sensor_refid[i]);
+      // The object kind each sensor family expects (a rangefinder can also sit on a camera, which
+      // MuJoCo Warp does not support).
+      int expected = kind == SensorObj::Joint      ? mjOBJ_JOINT
+                     : kind == SensorObj::Actuator ? mjOBJ_ACTUATOR
+                     : kind == SensorObj::Site     ? mjOBJ_SITE
+                     : kind == SensorObj::Body     ? mjOBJ_BODY
+                     : kind == SensorObj::Tendon   ? mjOBJ_TENDON
+                     : kind == SensorObj::CamProj  ? mjOBJ_SITE
+                                                   : -1;
+      if (expected >= 0 && ot != expected && !(kind == SensorObj::Body && ot == mjOBJ_XBODY)) {
+        ++skipped[x.type == SensorType::RangeFinder ? "rangefinders on cameras" : std::string(sensorInfo(x.type).xml) + " sensors on other objects"];
+        continue;
       }
-      if (kind != SensorObj::None) {
-        x.obj = objectId(ot, m_->sensor_objid[i]);
-        if (!x.obj) {
-          ++skipped;
-          continue;
+      bool ok = true;
+      auto objOf = [&](int t, int id, FrameObj* ft) -> Id {
+        if (id < 0) return kNoId;
+        if (!frameObjFrom(t, ft)) {
+          ok = false;
+          return kNoId;
         }
+        Id r = objectId(t, id);
+        if (!r) ok = false;
+        return r;
+      };
+      switch (kind) {
+        case SensorObj::Frame:
+          x.obj = objOf(ot, oid, &x.objtype);
+          if (rid >= 0) x.ref = objOf(rt, rid, &x.reftype);
+          ok &= x.obj != kNoId;
+          break;
+        case SensorObj::GeomPair:
+          x.obj = objOf(ot, oid, &x.objtype);
+          x.ref = objOf(rt, rid, &x.reftype);
+          ok &= x.obj != kNoId && x.ref != kNoId;
+          break;
+        case SensorObj::Contact:
+          x.obj = objOf(ot, oid, &x.objtype);  // -1: any
+          x.ref = objOf(rt, rid, &x.reftype);
+          x.condata = prm[0] > 0 ? prm[0] : 1;
+          x.reduce = std::clamp(prm[1], 0, 3);
+          x.connum = std::max(1, prm[2]);
+          break;
+        case SensorObj::Inside: {
+          x.obj = objOf(ot, oid, &x.objtype);
+          FrameObj site;
+          x.ref = objOf(rt, rid, &site);
+          ok &= x.obj != kNoId && x.ref != kNoId;
+          x.enclosed = prm[0] != 0;
+          break;
+        }
+        case SensorObj::CamProj: {
+          FrameObj t;
+          x.obj = objOf(ot, oid, &t);
+          x.ref = objOf(rt, rid, &t);
+          ok &= x.obj != kNoId && x.ref != kNoId;
+          break;
+        }
+        case SensorObj::None: break;
+        default:
+          x.obj = objectId(ot, oid);
+          ok = x.obj != kNoId;
+          break;
       }
+      if (!ok) {
+        ++skipped[std::string(sensorInfo(x.type).xml) + " sensors with unknown objects"];
+        continue;
+      }
+      if (x.type == SensorType::RangeFinder) x.raydata = prm[0] > 0 ? prm[0] : 1;
       x.noise = m_->sensor_noise[i];
       x.cutoff = m_->sensor_cutoff[i];
+      if (const mjsSensor* sp = specs[i]) {
+        x.nsample = std::max(0, sp->nsample);
+        x.interp = std::clamp(sp->interp, 0, 2);
+        x.delay = sp->delay;
+        x.interval = {sp->interval[0], sp->interval[1]};
+      }
       doc_.sensors.push_back(x);
     }
-    if (skipped) note(std::to_string(skipped) + " sensor(s) of unsupported types were not imported");
+    for (const auto& [what, n] : skipped) note(std::to_string(n) + " " + what + " were not imported");
   }
 
   void tendons() {
@@ -795,6 +939,7 @@ class Builder {
       x.solimp = v5(m_->pair_solimp + mjNIMP * i);
       x.margin = m_->pair_margin[i];
       x.gap = m_->pair_gap[i];
+      x.adhesion = m_->pair_adhesion[i];
       doc_.pairs.push_back(x);
     }
   }
@@ -916,7 +1061,11 @@ class Builder {
     };
     count(m_->nflex, "flex object(s)");
     count(m_->nskin, "skin(s)");
-    count(m_->nplugin, "plugin instance(s)");
+    int bodyPlugins = 0;
+    for (int b = 0; b < m_->nbody; ++b) bodyPlugins += m_->body_plugin[b] >= 0;
+    if (bodyPlugins)
+      note(std::to_string(bodyPlugins) + " bodies use a plugin (e.g. cable or shell elasticity) that was not imported: "
+           "they keep their joints but lose the plugin's forces");
   }
 
   mjSpec* spec_;
