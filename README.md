@@ -14,9 +14,10 @@ ready-to-run MuJoCo Warp loader.
 
 **Build**
 - Bodies, geoms (box, sphere, capsule, cylinder, ellipsoid, plane, height field, mesh), joints
-  (hinge, slide, ball, free), sites, cameras and lights, with gizmos, snapping, undo and
-  multi-selection editing. Meshes load from STL, OBJ or MSH files through MuJoCo itself. Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's
-  documentation in the tooltips.
+  (hinge, slide, ball, free), sites, cameras and lights, with gizmos, snapping, align/distribute,
+  undo and multi-selection editing. Meshes load from STL, OBJ or MSH files through MuJoCo itself.
+  Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's documentation
+  in the tooltips.
 - All actuator types: motor (torque), position servo (target angle), velocity, integrated velocity,
   damper, cylinder, muscle, adhesion and general, with control latency, plus friction, armature,
   damping, mass and inertia per element.
@@ -64,8 +65,9 @@ ready-to-run MuJoCo Warp loader.
 - MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes, orientations
   and meshes behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (Unitree Go2 and H1,
   ANYmal C, Franka Panda, Agility Cassie, Robotiq 2F-85, Shadow and Allegro hands, ALOHA): the
-  re-exported files compile to the same masses, inertias, tendons and constraints, and simulate the
-  same trajectories.
+  re-exported files compile to the same masses, inertias, tendons and constraints, and rollouts
+  agree to about 1e-7 (models whose meshes touch each other drift apart after contact, because
+  de-duplicated mesh vertices shift the contact points slightly).
 - Keyframes: the first one is the start pose of simulations and exported models; pose it in the
   viewport or capture one from the simulation.
 - Unsaved changes are never dropped silently: quitting or opening another project asks first, and
@@ -76,7 +78,7 @@ ready-to-run MuJoCo Warp loader.
 
 ## Building
 
-Requirements: a C++17 compiler, CMake 3.20 or newer, OpenGL 3.3, and MuJoCo 3.16. The easiest way
+Requirements: a C++17 compiler, CMake 3.21 or newer, OpenGL 3.3, and MuJoCo 3.16. The easiest way
 to get MuJoCo is the Python package, which ships the C library and guarantees MJForge validates with
 the same MuJoCo that MuJoCo Warp uses:
 
@@ -125,6 +127,7 @@ walks through every panel.
 | Ctrl+R, Right arrow | reset simulation, single step (paused) |
 | X, J, C, L | x-ray, joints, centers of mass, names |
 | Ctrl+S, Ctrl+O, Ctrl+I, Ctrl+E | save, open (project or MJCF), import into scene, export |
+| Ctrl+, | preferences |
 
 ## Training with MuJoCo Warp
 
@@ -166,7 +169,7 @@ src/sim        MuJoCo bridge (background compile), simulator, MJCF import, MJWar
 src/render     OpenGL renderer, debug drawing, camera
 src/ui         editor panels, viewport, inspector, simulation panel, tools
 tests          unit and integration tests (doctest)
-tools          MJWarp verification script, MJCF documentation generator
+tools          MJWarp verification script, MJCF documentation generator, CI annotations
 examples       example projects with exported MJCF and MJWarp loaders
 ```
 
@@ -175,7 +178,9 @@ The design and milestones are in [PLAN.md](PLAN.md).
 ## Limitations
 
 - SDF geoms from imported files are approximated by boxes (bodies keep exact masses and inertias).
-- Flex objects, skins and plugins in imported files are reported and skipped.
+- Flex objects, skins, plugins and MuJoCo 3.16's DC motor, PID and orientation actuators in
+  imported files are reported and skipped; nonlinear (polynomial) stiffness and damping keep only
+  their linear terms, and geom adhesion is not imported (each is listed in the import notes).
 
 ## Third-party software
 
