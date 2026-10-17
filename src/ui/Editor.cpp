@@ -68,9 +68,11 @@ void Editor::init(GLFWwindow* window, float scale, const std::string& configDir)
   std::error_code ec;
   if (lastDir_.empty()) lastDir_ = fs::current_path(ec).string();
   newDocument("quadruped");
+  initAutosave();
 }
 
 void Editor::applyCli(const CliOptions& cli) {
+  if (!cli.screenshot.empty() || !cli.actions.empty()) showRecover_ = false;  // scripted runs never block
   if (!cli.templateName.empty()) newDocument(cli.templateName);
   if (!cli.input.empty()) openPath(cli.input);
   for (const std::string& name : cli.select) {
@@ -112,6 +114,8 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a.rfind("export:", 0) == 0) exportTo(a.substr(7), ExportOptions::Scope::All, false);
     else if (a == "limbtool") limbTool_ = true;
     else if (a == "posemode") setPoseMode(true);
+    else if (a == "quit") quit_ = true;
+    else if (a == "recover") showRecover_ = !recoverPath_.empty();
     else if (a.rfind("pose:", 0) == 0) {
       // pose:<joint>=<value> (degrees for hinges), as if dragged in pose mode.
       size_t eq = a.find('=');
@@ -146,12 +150,8 @@ bool Editor::hasPendingWork() {
   // A finished compile, a scheduled compile that is due, or a pending window focus request.
   if (requestedRevision_ != editRevision_) return true;
   if (compiledRevision_ != requestedRevision_ && !compiler_.busy()) return true;
+  if (autosaveDue()) return true;
   return !pendingFocus_.empty() || focusInspector_ > 0;
-}
-
-bool Editor::confirmQuit() {
-  savePrefs();
-  return true;
 }
 
 void Editor::change() {
@@ -225,6 +225,7 @@ void Editor::newDocument(const std::string& templateId) {
     return;
   }
   stopSimulation();
+  removeAutosave();
   doc_ = std::move(d);
   history_.clear();
   sel_.clear();
@@ -243,6 +244,7 @@ bool Editor::openPath(const std::string& path) {
   if (!loadAnyFile(path, d, &notes, &editorState)) return false;
   bool mjcf = fs::path(path).extension() != ".mjforge";
   stopSimulation();
+  removeAutosave();
   doc_ = std::move(d);
   history_.clear();
   sel_.clear();
@@ -268,10 +270,16 @@ bool Editor::savePath(const std::string& path) {
   }
   path_ = path;
   modified_ = false;
+  removeAutosave();
   lastDir_ = fs::path(path).parent_path().string();
   addRecent(path);
   setTitle();
   notify("Saved " + fs::path(path).filename().string(), pal::kOk);
+  if (afterSave_) {
+    auto next = std::move(afterSave_);
+    afterSave_ = nullptr;
+    next();
+  }
   return true;
 }
 
@@ -467,6 +475,7 @@ void Editor::frame() {
   double dt = lastFrameTime_ > 0 ? t - lastFrameTime_ : 0;
   lastFrameTime_ = t;
   if (sim_.active()) sim_.advance(dt);
+  maybeAutosave();
   handleShortcuts();
   drawMenuBar();
   drawToolbar();
@@ -496,6 +505,9 @@ void Editor::frame() {
   drawSimulationPanel();
   drawViewport();
 
+  drawUnsavedModal();
+  drawRecoverModal();
+  if (!fileDialog_.isOpen() && afterSave_ && !ImGui::IsPopupOpen("Unsaved changes")) afterSave_ = nullptr;  // save cancelled
   if (fileDialog_.draw()) {
     const std::string& p = fileDialog_.result();
     switch (fileDialog_.purpose()) {
@@ -606,16 +618,20 @@ void Editor::drawMenuBar() {
   if (ImGui::BeginMenu("File")) {
     if (ImGui::BeginMenu("New")) {
       for (const auto& t : templateList()) {
-        if (ImGui::MenuItem(t.name)) newDocument(t.id);
+        if (ImGui::MenuItem(t.name)) {
+          std::string id = t.id;
+          requestDiscard([this, id] { newDocument(id); });
+        }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", t.description);
       }
       ImGui::EndMenu();
     }
-    if (ImGui::MenuItem("Open...", "Ctrl+O")) openDialog();
+    if (ImGui::MenuItem("Open...", "Ctrl+O")) requestDiscard([this] { openDialog(); });
     if (ImGui::BeginMenu("Open recent", !recent_.empty())) {
       for (const auto& r : recent_)
         if (ImGui::MenuItem(r.c_str())) {
-          openPath(r);
+          std::string p = r;
+          requestDiscard([this, p] { openPath(p); });
           break;
         }
       ImGui::EndMenu();
@@ -942,7 +958,7 @@ void Editor::handleShortcuts() {
   if (ctrl && pressed(ImGuiKey_Z)) { shift ? redo() : undo(); return; }
   if (ctrl && pressed(ImGuiKey_Y)) { redo(); return; }
   if (ctrl && pressed(ImGuiKey_S)) { shift ? saveAs() : save(); return; }
-  if (ctrl && pressed(ImGuiKey_O)) { openDialog(); return; }
+  if (ctrl && pressed(ImGuiKey_O)) { requestDiscard([this] { openDialog(); }); return; }
   if (ctrl && pressed(ImGuiKey_I)) { importDialog(); return; }
   if (ctrl && pressed(ImGuiKey_E)) { exportDialog(); return; }
   if (ctrl && pressed(ImGuiKey_Q)) { quit_ = true; return; }

@@ -67,6 +67,8 @@ ready-to-run MuJoCo Warp loader.
   same trajectories.
 - Keyframes: the first one is the start pose of simulations and exported models; pose it in the
   viewport or capture one from the simulation.
+- Unsaved changes are never dropped silently: quitting or opening another project asks first, and
+  modified projects are autosaved in the background and recovered after a crash.
 - Export one file, or a model file plus a scene file that includes it (the Menagerie layout), and
   optionally a `name_mjwarp.py` loader with measured buffer sizes. Big meshes are written as STL
   files and texture images are copied into `name_assets/`, so the export folder is self-contained.

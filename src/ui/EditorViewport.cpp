@@ -753,7 +753,10 @@ void Editor::drawViewportOverlayUI() {
       ImGui::Separator();
       for (const auto& t : templateList()) {
         if (std::string(t.id) == "empty") continue;
-        if (ImGui::Button(t.name, ImVec2(130 * scale_, 0))) newDocument(t.id);
+        if (ImGui::Button(t.name, ImVec2(130 * scale_, 0))) {
+          std::string id = t.id;
+          requestDiscard([this, id] { newDocument(id); });
+        }
         ImGui::SameLine();
         ImGui::TextWrapped("%s", t.description);
       }

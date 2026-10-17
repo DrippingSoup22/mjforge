@@ -3,6 +3,8 @@
 
 #include <chrono>
 #include <memory>
+#include <functional>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -79,7 +81,7 @@ class Editor {
   // True when something changed without user input (e.g. a validation result arrived).
   bool hasPendingWork();
   bool quitRequested() const { return quit_; }
-  bool confirmQuit();
+  bool confirmQuit();  // false: a "save changes?" prompt is shown first
 
   // ----- document & transactions -----
   Document& doc() { return doc_; }
@@ -96,6 +98,8 @@ class Editor {
 
   // ----- actions -----
   void newDocument(const std::string& templateId);
+  // Runs `action` (replacing or closing the project) after asking to save unsaved changes.
+  void requestDiscard(std::function<void()> action);
   bool openPath(const std::string& path);
   bool savePath(const std::string& path);
   void save();
@@ -305,6 +309,24 @@ class Editor {
     bool active = false;
     Vec3 planePoint, planeNormal;
   } simDrag_;
+
+  // not losing work (EditorSafety.cpp)
+  void drawUnsavedModal();
+  void initAutosave();
+  bool autosaveDue() const;
+  void maybeAutosave();
+  void finishAutosave();
+  void removeAutosave();
+  void drawRecoverModal();
+  std::function<void()> pendingDiscard_, afterSave_;
+  bool showUnsaved_ = false;
+  bool quitConfirmed_ = false;
+  std::string autosavePath_;   // this session's autosave file
+  uint64_t autosavedRevision_ = 0;
+  double lastAutosaveTime_ = 0;
+  std::future<bool> autosaveJob_;
+  std::string recoverPath_;    // an autosave left by an earlier session
+  bool showRecover_ = false;
 
   // pose mode
   bool poseMode_ = false;
