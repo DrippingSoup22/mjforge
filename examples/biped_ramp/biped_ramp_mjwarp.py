@@ -8,6 +8,7 @@ import os
 
 import mujoco
 import mujoco_warp as mjw
+import numpy as np
 import warp as wp
 
 XML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "biped_ramp.xml")
@@ -19,6 +20,11 @@ mjm = mujoco.MjModel.from_xml_path(XML)
 mjd = mujoco.MjData(mjm)
 if mjm.nkey > 0:
   mujoco.mj_resetDataKeyframe(mjm, mjd, 0)  # start pose
+  # Delayed actuators read past controls from a history buffer: start it at the keyframe's controls
+  # (do the same after your own resets), or they drive the joints towards 0 for the delay.
+  for i in range(mjm.nu):
+    if mjm.actuator_history[i, 0] > 0:
+      mujoco.mj_initCtrlHistory(mjm, mjd, i, None, np.full((mjm.actuator_history[i, 0], 1), mjd.ctrl[i]))
 mujoco.mj_forward(mjm, mjd)
 
 m = mjw.put_model(mjm)
