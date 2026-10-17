@@ -204,6 +204,13 @@ class Editor {
   bool movesInSimulation(Id element) const;
   // Simulated joint position relative to the reference (0 when not simulating).
   double simJointOffset(Id joint) const;
+  // pose mode (start pose = keyframe 0)
+  void setPoseMode(bool on);
+  const Keyframe* poseKey() const;            // keyframe shown in the viewport (pose mode only)
+  double jointDisplayOffset(Id joint) const;  // joint position relative to the reference, as displayed
+  void poseEdited();
+  void drawPoseGizmo();
+  void drawPosePanel();
   // modeling tools
   bool pickSurface(const Ray& ray, Id* geom, Vec3* point, Vec3* normal);
   LimbSpec limbSpecAt(Id body, const Vec3& normal) const;
@@ -293,6 +300,10 @@ class Editor {
     bool active = false;
     Vec3 planePoint, planeNormal;
   } simDrag_;
+
+  // pose mode
+  bool poseMode_ = false;
+  bool poseDrag_ = false;
 
   // modeling tools
   bool limbTool_ = false;

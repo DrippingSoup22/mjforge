@@ -71,8 +71,27 @@ struct LimbSpec {
 // segment's body.
 Id addLimb(Document& doc, Id parent, const Vec3& worldPoint, const LimbSpec& spec);
 
+// ----- start pose (keyframe 0) -----
+// The start keyframe; a "home" keyframe is created when the document has none.
+Keyframe& startKeyframe(Document& doc);
+// Value of a hinge or slide joint in a keyframe (the joint's reference position if omitted).
+double keyJointValue(const Keyframe* key, const Joint& joint);
+void setKeyJointQpos(Keyframe& key, Id joint, std::vector<double> qpos);
+// Position servos on hinge/slide joints aim at the keyframe pose (ctrl = gear * q), so the pose is
+// held after mj_resetDataKeyframe.
+void syncKeyframeControls(const Document& doc, Keyframe& key);
+// Puts a model's hinge, slide and ball joints back to their reference positions in the keyframe.
+void resetKeyPose(const Document& doc, Keyframe& key, Id root);
+// Copies joint values from one side of a model to the other (left = +y in the model's frame),
+// pairing joints by mirrorName. Returns the number of joints set.
+int mirrorKeyPose(const Document& doc, Keyframe& key, Id root, bool leftToRight);
+// Moves a model's start pose up by dz: its free joint's value in the first keyframe if it has one,
+// otherwise the body itself.
+void liftStartPose(Document& doc, Id root, double dz);
+
 // ----- placement & collision presets -----
-// Moves a top-level body so its lowest geom rests `clearance` above z = floorZ.
+// Moves a top-level body so its lowest colliding geom rests `clearance` above z = floorZ at the
+// start pose (the first keyframe if there is one).
 void placeOnFloor(Document& doc, Id root, double floorZ = 0.0, double clearance = 0.002);
 // Geoms at the bottom of a model (within `tolerance` of its lowest point), e.g. the feet.
 std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance = -1);

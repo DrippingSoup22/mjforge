@@ -8,7 +8,7 @@ namespace mjf {
 enum class Icon {
   World, Body, Box, Sphere, Capsule, Cylinder, Ellipsoid, Plane, Hfield, Hinge, Slide, Ball, Free, Site, Camera,
   Light, Actuator, Sensor, Material, Exclude, EyeOpen, EyeClosed, Play, Pause, Step, Reset, Stop, Select, Move, Rotate,
-  Scale, Warning, Error, Info, Ok, Magnet, Limb, Mirror, Plus
+  Scale, Warning, Error, Info, Ok, Magnet, Limb, Mirror, Plus, Pose
 };
 
 void drawIcon(ImDrawList* dl, ImVec2 center, float size, Icon icon, ImU32 color);

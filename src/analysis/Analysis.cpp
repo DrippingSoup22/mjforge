@@ -176,20 +176,6 @@ double polygonDistance(const std::vector<Vec2>& poly, const Vec2& q) {
   return worst;
 }
 
-// Moves a model's start pose up by dz: its free joint's value in the first keyframe if it has one,
-// otherwise the body itself.
-void liftStartPose(Document& d, Id root, double dz) {
-  if (!d.keyframes.empty())
-    for (const Joint& j : d.joints)
-      if (j.body == root && j.type == JointType::Free)
-        for (auto& [jid, q] : d.keyframes[0].qpos)
-          if (jid == j.id && q.size() == 7) {
-            q[2] += dz;
-            return;
-          }
-  if (Body* b = d.body(root)) b->pos.z += dz;
-}
-
 class Analyzer {
  public:
   Analyzer(const Document& d, const CompileResult* cr, bool crValid) : doc_(d), cr_(cr), crValid_(crValid) {}

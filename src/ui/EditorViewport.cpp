@@ -78,7 +78,7 @@ double bodyScale(const Document& doc, const std::vector<Pose>& poses, Id body) {
 // ------------------------------------------------------------------------------------ scene
 
 void Editor::buildScene(std::vector<DrawItem>& items) {
-  poses_ = computeBodyPoses(doc_);
+  poses_ = computeBodyPoses(doc_, poseKey());
   if (sim_.active()) applySimPoses();
   const DocIndex& ix = doc_.index();
   std::unordered_set<Id> selected(sel_.ids.begin(), sel_.ids.end());
@@ -212,7 +212,7 @@ void Editor::buildOverlays() {
         double r = L * 0.6;
         // While simulating, the range stays attached to the parent and the needle shows the angle.
         Vec3 zero = ref;
-        double q = simJointOffset(j.id);
+        double q = jointDisplayOffset(j.id);
         if (q != 0) zero = rotate(axisAngle(axis, -q), ref);
         if (j.limited && j.range.y > j.range.x) {
           Color fill = c;
@@ -232,7 +232,7 @@ void Editor::buildOverlays() {
         dbg_.arrow(anchor + axis * (L * 0.4), anchor - axis * (L * 0.8), c, w, layer);
         if (j.limited) {
           Vec3 u = perpendicular(axis) * (L * 0.15);
-          Vec3 zero = anchor - axis * simJointOffset(j.id);
+          Vec3 zero = anchor - axis * jointDisplayOffset(j.id);
           for (double v : {j.range.x, j.range.y}) dbg_.line(zero + axis * v - u, zero + axis * v + u, c, w + 1, layer);
         }
         break;
@@ -514,6 +514,10 @@ static Vec3 gizmoScaleOf(const Geom& g) {
 
 void Editor::drawGizmo() {
   vp_.gizmoUsing = false;
+  if (poseMode_ && !sim_.active()) {
+    drawPoseGizmo();
+    return;
+  }
   Id id = sel_.primary();
   Kind k = doc_.kindOf(id);
   if (gizmoOp_ == GizmoOp::Select || id == kNoId || id == kWorldId) return;
@@ -715,6 +719,7 @@ void Editor::drawViewportOverlayUI() {
   ImGui::PopStyleVar();
 
   if (sim_.active()) drawSimBadge();
+  else if (poseMode_) drawPosePanel();
   else drawLimbToolPanel();
 
   // Hover name and hints (bottom left).

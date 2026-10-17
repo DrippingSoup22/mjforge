@@ -50,6 +50,17 @@ make 5 radial copies around Z with a total angle of 360 degrees to get six legs 
 *Ctrl+M* mirrors a body subtree left/right with names (`left` becomes `right`) and joint axes that
 move symmetrically.
 
+**Start pose.** Press **P** (or the stick-figure button) for pose mode. The viewport shows the
+model in its start pose, and selecting a body shows a ring per joint (red: roll about the body's X
+axis, green: pitch about Y, blue: yaw about Z); drag a ring to turn the joint. The panel lists
+every joint of the model with a slider, copies a pose from the left side to the right side (or
+back; joints whose axes point the same way on both sides get the opposite angle), and *Place on
+floor* lowers the posed model until its feet touch the floor. With the model root selected, W and E
+move and turn the whole model. The pose is stored as keyframe 0 (created as `home` on the first
+change): simulations, the analysis and exported models start from it, and position servos get the
+matching control values so they hold it after `mj_resetDataKeyframe`. Esc or P leaves pose mode;
+bodies can only be moved outside it.
+
 **Collisions.** *Tools > Collisions* has presets for a selected model: everything collides, no
 self-collisions, or only the feet touch the world (the cheapest setup for locomotion training).
 *Tools > Exclude contacts between selected bodies* adds `<exclude>` pairs.
@@ -120,7 +131,7 @@ gets a colored frame and a badge with the simulated time.
 - **Instability**: if the dynamics blow up, the simulation pauses, names the joint where it
   happened, and lists the usual causes.
 - **Keyframes**: *Save pose as keyframe* stores the current pose as the start pose (keyframe 0)
-  of every later simulation and of the exported model.
+  of every later simulation and of the exported model. Pose mode (P) edits it directly.
 - **Keys**: Space play/pause, Shift+Space stop, Ctrl+R reset, Right arrow single step while paused.
 
 Static parts of the environment stay editable while simulating: move an obstacle and the running
@@ -193,6 +204,7 @@ a project does not depend on the original mesh files; texture images are referen
 | Q W E R | select, move, rotate, resize |
 | Tab | gizmo in world / local frame (Ctrl inverts snapping while dragging) |
 | G | add-limb tool (Esc leaves it) |
+| P | pose mode: edit the start pose (Esc leaves it) |
 | F, Home | frame selection, frame everything |
 | Numpad 1 / 3 / 7 / 5 | front, side, top view, orthographic |
 | Ctrl+D, Ctrl+M, Del | duplicate, mirror left/right, delete |

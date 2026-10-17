@@ -238,6 +238,16 @@ void drawIcon(ImDrawList* dl, ImVec2 c, float size, Icon icon, ImU32 col) {
       dl->AddLine(off(c, s, -0.7f, 0), off(c, s, 0.7f, 0), col, t * 1.8f);
       dl->AddLine(off(c, s, 0, -0.7f), off(c, s, 0, 0.7f), col, t * 1.8f);
       break;
+    case Icon::Pose: {  // stick figure with a raised arm and a bent knee
+      dl->AddCircleFilled(off(c, s, 0, -0.68f), s * 0.2f, col, 12);
+      dl->AddLine(off(c, s, 0, -0.45f), off(c, s, 0, 0.2f), col, t * 1.8f);
+      dl->AddLine(off(c, s, 0, -0.25f), off(c, s, -0.55f, 0.05f), col, t * 1.6f);
+      dl->AddLine(off(c, s, 0, -0.25f), off(c, s, 0.5f, -0.6f), col, t * 1.6f);
+      dl->AddLine(off(c, s, 0, 0.2f), off(c, s, -0.4f, 0.88f), col, t * 1.6f);
+      dl->AddLine(off(c, s, 0, 0.2f), off(c, s, 0.35f, 0.45f), col, t * 1.6f);
+      dl->AddLine(off(c, s, 0.35f, 0.45f), off(c, s, 0.3f, 0.88f), col, t * 1.6f);
+      break;
+    }
   }
 }
 

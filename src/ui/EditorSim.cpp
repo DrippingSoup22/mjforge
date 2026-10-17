@@ -117,6 +117,7 @@ void Editor::startSimulation(bool paused) {
     lastFrameTime_ = now();
     return;
   }
+  poseMode_ = false;  // the simulation starts from the pose and shows it moving
   simStartPaused_ = paused;
   if (compileValid()) {
     launchSimulation();

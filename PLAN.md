@@ -182,7 +182,8 @@ headless settle).
 
 ### M5 — Polish
 - [x] Keyframes (per-joint storage, start pose, capture from simulation)
-- [ ] Pose mode (edit keyframes in the viewport)
+- [x] Pose mode (P): edit the start pose in the viewport with joint rings and sliders, mirror
+      left/right (axis-aware), place on the floor; position servos get matching keyframe controls
 - [x] Mesh assets: imported with MJCF files and loaded from STL/OBJ/MSH through MuJoCo, exact
       volume, mass and inertia, rendering and picking; projects store them as base64, exports write
       big meshes as STL files and copy texture images next to the XML

@@ -637,14 +637,122 @@ Id addLimb(Document& doc, Id parent, const Vec3& worldPoint, const LimbSpec& spe
   return first;
 }
 
-void placeOnFloor(Document& doc, Id root, double floorZ, double clearance) {
-  if (root == kWorldId || !doc.body(root)) return;
-  auto poses = computeBodyPoses(doc);
-  double minZ = subtreeMinZ(doc, poses, root);
-  if (std::isfinite(minZ)) {
-    doc.body(root)->pos.z += floorZ + clearance - minZ;
+Keyframe& startKeyframe(Document& doc) {
+  if (doc.keyframes.empty()) {
+    Keyframe k;
+    k.name = "home";
+    doc.keyframes.push_back(k);
     doc.touch();
   }
+  return doc.keyframes[0];
+}
+
+double keyJointValue(const Keyframe* key, const Joint& joint) {
+  const std::vector<double>* q = key ? key->jointQpos(joint.id) : nullptr;
+  return q && q->size() == 1 ? (*q)[0] : joint.ref;
+}
+
+void setKeyJointQpos(Keyframe& key, Id joint, std::vector<double> qpos) {
+  for (auto& e : key.qpos)
+    if (e.first == joint) {
+      e.second = std::move(qpos);
+      return;
+    }
+  key.qpos.emplace_back(joint, std::move(qpos));
+}
+
+void syncKeyframeControls(const Document& doc, Keyframe& key) {
+  for (const Actuator& a : doc.actuators) {
+    if (a.type != ActuatorType::Position || a.trn != TrnType::Joint) continue;
+    const Joint* j = doc.joint(a.target);
+    if (!j || (j->type != JointType::Hinge && j->type != JointType::Slide)) continue;
+    double c = a.gear[0] * keyJointValue(&key, *j);
+    if (a.ctrllimited && a.ctrlrange.y > a.ctrlrange.x) c = std::clamp(c, a.ctrlrange.x, a.ctrlrange.y);
+    bool found = false;
+    for (auto& e : key.ctrl)
+      if (e.first == a.id) {
+        e.second = c;
+        found = true;
+      }
+    if (!found) key.ctrl.emplace_back(a.id, c);
+  }
+}
+
+void resetKeyPose(const Document& doc, Keyframe& key, Id root) {
+  std::vector<Id> bodies = doc.subtree(root);
+  std::unordered_set<Id> in(bodies.begin(), bodies.end());
+  key.qpos.erase(std::remove_if(key.qpos.begin(), key.qpos.end(),
+                                [&](const auto& e) {
+                                  const Joint* j = doc.joint(e.first);
+                                  return j && j->type != JointType::Free && in.count(j->body);
+                                }),
+                 key.qpos.end());
+  syncKeyframeControls(doc, key);
+}
+
+int mirrorKeyPose(const Document& doc, Keyframe& key, Id root, bool leftToRight) {
+  std::vector<Id> bodies = doc.subtree(root);
+  std::unordered_set<Id> in(bodies.begin(), bodies.end());
+  std::unordered_map<std::string, const Joint*> byName;
+  for (const Joint& j : doc.joints)
+    if (in.count(j.body) && !j.name.empty()) byName[j.name] = &j;
+  // The side comes from where the joint sits in the model's frame (y > 0 is left in MuJoCo's
+  // convention), so any naming scheme works as long as mirrorName pairs the names.
+  Pose rootInv = inverse(bodyWorldPose(doc, root));
+  auto side = [&](const Joint& j) { return rootInv.apply(bodyWorldPose(doc, j.body).apply(j.pos)).y; };
+  int n = 0;
+  for (const auto& [name, j] : byName) {
+    double y = side(*j);
+    if (j->type == JointType::Free || (leftToRight ? y < 1e-6 : y > -1e-6)) continue;
+    bool changed = false;
+    std::string other = mirrorName(name, &changed);
+    auto it = byName.find(other);
+    if (!changed || it == byName.end() || it->second->type != j->type) continue;
+    if (leftToRight ? side(*it->second) > -1e-6 : side(*it->second) < 1e-6) continue;  // not across
+    const Joint& t = *it->second;
+    const std::vector<double>* q = key.jointQpos(j->id);
+    if (j->type == JointType::Hinge || j->type == JointType::Slide) {
+      // Mirror-symmetric motion: hinge axes reflect as pseudo-vectors, slide axes as vectors. If
+      // the other joint's axis points the opposite way, the value changes sign.
+      auto axisIn = [&](const Joint& x) { return rotate(rootInv.quat, rotate(bodyWorldPose(doc, x.body).quat, normalize(x.axis))); };
+      Vec3 a = axisIn(*j), b = axisIn(t);
+      Vec3 mirrored = j->type == JointType::Hinge ? Vec3{-a.x, a.y, -a.z} : Vec3{a.x, -a.y, a.z};
+      double sign = dot(mirrored, b) < -0.5 ? -1.0 : 1.0;
+      double v = t.ref + sign * (keyJointValue(&key, *j) - j->ref);
+      if (t.limited && t.range.y > t.range.x) v = std::clamp(v, t.range.x, t.range.y);
+      setKeyJointQpos(key, t.id, {v});
+    } else if (q) {
+      setKeyJointQpos(key, t.id, *q);
+    } else {
+      key.qpos.erase(std::remove_if(key.qpos.begin(), key.qpos.end(), [&](const auto& e) { return e.first == t.id; }), key.qpos.end());
+    }
+    ++n;
+  }
+  syncKeyframeControls(doc, key);
+  return n;
+}
+
+void liftStartPose(Document& doc, Id root, double dz) {
+  if (!doc.keyframes.empty())
+    for (const Joint& j : doc.joints)
+      if (j.body == root && j.type == JointType::Free)
+        for (auto& [jid, q] : doc.keyframes[0].qpos)
+          if (jid == j.id && q.size() == 7) {
+            q[2] += dz;
+            doc.touch();
+            return;
+          }
+  if (Body* b = doc.body(root)) b->pos.z += dz;
+  doc.touch();
+}
+
+void placeOnFloor(Document& doc, Id root, double floorZ, double clearance) {
+  if (root == kWorldId || !doc.body(root)) return;
+  auto poses = computeBodyPoses(doc, doc.keyframes.empty() ? nullptr : &doc.keyframes[0]);
+  // Visual-only geoms never touch the ground; use them only when nothing collides.
+  bool colliding = subtreeAabb(doc, poses, root, true).valid();
+  double minZ = subtreeMinZ(doc, poses, root, colliding);
+  if (std::isfinite(minZ)) liftStartPose(doc, root, floorZ + clearance - minZ);
 }
 
 std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance) {

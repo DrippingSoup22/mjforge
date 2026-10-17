@@ -489,9 +489,9 @@ void Editor::drawScenePanel() {
 
   ImGui::SeparatorText("Keyframes");
   if (doc_.keyframes.empty()) {
-    ImGui::TextWrapped("None: simulations start from the reference pose. To set a start pose, simulate, pose the "
-                       "model (Manual sliders, or let it settle) and press 'Save pose as keyframe' in the Simulation "
-                       "panel.");
+    ImGui::TextWrapped("None: simulations start from the reference pose. Set a start pose in pose mode (P), or "
+                       "simulate and press 'Save pose as keyframe' in the Simulation panel.");
+    if (ImGui::Button("Pose mode")) setPoseMode(true);
   }
   for (size_t k = 0; k < doc_.keyframes.size(); ++k) {
     ImGui::PushID(int(k));

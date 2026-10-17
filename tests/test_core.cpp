@@ -11,6 +11,7 @@
 #include "core/MjcfWriter.h"
 #include "core/Ops.h"
 #include "core/ProjectIO.h"
+#include "core/Templates.h"
 #include "sim/MujocoBridge.h"
 
 using namespace mjf;
@@ -362,4 +363,75 @@ TEST_CASE("arrays: radial legs and linear geoms") {
   std::vector<Id> posts = arrayDuplicate(doc, post, 3, {{0.5, 0, 0}, {}});
   REQUIRE(posts.size() == 3);
   CHECK(doc.geom(posts[2])->pos.x == doctest::Approx(2.5));
+}
+
+TEST_CASE("start pose: joint values, servo targets, mirror, reset, floor") {
+  Document doc;
+  REQUIRE(makeTemplate("quadruped", doc));
+  REQUIRE(doc.keyframes.empty());
+  auto joint = [&](const char* name) -> const Joint& {
+    for (const Joint& j : doc.joints) if (j.name == name) return j;
+    FAIL("no joint " << name);
+    return doc.joints[0];
+  };
+  const Joint& fl = joint("FL_knee");
+  const Joint& fr = joint("FR_knee");
+  CHECK(keyJointValue(nullptr, fl) == fl.ref);
+  Keyframe& key = startKeyframe(doc);
+  CHECK(key.name == "home");
+  CHECK(&startKeyframe(doc) == &doc.keyframes[0]);  // created once
+  setKeyJointQpos(key, fl.id, {-0.7});
+  setKeyJointQpos(key, fl.id, {-0.8});  // replaces
+  CHECK(key.qpos.size() == 1);
+  CHECK(keyJointValue(&key, fl) == -0.8);
+  syncKeyframeControls(doc, key);
+  // Every position servo gets a target; the FL knee servo aims at the pose.
+  int servos = 0;
+  for (const Actuator& a : doc.actuators) servos += a.type == ActuatorType::Position;
+  CHECK(int(key.ctrl.size()) == servos);
+  for (const auto& [aid, c] : key.ctrl)
+    if (doc.actuator(aid)->target == fl.id) CHECK(c == doctest::Approx(-0.8));
+
+  // Mirror: the left knee's value goes to the right knee. Both hip-roll axes point forward in
+  // this template, so a mirror-symmetric pose needs the opposite roll angle.
+  setKeyJointQpos(key, joint("FL_hip_roll").id, {0.3});
+  CHECK(mirrorKeyPose(doc, key, doc.rootOf(fl.body), true) >= 2);
+  CHECK(keyJointValue(&key, fr) == doctest::Approx(-0.8));
+  CHECK(keyJointValue(&key, joint("FR_hip_roll")) == doctest::Approx(-0.3));
+  auto mp = computeBodyPoses(doc, &key);
+  Vec3 fla = mp[doc.bodyIndex(joint("FL_knee").body)].pos, fra = mp[doc.bodyIndex(fr.body)].pos;
+  Vec3 rootp = mp[doc.bodyIndex(doc.rootOf(fl.body))].pos;
+  CHECK(fla.x == doctest::Approx(fra.x));
+  CHECK(fla.z == doctest::Approx(fra.z));
+  CHECK(fla.y - rootp.y == doctest::Approx(rootp.y - fra.y));
+
+  // The pose compiles into a keyframe MuJoCo starts from, and the servos hold it.
+  ExportMap map;
+  CompileResult cr = compileMjcf(writeMjcf(doc, {}, &map));
+  INFO(cr.error);
+  REQUIRE(cr.ok);
+  REQUIRE(cr.model->nkey == 1);
+  int jid = -1;
+  for (int j = 0; j < int(map.joints.size()); ++j) if (map.joints[j] == fl.id) jid = j;
+  REQUIRE(jid >= 0);
+  CHECK(cr.model->key_qpos[cr.model->jnt_qposadr[jid]] == doctest::Approx(-0.8));
+
+  // Bent knees lower the body: placing on the floor moves the keyframe's root, not the body.
+  Id root = doc.rootOf(fl.body);
+  for (const char* n : {"FL_knee", "FR_knee", "RL_knee", "RR_knee"}) setKeyJointQpos(key, joint(n).id, {-0.9});
+  Vec3 bodyPos = doc.body(root)->pos;
+  const Joint* free = nullptr;
+  for (const Joint& j : doc.joints) if (j.body == root && j.type == JointType::Free) free = &j;
+  REQUIRE(free);
+  setKeyJointQpos(key, free->id, {bodyPos.x, bodyPos.y, bodyPos.z, 1, 0, 0, 0});
+  placeOnFloor(doc, root);
+  CHECK(doc.body(root)->pos == bodyPos);
+  auto poses = computeBodyPoses(doc, &doc.keyframes[0]);
+  CHECK(subtreeMinZ(doc, poses, root, true) == doctest::Approx(0.002).epsilon(1e-6));
+  CHECK((*doc.keyframes[0].jointQpos(free->id))[2] < bodyPos.z);
+
+  // Reset brings the joints back (the free joint stays).
+  resetKeyPose(doc, key, root);
+  CHECK(keyJointValue(&key, fl) == fl.ref);
+  CHECK(key.jointQpos(free->id) != nullptr);
 }

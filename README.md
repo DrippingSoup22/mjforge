@@ -23,6 +23,9 @@ ready-to-run MuJoCo Warp loader.
 - **Add-limb tool** (G): click a body to grow a jointed limb with actuators and a foot; it is
   mirrored to the other side automatically (`leg1_left_hip`, `leg1_right_hip`, ...).
 - Mirror, duplicate, linear and radial **arrays** (six hexapod legs from one).
+- **Pose mode** (P): set the start pose by rotating joints in the viewport (a crouch, a raised
+  arm), mirror it left/right and drop it onto the floor. It becomes keyframe 0 with matching
+  position-servo targets, which training code resets to.
 - **Environment generators** with live parameters: stairs, ramps, rough terrain and waves (single
   height-field geoms, cheap in MJWarp), stepping stones, obstacle fields, arena walls.
 - Templates: quadruped, hexapod, biped, hopper, robot arm, empty scene.
@@ -57,8 +60,8 @@ ready-to-run MuJoCo Warp loader.
 - MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes, orientations
   and meshes behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (Unitree Go2 and H1,
   ANYmal C, Franka Panda): the re-exported files compile to the same masses, inertias and poses.
-- Keyframes: the first one is the start pose of simulations and exported models; capture one from
-  the simulation.
+- Keyframes: the first one is the start pose of simulations and exported models; pose it in the
+  viewport or capture one from the simulation.
 - Export one file, or a model file plus a scene file that includes it (the Menagerie layout), and
   optionally a `name_mjwarp.py` loader with measured buffer sizes. Big meshes are written as STL
   files and texture images are copied into `name_assets/`, so the export folder is self-contained.
@@ -105,6 +108,7 @@ walks through every panel.
 | Q W E R | select, move, rotate, resize |
 | Tab | gizmo in world / local frame |
 | G | add-limb tool |
+| P | pose mode (start pose) |
 | F / Home | frame selection / frame everything |
 | Ctrl+D, Ctrl+M, Del | duplicate, mirror left/right, delete |
 | Ctrl+Z, Ctrl+Y | undo, redo |
@@ -163,7 +167,6 @@ The design and milestones are in [PLAN.md](PLAN.md).
 
 - SDF geoms from imported files are approximated by boxes (bodies keep exact masses and inertias).
 - Tendons, equality constraints and explicit contact pairs are not edited yet (import reports them).
-- Keyframes can be captured from the simulation but not yet posed directly in the viewport.
 
 ## Third-party software
 

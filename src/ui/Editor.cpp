@@ -108,6 +108,20 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a == "shortcuts") showShortcuts_ = true;
     else if (a.rfind("export:", 0) == 0) exportTo(a.substr(7), ExportOptions::Scope::All, false);
     else if (a == "limbtool") limbTool_ = true;
+    else if (a == "posemode") setPoseMode(true);
+    else if (a.rfind("pose:", 0) == 0) {
+      // pose:<joint>=<value> (degrees for hinges), as if dragged in pose mode.
+      size_t eq = a.find('=');
+      std::string jn = a.substr(5, eq == std::string::npos ? std::string::npos : eq - 5);
+      for (const Joint& j : doc_.joints)
+        if (j.name == jn && eq != std::string::npos && (j.type == JointType::Hinge || j.type == JointType::Slide)) {
+          double v = std::atof(a.c_str() + eq + 1);
+          checkpoint("Pose");
+          setKeyJointQpos(startKeyframe(doc_), j.id, {j.type == JointType::Hinge ? deg2rad(v) : v});
+          poseEdited();
+          break;
+        }
+    }
     else if (a.rfind("sim:", 0) == 0) {
       // Start paused and fast-forward: deterministic screenshots of the simulation.
       cliSimSeconds_ = std::max(1e-9, std::atof(a.c_str() + 4));
@@ -764,8 +778,13 @@ void Editor::drawToolbar() {
     ImGui::SameLine();
     if (iconButton("##addsite", Icon::Site, false, "Add a site (sensor / attachment point)")) addSiteTo(targetBody());
     ImGui::SameLine();
-    if (iconButton("##limbtool", Icon::Limb, limbTool_, "Add limb tool (G): click a body to grow a jointed limb"))
+    if (iconButton("##limbtool", Icon::Limb, limbTool_, "Add limb tool (G): click a body to grow a jointed limb")) {
       limbTool_ = !limbTool_;
+      if (limbTool_) setPoseMode(false);
+    }
+    ImGui::SameLine();
+    if (iconButton("##posemode", Icon::Pose, poseMode_, "Pose mode (P): set the start pose by moving joints"))
+      setPoseMode(!poseMode_);
     sep();
     if (iconButton("##mirror", Icon::Mirror, false, "Mirror selected body left/right (Ctrl+M)")) mirrorSelection(1);
     sep();
@@ -894,6 +913,7 @@ void Editor::drawShortcutsWindow() {
     table("##edit", {{"Q  W  E  R", "select, move, rotate, resize"},
                      {"Tab", "gizmo in world / local frame (hold Ctrl to invert snapping)"},
                      {"G", "add-limb tool (Esc leaves it)"},
+                     {"P", "pose mode: set the start pose by moving joints (Esc leaves it)"},
                      {"Ctrl+D  Ctrl+M  Del", "duplicate, mirror left/right, delete"},
                      {"Ctrl+Z  Ctrl+Y", "undo, redo"},
                      {"F2", "rename (outliner)"}});
@@ -932,12 +952,17 @@ void Editor::handleShortcuts() {
   if (pressed(ImGuiKey_Delete) || (pressed(ImGuiKey_Backspace) && !io.WantCaptureKeyboard)) deleteSelection();
   if (pressed(ImGuiKey_Escape)) {
     if (limbTool_) limbTool_ = false;
+    else if (poseMode_) setPoseMode(false);
     else sel_.clear();
   }
   if (io.WantCaptureKeyboard && !vp_.hovered) return;
   if (pressed(ImGuiKey_Space)) shift ? stopSimulation() : toggleSimulation();
   if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) && sim_.active() && sim_.paused()) stepSimulation();
-  if (pressed(ImGuiKey_G)) limbTool_ = !limbTool_;
+  if (pressed(ImGuiKey_G)) {
+    limbTool_ = !limbTool_;
+    if (limbTool_) setPoseMode(false);
+  }
+  if (pressed(ImGuiKey_P)) setPoseMode(!poseMode_);
   if (pressed(ImGuiKey_Q)) gizmoOp_ = GizmoOp::Select;
   if (pressed(ImGuiKey_W)) gizmoOp_ = GizmoOp::Translate;
   if (pressed(ImGuiKey_E)) gizmoOp_ = GizmoOp::Rotate;
