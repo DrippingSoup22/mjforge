@@ -23,6 +23,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -37,6 +50,7 @@
    "cylTimeconst": 1.0,
    "damping": 0.0,
    "dampratio": 0.0,
+   "dcinput": "voltage",
    "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
@@ -82,6 +96,10 @@
    ],
    "group": 0,
    "id": 26,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
    "interp": 0,
    "kp": 1.0,
@@ -92,6 +110,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -103,11 +132,30 @@
     0.04
    ],
    "name": "flexor_motor",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 24,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "tendon",
    "type": "motor",
@@ -136,6 +184,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -150,6 +211,7 @@
    "cylTimeconst": 1.0,
    "damping": 0.0,
    "dampratio": 0.0,
+   "dcinput": "voltage",
    "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
@@ -195,6 +257,10 @@
    ],
    "group": 0,
    "id": 27,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
    "interp": 0,
    "kp": 1.0,
@@ -205,6 +271,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -216,11 +293,30 @@
     0.04
    ],
    "name": "extensor_motor",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 25,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "tendon",
    "type": "motor",
@@ -249,6 +345,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -263,6 +372,7 @@
    "cylTimeconst": 1.0,
    "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
    "delay": 0.004,
    "diameter": 0.0,
    "dynprm": [
@@ -308,6 +418,10 @@
    ],
    "group": 0,
    "id": 28,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
    "interp": 0,
    "kp": 250.0,
@@ -318,6 +432,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -329,11 +454,30 @@
     0.04
    ],
    "name": "shoulder_servo",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "nsample": 2,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 7,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -381,7 +525,8 @@
     0.0,
     0.0
    ],
-   "role": "environment"
+   "role": "environment",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -423,7 +568,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -465,7 +611,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -507,7 +654,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -549,7 +697,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -591,7 +740,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   }
  ],
  "cameras": [],
@@ -609,17 +759,27 @@
  "generator": "MJForge 0.1.0",
  "geoms": [
   {
+   "adhesion": 0.0,
    "body": 1,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -666,20 +826,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "plane"
   },
   {
+   "adhesion": 0.0,
    "body": 2,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -726,20 +904,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 3,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -786,20 +982,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 3,
    "conaffinity": 0,
    "condim": 3,
    "contype": 0,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -846,20 +1060,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "cylinder"
   },
   {
+   "adhesion": 0.0,
    "body": 4,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -906,20 +1138,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 5,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -966,20 +1216,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "sphere"
   },
   {
+   "adhesion": 0.0,
    "body": 6,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1025,6 +1293,14 @@
    "solref": [
     0.02,
     1.0
+   ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
    ],
    "type": "sphere"
   }
@@ -1221,6 +1497,7 @@
     0.0
    ],
    "body": 1,
+   "bulbradius": 0.02,
    "castshadow": true,
    "cutoff": 45.0,
    "diffuse": [
@@ -1236,6 +1513,7 @@
    "exponent": 10.0,
    "hidden": false,
    "id": 23,
+   "intensity": 0.0,
    "mode": "fixed",
    "name": "sun",
    "pos": [
@@ -1243,6 +1521,8 @@
     0.0,
     3.0
    ],
+   "range": 10.0,
+   "softness": 0.2,
    "specular": [
     0.3,
     0.3,
@@ -1258,8 +1538,10 @@
  "nextId": 33,
  "option": {
   "ccd_iterations": 35,
+  "ccd_tolerance": 1e-06,
   "cone": "elliptic",
   "density": 0.0,
+  "disableactuator": 0,
   "flag_actuation": true,
   "flag_autoreset": true,
   "flag_clampctrl": true,
@@ -1301,7 +1583,29 @@
    -0.5,
    0.0
   ],
+  "memory": "",
   "noslip_iterations": 0,
+  "noslip_tolerance": 1e-06,
+  "o_friction": [
+   1.0,
+   1.0,
+   0.005,
+   0.0001,
+   0.0001
+  ],
+  "o_margin": 0.0,
+  "o_solimp": [
+   0.9,
+   0.95,
+   0.001,
+   0.5,
+   2.0
+  ],
+  "o_solref": [
+   0.02,
+   1.0
+  ],
+  "sleep_tolerance": 0.001,
   "solver": "Newton",
   "timestep": 0.002,
   "tolerance": 1e-08,
@@ -1314,6 +1618,7 @@
  },
  "pairs": [
   {
+   "adhesion": 0.0,
    "condim": 4,
    "friction": [
     1.2,
@@ -1347,34 +1652,70 @@
  ],
  "sensors": [
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 29,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 24,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "tendonpos"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 30,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 25,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "tendonpos"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 31,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 8,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "jointpos"
@@ -1723,7 +2064,7 @@
   }
  ],
  "textures": [],
- "version": 1,
+ "version": 3,
  "visual": {
   "azimuth": 90.0,
   "elevation": -45.0,

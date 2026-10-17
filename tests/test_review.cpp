@@ -439,6 +439,14 @@ TEST_CASE("review: save and load give back every digit of the export") {
     if (b.contains("quat")) b["quat"] = {2, 0, 0, 0};
   REQUIRE(projectFromJson(back, j.dump(), &err));
   CHECK(back.bodies[2].quat.w == doctest::Approx(1));
+  // Colors are floats: saved as the shortest decimal that reads back as the same float.
+  std::uniform_real_distribution<float> uf(0, 1);
+  for (Geom& g : doc.geoms) g.rgba = {uf(rng), uf(rng), uf(rng), uf(rng)};
+  doc.geoms[0].rgba = {0.3f, 0.33f, 0.38f, 1};
+  json = projectToJson(doc);
+  CHECK(json.find("0.30000001") == std::string::npos);
+  REQUIRE(projectFromJson(back, json, &err));
+  for (size_t i = 0; i < doc.geoms.size(); ++i) CHECK(back.geoms[i].rgba == doc.geoms[i].rgba);
 }
 
 TEST_CASE("review: sensors fit the joints and objects they read") {

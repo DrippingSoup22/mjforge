@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -63,6 +65,18 @@ MJF_ENUM_TABLE(MeshInertia, kMeshInertias)
 // infinite values are stored as +-1e300, which MuJoCo also reads as unbounded.
 double finite(double v) { return std::isnan(v) ? 0.0 : std::isinf(v) ? (v > 0 ? 1e300 : -1e300) : v; }
 
+// A float as the shortest decimal that reads back as the same float: 0.3, not 0.30000001192092896.
+double shortest(float v) {
+  if (!std::isfinite(v)) return finite(v);
+  char buf[32];
+  for (int digits = 6; digits < 9; ++digits) {
+    std::snprintf(buf, sizeof buf, "%.*g", digits, double(v));
+    double d = std::strtod(buf, nullptr);
+    if (float(d) == v) return d;
+  }
+  return double(v);  // 9 digits always round-trip, and a double holds the float exactly
+}
+
 struct Saver {
   json& j;
   void operator()(const char* k, double& v) { j[k] = finite(v); }
@@ -79,7 +93,7 @@ struct Saver {
   void operator()(const char* k, Vec3& v) { j[k] = {finite(v.x), finite(v.y), finite(v.z)}; }
   void operator()(const char* k, Vec4& v) { j[k] = {finite(v.x), finite(v.y), finite(v.z), finite(v.w)}; }
   void operator()(const char* k, Quat& v) { j[k] = {finite(v.w), finite(v.x), finite(v.y), finite(v.z)}; }
-  void operator()(const char* k, Color& v) { j[k] = {finite(v.r), finite(v.g), finite(v.b), finite(v.a)}; }
+  void operator()(const char* k, Color& v) { j[k] = {shortest(v.r), shortest(v.g), shortest(v.b), shortest(v.a)}; }
   template <int N> void operator()(const char* k, VecN<N>& v) {
     json a = json::array();
     for (int i = 0; i < N; ++i) a.push_back(finite(v[i]));

@@ -9,6 +9,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -22,6 +23,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -34,7 +48,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 0.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -79,7 +96,12 @@
    ],
    "group": 0,
    "id": 15,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 0.0,
    "kv": 0.0,
    "lengthrange": [
@@ -88,6 +110,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -99,10 +132,30 @@
     0.04
    ],
    "name": "hopper_thigh_joint_motor",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 13,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "motor",
@@ -117,6 +170,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -130,6 +184,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -142,7 +209,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 0.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -187,7 +257,12 @@
    ],
    "group": 0,
    "id": 19,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 0.0,
    "kv": 0.0,
    "lengthrange": [
@@ -196,6 +271,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -207,10 +293,30 @@
     0.04
    ],
    "name": "hopper_leg_joint_motor",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 17,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "motor",
@@ -225,6 +331,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -238,6 +345,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -250,7 +370,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 0.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -295,7 +418,12 @@
    ],
    "group": 0,
    "id": 23,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 0.0,
    "kv": 0.0,
    "lengthrange": [
@@ -304,6 +432,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -315,10 +454,30 @@
     0.04
    ],
    "name": "hopper_foot_joint_motor",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 21,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "motor",
@@ -366,7 +525,8 @@
     0.0,
     0.0
    ],
-   "role": "environment"
+   "role": "environment",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -408,7 +568,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -450,7 +611,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -492,7 +654,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -534,7 +697,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -584,7 +748,8 @@
     0.0,
     0.0
    ],
-   "role": "environment"
+   "role": "environment",
+   "sleep": "auto"
   }
  ],
  "cameras": [],
@@ -596,22 +761,33 @@
   "inertiafromgeom": "auto",
   "settotalmass": -1.0
  },
+ "equalities": [],
  "excludes": [],
  "format": "mjforge",
  "generator": "MJForge 0.1.0",
  "geoms": [
   {
+   "adhesion": 0.0,
    "body": 1,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -620,6 +796,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 4,
+   "mesh": 0,
    "name": "floor",
    "pos": [
     0.0,
@@ -634,9 +811,9 @@
     0.0
    ],
    "rgba": [
-    1.0,
-    1.0,
-    1.0,
+    0.5,
+    0.5,
+    0.5,
     1.0
    ],
    "shellinertia": false,
@@ -657,20 +834,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "plane"
   },
   {
+   "adhesion": 0.0,
    "body": 7,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -679,6 +874,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "hopper_torso_geom",
    "pos": [
     0.0,
@@ -716,20 +912,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 12,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -738,6 +952,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "hopper_thigh_geom",
    "pos": [
     0.0,
@@ -775,20 +990,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 16,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -797,6 +1030,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "hopper_leg_geom",
    "pos": [
     0.0,
@@ -834,20 +1068,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 20,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     2.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -856,6 +1108,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "hopper_foot_geom",
    "pos": [
     0.065,
@@ -893,20 +1146,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_1_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -915,6 +1186,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_1_1",
    "pos": [
     0.175,
@@ -952,20 +1224,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_2_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -974,6 +1264,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_2_1",
    "pos": [
     0.605,
@@ -1011,20 +1302,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_3_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1033,6 +1342,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_3_1",
    "pos": [
     1.035,
@@ -1070,20 +1380,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_4_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1092,6 +1420,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_4_1",
    "pos": [
     1.465,
@@ -1129,20 +1458,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_5_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1151,6 +1498,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_5_1",
    "pos": [
     1.895,
@@ -1188,20 +1536,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_6_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1210,6 +1576,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_6_1",
    "pos": [
     2.3249999999999997,
@@ -1247,20 +1614,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_7_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1269,6 +1654,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_7_1",
    "pos": [
     2.755,
@@ -1306,20 +1692,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_8_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1328,6 +1732,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_8_1",
    "pos": [
     3.1849999999999996,
@@ -1365,20 +1770,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_9_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1387,6 +1810,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_9_1",
    "pos": [
     3.6149999999999998,
@@ -1424,20 +1848,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 24,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_10_1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1446,6 +1888,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stones_10_1",
    "pos": [
     4.045,
@@ -1482,6 +1925,14 @@
    "solref": [
     0.02,
     1.0
+   ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
    ],
    "type": "box"
   }
@@ -1852,6 +2303,7 @@
     0.0
    ],
    "body": 1,
+   "bulbradius": 0.02,
    "castshadow": true,
    "cutoff": 45.0,
    "diffuse": [
@@ -1867,6 +2319,7 @@
    "exponent": 10.0,
    "hidden": false,
    "id": 6,
+   "intensity": 0.0,
    "mode": "fixed",
    "name": "sun",
    "pos": [
@@ -1874,6 +2327,8 @@
     0.0,
     3.5
    ],
+   "range": 10.0,
+   "softness": 0.2,
    "specular": [
     0.3,
     0.3,
@@ -1905,12 +2360,15 @@
    "texuniform": true
   }
  ],
+ "meshes": [],
  "modelName": "hopper_stones",
  "nextId": 35,
  "option": {
   "ccd_iterations": 35,
+  "ccd_tolerance": 1e-06,
   "cone": "elliptic",
   "density": 0.0,
+  "disableactuator": 0,
   "flag_actuation": true,
   "flag_autoreset": true,
   "flag_clampctrl": true,
@@ -1952,7 +2410,29 @@
    -0.5,
    0.0
   ],
+  "memory": "",
   "noslip_iterations": 0,
+  "noslip_tolerance": 1e-06,
+  "o_friction": [
+   1.0,
+   1.0,
+   0.005,
+   0.0001,
+   0.0001
+  ],
+  "o_margin": 0.0,
+  "o_solimp": [
+   0.9,
+   0.95,
+   0.001,
+   0.5,
+   2.0
+  ],
+  "o_solref": [
+   0.02,
+   1.0
+  ],
+  "sleep_tolerance": 0.001,
   "solver": "Newton",
   "timestep": 0.002,
   "tolerance": 1e-08,
@@ -1963,13 +2443,25 @@
    0.0
   ]
  },
+ "pairs": [],
  "sensors": [],
  "sites": [],
+ "tendons": [],
  "textures": [
   {
    "builtin": "gradient",
    "file": "",
+   "fileback": "",
+   "filedown": "",
+   "filefront": "",
+   "fileleft": "",
+   "fileright": "",
+   "fileup": "",
+   "gridcols": 1,
+   "gridlayout": "",
+   "gridrows": 1,
    "height": 3072,
+   "hflip": false,
    "id": 2,
    "mark": "none",
    "markrgb": [
@@ -1990,12 +2482,23 @@
     0.0
    ],
    "type": "skybox",
+   "vflip": false,
    "width": 512
   },
   {
    "builtin": "checker",
    "file": "",
+   "fileback": "",
+   "filedown": "",
+   "filefront": "",
+   "fileleft": "",
+   "fileright": "",
+   "fileup": "",
+   "gridcols": 1,
+   "gridlayout": "",
+   "gridrows": 1,
    "height": 300,
+   "hflip": false,
    "id": 3,
    "mark": "edge",
    "markrgb": [
@@ -2016,10 +2519,11 @@
     0.3
    ],
    "type": "2d",
+   "vflip": false,
    "width": 300
   }
  ],
- "version": 1,
+ "version": 3,
  "visual": {
   "azimuth": 120.0,
   "elevation": -20.0,

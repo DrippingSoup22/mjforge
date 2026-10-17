@@ -9,6 +9,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -22,6 +23,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -34,7 +48,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -79,7 +96,12 @@
    ],
    "group": 0,
    "id": 24,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -88,6 +110,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -99,10 +132,30 @@
     0.04
    ],
    "name": "FL_hip_roll_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 15,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -117,6 +170,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -130,6 +184,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -142,7 +209,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -187,7 +257,12 @@
    ],
    "group": 0,
    "id": 25,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -196,6 +271,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -207,10 +293,30 @@
     0.04
    ],
    "name": "FL_hip_pitch_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 16,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -225,6 +331,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -238,6 +345,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -250,7 +370,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -295,7 +418,12 @@
    ],
    "group": 0,
    "id": 26,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -304,6 +432,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -315,10 +454,30 @@
     0.04
    ],
    "name": "FL_knee_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 19,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -333,6 +492,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -346,6 +506,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -358,7 +531,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -403,7 +579,12 @@
    ],
    "group": 0,
    "id": 37,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -412,6 +593,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -423,10 +615,30 @@
     0.04
    ],
    "name": "FR_hip_roll_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 28,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -441,6 +653,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -454,6 +667,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -466,7 +692,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -511,7 +740,12 @@
    ],
    "group": 0,
    "id": 38,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -520,6 +754,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -531,10 +776,30 @@
     0.04
    ],
    "name": "FR_hip_pitch_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 29,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -549,6 +814,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -562,6 +828,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -574,7 +853,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -619,7 +901,12 @@
    ],
    "group": 0,
    "id": 39,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -628,6 +915,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -639,10 +937,30 @@
     0.04
    ],
    "name": "FR_knee_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 32,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -657,6 +975,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -670,6 +989,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -682,7 +1014,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -727,7 +1062,12 @@
    ],
    "group": 0,
    "id": 50,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -736,6 +1076,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -747,10 +1098,30 @@
     0.04
    ],
    "name": "RL_hip_roll_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 41,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -765,6 +1136,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -778,6 +1150,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -790,7 +1175,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -835,7 +1223,12 @@
    ],
    "group": 0,
    "id": 51,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -844,6 +1237,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -855,10 +1259,30 @@
     0.04
    ],
    "name": "RL_hip_pitch_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 42,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -873,6 +1297,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -886,6 +1311,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -898,7 +1336,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -943,7 +1384,12 @@
    ],
    "group": 0,
    "id": 52,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -952,6 +1398,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -963,10 +1420,30 @@
     0.04
    ],
    "name": "RL_knee_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 45,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -981,6 +1458,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -994,6 +1472,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -1006,7 +1497,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -1051,7 +1545,12 @@
    ],
    "group": 0,
    "id": 63,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -1060,6 +1559,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -1071,10 +1581,30 @@
     0.04
    ],
    "name": "RR_hip_roll_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 54,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -1089,6 +1619,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -1102,6 +1633,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -1114,7 +1658,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -1159,7 +1706,12 @@
    ],
    "group": 0,
    "id": 64,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -1168,6 +1720,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -1179,10 +1742,30 @@
     0.04
    ],
    "name": "RR_hip_pitch_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 55,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -1197,6 +1780,7 @@
    ],
    "adhesionGain": 1.0,
    "area": 1.0,
+   "armature": 0.0,
    "biasprm": [
     0.0,
     0.0,
@@ -1210,6 +1794,19 @@
     0.0
    ],
    "biastype": "none",
+   "cogging": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "controller": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "cranklength": 0.0,
    "ctrllimited": true,
    "ctrlrange": [
@@ -1222,7 +1819,10 @@
     0.0
    ],
    "cylTimeconst": 1.0,
+   "damping": 0.0,
    "dampratio": 1.0,
+   "dcinput": "voltage",
+   "delay": 0.0,
    "diameter": 0.0,
    "dynprm": [
     1.0,
@@ -1267,7 +1867,12 @@
    ],
    "group": 0,
    "id": 65,
+   "inductance": [
+    0.0,
+    0.0
+   ],
    "inheritrange": 0.0,
+   "interp": 0,
    "kp": 30.0,
    "kv": 0.0,
    "lengthrange": [
@@ -1276,6 +1881,17 @@
    ],
    "lmax": 1.6,
    "lmin": 0.5,
+   "lugre": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "motorconst": [
+    0.0,
+    0.0
+   ],
    "muscleForce": -1.0,
    "muscleRange": [
     0.75,
@@ -1287,10 +1903,30 @@
     0.04
    ],
    "name": "RR_knee_pos",
+   "nominal": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "nsample": 0,
    "refsite": 0,
+   "resistance": 0.0,
+   "saturation": [
+    0.0,
+    0.0,
+    0.0
+   ],
    "slidersite": 0,
    "target": 58,
    "tausmooth": 0.0,
+   "thermal": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "timeconst": 0.0,
    "trn": "joint",
    "type": "position",
@@ -1338,7 +1974,8 @@
     0.0,
     0.0
    ],
-   "role": "environment"
+   "role": "environment",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1380,7 +2017,8 @@
     0.0,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1422,7 +2060,8 @@
     0.19866933079506122,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1464,7 +2103,8 @@
     -0.3894183423086505,
     -0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1506,7 +2146,8 @@
     0.19866933079506122,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1548,7 +2189,8 @@
     -0.3894183423086505,
     -0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1590,7 +2232,8 @@
     0.19866933079506122,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1632,7 +2275,8 @@
     -0.3894183423086505,
     -0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1674,7 +2318,8 @@
     0.19866933079506122,
     0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1716,7 +2361,8 @@
     -0.3894183423086505,
     -0.0
    ],
-   "role": "model"
+   "role": "model",
+   "sleep": "auto"
   },
   {
    "diaginertia": [
@@ -1765,7 +2411,8 @@
     0.0,
     0.0
    ],
-   "role": "environment"
+   "role": "environment",
+   "sleep": "auto"
   }
  ],
  "cameras": [],
@@ -1777,22 +2424,33 @@
   "inertiafromgeom": "auto",
   "settotalmass": -1.0
  },
+ "equalities": [],
  "excludes": [],
  "format": "mjforge",
  "generator": "MJForge 0.1.0",
  "geoms": [
   {
+   "adhesion": 0.0,
    "body": 1,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1801,6 +2459,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 4,
+   "mesh": 0,
    "name": "floor",
    "pos": [
     0.0,
@@ -1815,9 +2474,9 @@
     0.0
    ],
    "rgba": [
-    1.0,
-    1.0,
-    1.0,
+    0.5,
+    0.5,
+    0.5,
     1.0
    ],
    "shellinertia": false,
@@ -1838,20 +2497,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "plane"
   },
   {
+   "adhesion": 0.0,
    "body": 7,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1860,6 +2537,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "quadruped_shell",
    "pos": [
     0.0,
@@ -1897,20 +2575,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "ellipsoid"
   },
   {
+   "adhesion": 0.0,
    "body": 14,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1919,6 +2615,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FL_thigh_geom",
    "pos": [
     0.0,
@@ -1956,20 +2653,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 18,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -1978,6 +2693,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FL_calf_geom",
    "pos": [
     0.0,
@@ -2015,20 +2731,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 18,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.02,
     0.01
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2037,6 +2771,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FL_foot",
    "pos": [
     0.0,
@@ -2074,20 +2809,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "sphere"
   },
   {
+   "adhesion": 0.0,
    "body": 27,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2096,6 +2849,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FR_thigh_geom",
    "pos": [
     0.0,
@@ -2133,20 +2887,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 31,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2155,6 +2927,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FR_calf_geom",
    "pos": [
     0.0,
@@ -2192,20 +2965,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 31,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.02,
     0.01
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2214,6 +3005,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "FR_foot",
    "pos": [
     0.0,
@@ -2251,20 +3043,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "sphere"
   },
   {
+   "adhesion": 0.0,
    "body": 40,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2273,6 +3083,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RL_thigh_geom",
    "pos": [
     0.0,
@@ -2310,20 +3121,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 44,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2332,6 +3161,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RL_calf_geom",
    "pos": [
     0.0,
@@ -2369,20 +3199,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 44,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.02,
     0.01
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2391,6 +3239,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RL_foot",
    "pos": [
     0.0,
@@ -2428,20 +3277,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "sphere"
   },
   {
+   "adhesion": 0.0,
    "body": 53,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2450,6 +3317,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RR_thigh_geom",
    "pos": [
     0.0,
@@ -2487,20 +3355,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 57,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2509,6 +3395,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RR_calf_geom",
    "pos": [
     0.0,
@@ -2546,20 +3433,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "capsule"
   },
   {
+   "adhesion": 0.0,
    "body": 57,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.02,
     0.01
    ],
    "gap": 0.0,
+   "genKey": "",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2568,6 +3473,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "RR_foot",
    "pos": [
     0.0,
@@ -2605,20 +3511,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "sphere"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2627,6 +3551,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step1",
    "pos": [
     0.15,
@@ -2664,20 +3589,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step2",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2686,6 +3629,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step2",
    "pos": [
     0.44999999999999996,
@@ -2723,20 +3667,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step3",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2745,6 +3707,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step3",
    "pos": [
     0.75,
@@ -2782,20 +3745,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step4",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2804,6 +3785,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step4",
    "pos": [
     1.0499999999999998,
@@ -2841,20 +3823,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step5",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2863,6 +3863,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step5",
    "pos": [
     1.3499999999999999,
@@ -2900,20 +3901,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_step6",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2922,6 +3941,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_step6",
    "pos": [
     1.65,
@@ -2959,20 +3979,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_top",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -2981,6 +4019,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_top",
    "pos": [
     2.3,
@@ -3018,20 +4057,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down1",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3040,6 +4097,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down1",
    "pos": [
     2.9499999999999997,
@@ -3077,20 +4135,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down2",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3099,6 +4175,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down2",
    "pos": [
     3.2499999999999996,
@@ -3136,20 +4213,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down3",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3158,6 +4253,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down3",
    "pos": [
     3.55,
@@ -3195,20 +4291,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down4",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3217,6 +4331,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down4",
    "pos": [
     3.8499999999999996,
@@ -3254,20 +4369,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down5",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3276,6 +4409,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down5",
    "pos": [
     4.15,
@@ -3313,20 +4447,38 @@
     0.02,
     1.0
    ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
    "type": "box"
   },
   {
+   "adhesion": 0.0,
    "body": 66,
    "conaffinity": 1,
    "condim": 3,
    "contype": 1,
    "density": 1000.0,
+   "fluidEllipsoid": false,
+   "fluidcoef": [
+    0.5,
+    0.25,
+    1.5,
+    1.0,
+    1.0
+   ],
    "friction": [
     1.0,
     0.005,
     0.0001
    ],
    "gap": 0.0,
+   "genKey": "_down6",
    "group": 0,
    "hfield": 0,
    "hidden": false,
@@ -3335,6 +4487,7 @@
    "margin": 0.0,
    "mass": -1.0,
    "material": 0,
+   "mesh": 0,
    "name": "stairs_down6",
    "pos": [
     4.45,
@@ -3371,6 +4524,14 @@
    "solref": [
     0.02,
     1.0
+   ],
+   "surfacevel": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
    ],
    "type": "box"
   }
@@ -4147,6 +5308,7 @@
     0.0
    ],
    "body": 1,
+   "bulbradius": 0.02,
    "castshadow": true,
    "cutoff": 45.0,
    "diffuse": [
@@ -4162,6 +5324,7 @@
    "exponent": 10.0,
    "hidden": false,
    "id": 6,
+   "intensity": 0.0,
    "mode": "fixed",
    "name": "sun",
    "pos": [
@@ -4169,6 +5332,8 @@
     0.0,
     3.5
    ],
+   "range": 10.0,
+   "softness": 0.2,
    "specular": [
     0.3,
     0.3,
@@ -4200,12 +5365,15 @@
    "texuniform": true
   }
  ],
+ "meshes": [],
  "modelName": "quadruped_stairs",
  "nextId": 80,
  "option": {
   "ccd_iterations": 35,
+  "ccd_tolerance": 1e-06,
   "cone": "elliptic",
   "density": 0.0,
+  "disableactuator": 0,
   "flag_actuation": true,
   "flag_autoreset": true,
   "flag_clampctrl": true,
@@ -4247,7 +5415,29 @@
    -0.5,
    0.0
   ],
+  "memory": "",
   "noslip_iterations": 0,
+  "noslip_tolerance": 1e-06,
+  "o_friction": [
+   1.0,
+   1.0,
+   0.005,
+   0.0001,
+   0.0001
+  ],
+  "o_margin": 0.0,
+  "o_solimp": [
+   0.9,
+   0.95,
+   0.001,
+   0.5,
+   2.0
+  ],
+  "o_solref": [
+   0.02,
+   1.0
+  ],
+  "sleep_tolerance": 0.001,
   "solver": "Newton",
   "timestep": 0.002,
   "tolerance": 1e-08,
@@ -4258,80 +5448,165 @@
    0.0
   ]
  },
+ "pairs": [],
  "sensors": [
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 11,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "quadruped_imu_accelerometer",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 10,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "accelerometer"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 12,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "quadruped_imu_gyro",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 10,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "gyro"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 13,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "quadruped_upvector",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 10,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "framezaxis"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 23,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "FL_touch",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 22,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "touch"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 36,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "FR_touch",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 35,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "touch"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 49,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "RL_touch",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 48,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "touch"
   },
   {
+   "condata": 1,
+   "connum": 1,
    "cutoff": 0.0,
+   "delay": 0.0,
+   "enclosed": false,
    "id": 62,
+   "interp": 0,
+   "interval": [
+    0.0,
+    0.0
+   ],
    "name": "RR_touch",
    "noise": 0.0,
+   "nsample": 0,
    "obj": 61,
    "objtype": "site",
+   "raydata": 1,
+   "reduce": 0,
    "ref": 0,
    "reftype": "site",
    "type": "touch"
@@ -4494,11 +5769,22 @@
    "type": "sphere"
   }
  ],
+ "tendons": [],
  "textures": [
   {
    "builtin": "gradient",
    "file": "",
+   "fileback": "",
+   "filedown": "",
+   "filefront": "",
+   "fileleft": "",
+   "fileright": "",
+   "fileup": "",
+   "gridcols": 1,
+   "gridlayout": "",
+   "gridrows": 1,
    "height": 3072,
+   "hflip": false,
    "id": 2,
    "mark": "none",
    "markrgb": [
@@ -4519,12 +5805,23 @@
     0.0
    ],
    "type": "skybox",
+   "vflip": false,
    "width": 512
   },
   {
    "builtin": "checker",
    "file": "",
+   "fileback": "",
+   "filedown": "",
+   "filefront": "",
+   "fileleft": "",
+   "fileright": "",
+   "fileup": "",
+   "gridcols": 1,
+   "gridlayout": "",
+   "gridrows": 1,
    "height": 300,
+   "hflip": false,
    "id": 3,
    "mark": "edge",
    "markrgb": [
@@ -4545,10 +5842,11 @@
     0.3
    ],
    "type": "2d",
+   "vflip": false,
    "width": 300
   }
  ],
- "version": 1,
+ "version": 3,
  "visual": {
   "azimuth": 120.0,
   "elevation": -20.0,
