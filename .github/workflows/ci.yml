@@ -73,14 +73,18 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')"
 
       - name: Build
-        run: cmake --build build --config Release --parallel 4
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --parallel 4 2>&1 | tee build.log || { python tools/ci_annotate.py build.log Build; exit 1; }
 
       - name: Unit and integration tests
         shell: bash
         run: |
+          set -o pipefail
           dir=build/bin
           [ -d build/bin/Release ] && dir=build/bin/Release
-          "$dir/mjforge_tests"
+          "$dir/mjforge_tests" 2>&1 | tee tests.log || { python tools/ci_annotate.py tests.log Tests; exit 1; }
           "$dir/mjforge" --template quadruped --validate
 
   mjwarp:
