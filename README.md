@@ -117,7 +117,8 @@ CI builds and runs the tests on Linux, Windows (MSVC) and macOS (Apple clang). O
 downloads the MuJoCo release (the Python package has no import library); on macOS it uses the
 library inside the Python package. `cmake --install build --prefix <folder>` gathers a runnable
 package (add `-DMJFORGE_INSTALL_BINDIR=.` for a flat folder and `-DMJFORGE_MACOS_BUNDLE=ON` for
-`MJForge.app`); pushing a `v*` tag builds and publishes the release packages
+`MJForge.app`). Pushing a `v*` tag, or running the *Release* workflow from the Actions tab with a
+version such as `v0.2.0`, builds, checks and publishes the release packages
 (`.github/workflows/release.yml`).
 
 ## Using it

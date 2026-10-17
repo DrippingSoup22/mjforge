@@ -1,16 +1,18 @@
 name: Release
 
-# Pushing a tag vX.Y.Z builds MJForge on Linux, Windows and macOS, runs the tests, checks that each
-# installed package runs on its own, and publishes a GitHub release with the three downloads.
-# From the Actions tab ("Run workflow"): with a tag, rebuild and re-upload that release; without
-# one, only build and check the packages of the selected branch (they stay as run artifacts).
+# Builds MJForge on Linux, Windows and macOS, runs the tests, checks that each installed package
+# runs on its own, and publishes a GitHub release with the three downloads. Two ways to start it:
+# - push a tag vX.Y.Z;
+# - Actions tab > Release > Run workflow, with a version tag: a new tag is created on the selected
+#   branch once every package is ready, an existing one is rebuilt and its downloads replaced.
+#   Without a tag it only builds and checks the packages (they stay as run artifacts).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and publish, e.g. v0.1.0 (empty: build the packages only)"
+        description: "Version tag to publish, e.g. v0.1.0 (empty: only build the packages)"
         required: false
         default: ""
 
@@ -38,10 +40,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          fetch-depth: 0  # with the tags
 
       - name: Version
         run: |
+          # An existing tag is built as tagged; a new one from the selected branch.
+          if [ -n "$TAG" ] && git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            git checkout -q "$TAG"
+          fi
           ver=$(sed -n 's/^project(MJForge VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           if [ -n "$TAG" ] && [ "v$ver" != "$TAG" ]; then
             echo "::error::Tag $TAG does not match the version in CMakeLists.txt ($ver)"
@@ -141,7 +147,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8
         with:
@@ -153,11 +159,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l dist
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            git checkout -q "$TAG"
+            where=(--verify-tag)
+          else
+            where=(--target "$GITHUB_SHA")  # creates the tag on the commit the packages were built from
+          fi
           ver="${TAG#v}"
           sed "s/@VERSION@/$ver/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
             gh release edit "$TAG" --title "MJForge $ver" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$TAG" dist/* --verify-tag --title "MJForge $ver" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$TAG" dist/* "${where[@]}" --title "MJForge $ver" --notes-file "$RUNNER_TEMP/notes.md"
           fi
