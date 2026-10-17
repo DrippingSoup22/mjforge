@@ -197,7 +197,7 @@ template <class V> void visit(V& v, Geom& g) {
   v("adhesion", g.adhesion); v("surfacevel", g.surfacevel); v("fluidEllipsoid", g.fluidEllipsoid);
   v("fluidcoef", g.fluidcoef); v("density", g.density); v("mass", g.mass); v("shellinertia", g.shellinertia); v("rgba", g.rgba);
   v("material", g.material); v("group", g.group); v("hfield", g.hfield); v("mesh", g.mesh); v("hidden", g.hidden);
-  v("locked", g.locked);
+  v("locked", g.locked); v("genKey", g.genKey);
 }
 template <class V> void visit(V& v, Joint& j) {
   v("id", j.id); v("name", j.name); v("body", j.body); v("type", j.type); v("pos", j.pos); v("axis", j.axis);
@@ -729,6 +729,23 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     if (version < 3)
       for (Geom& g : doc.geoms)
         if (g.material != kNoId && g.rgba == Color{1, 1, 1, 1}) g.rgba = Geom{}.rgba;
+    // Files from before generated pieces had keys: every geom on a generated body is a piece
+    // (regenerating replaced them all), known by the body's name at the start of its own; one
+    // without it gets a key no generator makes, so it is replaced the next time as it was before.
+    auto geomsJson = root.find("geoms");
+    if (geomsJson != root.end() && geomsJson->is_array() &&
+        std::none_of(geomsJson->begin(), geomsJson->end(), [](const json& g) { return g.is_object() && g.contains("genKey"); })) {
+      std::unordered_map<Id, std::string> generated;
+      for (const Body& b : doc.bodies)
+        if (!b.generator.empty()) generated[b.id] = b.name;
+      for (Geom& g : doc.geoms) {
+        auto it = generated.find(g.body);
+        if (it == generated.end()) continue;
+        const std::string& base = it->second;
+        bool named = g.name.size() > base.size() && g.name.compare(0, base.size(), base) == 0;
+        g.genKey = named ? g.name.substr(base.size()) : "?" + std::to_string(g.id);
+      }
+    }
     doc.touch();
     if (editorStateJson)
       *editorStateJson = root.contains("editor") ? root["editor"].dump(-1, ' ', false, json::error_handler_t::replace) : std::string();

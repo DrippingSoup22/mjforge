@@ -188,7 +188,9 @@ simulation picks it up.
 *Add > Environment* creates generated pieces: stairs, ramp, rough terrain, waves, stepping stones,
 obstacle field, arena walls. Each one is a static body; select it to edit its parameters in the
 Inspector (the geometry regenerates as you drag), move it with the gizmo, or press *Bake* to turn it
-into ordinary geoms. Rough terrain and waves are single height-field geoms with a flat spawn area at
+into ordinary geoms. What you change on a piece (friction, contact settings, material, color, name)
+is kept when the parameters change, and so are contact pairs and sensors that use it; only its shape
+and place follow the parameters. Geoms you add to the body yourself are left alone. Rough terrain and waves are single height-field geoms with a flat spawn area at
 the center: much cheaper for MuJoCo Warp than many boxes, because every geom that can touch the
 robot adds broadphase work in every world.
 

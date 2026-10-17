@@ -1364,14 +1364,15 @@ bool writeExportFiles(const std::filesystem::path& dir, const std::string& asset
   namespace fs = std::filesystem;
   if (!files.empty()) {
     std::error_code ec;
-    fs::create_directories(dir / assetDir, ec);
+    // Names are UTF-8 (fs::u8path: a plain std::string is the local code page on Windows).
+    fs::create_directories(dir / fs::u8path(assetDir), ec);
     if (ec) {
-      if (error) *error = "Cannot create " + (dir / assetDir).u8string() + ": " + ec.message();
+      if (error) *error = "Cannot create " + (dir / fs::u8path(assetDir)).u8string() + ": " + ec.message();
       return false;
     }
   }
   for (const ExportFile& f : files) {
-    std::string fp = (dir / f.path).u8string();
+    std::string fp = (dir / fs::u8path(f.path)).u8string();
     if (!writeTextFile(fp, f.content, error)) return false;
     if (written) written->push_back(fp);
   }
@@ -1379,12 +1380,31 @@ bool writeExportFiles(const std::filesystem::path& dir, const std::string& asset
 }
 }  // namespace
 
+namespace {
+
+// MuJoCo splits file paths at backslashes on every platform: a file whose POSIX path contains one
+// could be written but never loaded.
+bool mujocoCanOpen(const std::string& path, std::string* error) {
+#ifndef _WIN32
+  if (path.find('\\') != std::string::npos) {
+    if (error) *error = "MuJoCo cannot open a file whose path contains a backslash: " + path;
+    return false;
+  }
+#endif
+  (void)path;
+  (void)error;
+  return true;
+}
+
+}  // namespace
+
 bool exportSplitMjcf(const Document& doc, const std::string& scenePath, const ExportOptions& optIn, std::string* error,
                      std::vector<std::string>* written) {
   namespace fs = std::filesystem;
-  fs::path p(scenePath);
+  if (!mujocoCanOpen(scenePath, error)) return false;
+  fs::path p = fs::u8path(scenePath);
   std::string stem = p.stem().u8string();
-  fs::path modelPath = p.parent_path() / (stem + "_model.xml");
+  fs::path modelPath = p.parent_path() / fs::u8path(stem + "_model.xml");
   ExportOptions base = optIn;
   base.externalMeshVertices = 1000;
   base.externalHfieldSamples = 64 * 64;
@@ -1416,7 +1436,8 @@ std::string writeMjcf(const Document& doc, const ExportOptions& opt, ExportMap* 
 bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOptions& optIn, std::string* error,
                     const std::string& assetStem, std::vector<std::string>* written) {
   namespace fs = std::filesystem;
-  fs::path p(path);
+  if (!mujocoCanOpen(path, error)) return false;
+  fs::path p = fs::u8path(path);
   ExportOptions opt = optIn;
   opt.externalMeshVertices = 1000;
   opt.externalHfieldSamples = 64 * 64;

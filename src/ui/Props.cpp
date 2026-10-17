@@ -154,8 +154,9 @@ bool real(const char* label, double* v, double def, const Opt& o) {
   double tmp = std::fabs(*v) < 1e-12 ? 0.0 : *v;
   std::string fmt = withUnit(o.fmt, o.unit);
   ImGui::BeginDisabled(o.disabled);
+  // Typed text can be "nan", which no clamp catches: ignored like any other invalid entry.
   if (ImGui::DragScalar("##v", ImGuiDataType_Double, &tmp, float(o.speed), &o.min, &o.max, fmt.c_str(),
-                        ImGuiSliderFlags_AlwaysClamp) && tmp != *v) {
+                        ImGuiSliderFlags_AlwaysClamp) && tmp != *v && !std::isnan(tmp)) {
     notifyChange();
     *v = tmp;
     changed = true;
@@ -173,7 +174,8 @@ bool angle(const char* label, double* rad, double defRad, const Opt& o) {
   double deg = rad2deg(*rad);
   double mn = o.min > -1e299 ? rad2deg(o.min) : -1e300, mx = o.max < 1e299 ? rad2deg(o.max) : 1e300;
   ImGui::BeginDisabled(o.disabled);
-  if (ImGui::DragScalar("##v", ImGuiDataType_Double, &deg, 0.5f, &mn, &mx, "%.2f\xC2\xB0", ImGuiSliderFlags_AlwaysClamp)) {
+  if (ImGui::DragScalar("##v", ImGuiDataType_Double, &deg, 0.5f, &mn, &mx, "%.2f\xC2\xB0", ImGuiSliderFlags_AlwaysClamp) &&
+      std::isfinite(deg)) {
     double r = deg2rad(deg);
     if (r != *rad) {
       notifyChange();
@@ -222,9 +224,12 @@ static bool dragN(const char* label, double* data, const double* def, const Opt&
   ImGui::BeginDisabled(o.disabled);
   if (ImGui::DragScalarN("##v", ImGuiDataType_Double, tmp, N, float(o.speed), &o.min, &o.max, fmt.c_str(),
                          ImGuiSliderFlags_AlwaysClamp)) {
-    bool diff = false;
-    for (int i = 0; i < N; ++i) diff |= tmp[i] != (std::fabs(data[i]) < 1e-12 ? 0.0 : data[i]);
-    if (diff) {
+    bool diff = false, nan = false;
+    for (int i = 0; i < N; ++i) {
+      diff |= tmp[i] != (std::fabs(data[i]) < 1e-12 ? 0.0 : data[i]);
+      nan |= std::isnan(tmp[i]);
+    }
+    if (diff && !nan) {
       notifyChange();
       for (int i = 0; i < N; ++i) data[i] = tmp[i];
       changed = true;
@@ -352,7 +357,8 @@ bool orientation(const char* label, Quat* q, const char* tip) {
   double deg[3] = {rad2deg(e.x), rad2deg(e.y), rad2deg(e.z)};
   for (double& d : deg)
     if (std::fabs(d) < 5e-4) d = 0;  // avoid "-0.0"
-  if (ImGui::DragScalarN("##v", ImGuiDataType_Double, deg, 3, 0.5f, nullptr, nullptr, "%.1f\xC2\xB0")) {
+  if (ImGui::DragScalarN("##v", ImGuiDataType_Double, deg, 3, 0.5f, nullptr, nullptr, "%.1f\xC2\xB0") &&
+      std::isfinite(deg[0]) && std::isfinite(deg[1]) && std::isfinite(deg[2])) {
     Vec3 ne{deg2rad(deg[0]), deg2rad(deg[1]), deg2rad(deg[2])};
     Quat nq = canonical(fromEulerXYZ(ne));
     notifyChange();

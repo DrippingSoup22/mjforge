@@ -101,6 +101,7 @@ struct Geom {
   // Editor metadata.
   bool hidden = false;
   bool locked = false;
+  std::string genKey;  // piece of its body's generator ("_step3"); empty for geoms made by hand
 };
 
 struct Joint {

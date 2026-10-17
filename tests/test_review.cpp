@@ -18,6 +18,7 @@
 #include "core/Templates.h"
 #include "sim/MjcfImport.h"
 #include "sim/MujocoBridge.h"
+#include "sim/WarpLoader.h"
 
 using namespace mjf;
 namespace fs = std::filesystem;
@@ -686,4 +687,27 @@ TEST_CASE("review: the examples' committed exports match what the editor exports
     ++checked;
   }
   CHECK(checked >= 5);
+}
+
+TEST_CASE("review: loader scripts and export paths survive unusual file names") {
+  Document doc;
+  REQUIRE(makeTemplate("quadruped", doc));
+  // Quotes, backslashes and control characters are escaped in the Python string; UTF-8 stays.
+  std::string script = mjwarpLoaderScript(doc, "it's \"my\" robot\\v2\n\xC3\xBC.xml", nullptr);
+  CHECK(script.find("\"it's \\\"my\\\" robot\\\\v2\\x0a\xC3\xBC.xml\")") != std::string::npos);
+  // A long name no longer truncates the script (it was built in a fixed 2048-byte buffer).
+  std::string longName(3000, 'a');
+  script = mjwarpLoaderScript(doc, longName + ".xml", nullptr);
+  CHECK(script.find(longName + ".xml\")") != std::string::npos);
+  CHECK(script.find("print(f\"stepped") != std::string::npos);
+  // Delayed actuators start from the keyframe's controls, not from 0.
+  CHECK(script.find("mj_initCtrlHistory") != std::string::npos);
+#ifndef _WIN32
+  // MuJoCo splits paths at backslashes on every platform: such a file would be written but never load.
+  std::string err;
+  fs::path dir = tmpDir("backslash");
+  CHECK_FALSE(exportMjcfFile(doc, (dir / "a\\b.xml").string(), {}, &err));
+  CHECK(err.find("backslash") != std::string::npos);
+  CHECK_FALSE(fs::exists(dir / "a\\b.xml"));
+#endif
 }

@@ -147,6 +147,7 @@ void Editor::inspectBody(Body& b) {
     std::string title = std::string("Generator: ") + gi->label;
     if (props::section(title.c_str())) {
       bool regen = false;
+      while (b.genParams.size() < gi->params.size()) b.genParams.push_back(gi->params[b.genParams.size()].def);
       b.genParams.resize(gi->params.size());
       for (size_t i = 0; i < gi->params.size(); ++i) {
         const GenParam& p = gi->params[i];
@@ -161,6 +162,16 @@ void Editor::inspectBody(Body& b) {
         }
       }
       if (regen) regenerate(doc_, b.id);
+      // Height fields have at most 1024 samples per side: say when the spacing asked for is coarsened.
+      if (b.generator == "rough" || b.generator == "waves") {
+        double asked = genParam(b, "spacing"), used = 0;
+        for (const char* k : {"sizex", "sizey"}) {
+          double size = genParam(b, k);
+          int n = std::clamp(int(std::lround(size / asked)) + 1, 2, 1024);
+          used = std::max(used, size / (n - 1));
+        }
+        if (used > asked * 1.01) props::info("Spacing used", "%.3g m (at most 1024 samples per side)", used);
+      }
       props::end();
       for (size_t i = 0; i < gi->params.size(); ++i)
         if (std::string(gi->params[i].key) == "seed") {
@@ -175,6 +186,8 @@ void Editor::inspectBody(Body& b) {
         checkpoint("Bake generator");
         b.generator.clear();
         b.genParams.clear();
+        for (Geom& g : doc_.geoms)
+          if (g.body == b.id) g.genKey.clear();
         notify("The generated geometry is now ordinary geoms you can edit one by one", pal::kTextDim, 3);
       }
       if (ImGui::IsItemHovered())
@@ -344,6 +357,9 @@ void Editor::inspectGeom(Geom& g) {
   nameHeader(*this, g.id, Icon::Box, pal::kGeom, "Geom", g.name);
   if (!props::begin("##geom")) return;
   if (props::section("Shape")) {
+    const Body* owner = doc_.body(g.body);
+    if (!g.genKey.empty() && owner && findGenerator(owner->generator))
+      props::info("Generated", "by %s: shape and place follow its parameters (Bake it to edit them)", owner->name.c_str());
     GeomType before = g.type;
     if (props::combo("Type", &g.type, kGeomTypes, GeomType::Sphere, D("geom.type"))) {
       // Keep a similar overall size when switching shapes.

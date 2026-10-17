@@ -326,7 +326,7 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
   ExportOptions opt;
   opt.angle = exportAngle_ == 1 ? AngleUnit::Degree : AngleUnit::Radian;
   std::string err;
-  fs::path p(path);
+  fs::path p = fs::u8path(path);
   if (split) {
     // The model file next to the scene file; the scene includes it.
     std::string stem = p.stem().u8string();
@@ -345,7 +345,7 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
   }
   if (exportLoader_) {
     bool measured = false;
-    fs::path py = p.parent_path() / (p.stem().u8string() + "_mjwarp.py");
+    fs::path py = p.parent_path() / fs::u8path(p.stem().u8string() + "_mjwarp.py");
     if (writeTextFile(py.u8string(), mjwarpLoader(p.filename().u8string(), &measured), &err))
       notify(std::string("Wrote ") + py.filename().u8string() + (measured ? " (sizes from the simulation)" : " (estimated sizes: simulate first for measured ones)"),
              pal::kTextDim, 5);

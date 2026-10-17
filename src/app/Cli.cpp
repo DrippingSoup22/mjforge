@@ -176,10 +176,10 @@ int runHeadless(const CliOptions& cli) {
     if (int(written.size()) > xmlFiles) std::printf("Wrote %d asset files (meshes, textures)\n", int(written.size()) - xmlFiles);
     std::printf("Wrote %s\n", cli.exportPath.c_str());
     if (cli.loader) {
-      std::string path = cli.exportPath, file = path.substr(path.find_last_of("/\\") + 1);
-      std::string stem = file.substr(0, file.find_last_of('.'));
-      std::string dir = path.substr(0, path.size() - file.size());
-      std::string py = dir + stem + "_mjwarp.py";
+      // Path parts as the platform defines them (a backslash is a separator on Windows only).
+      std::filesystem::path xml = std::filesystem::u8path(cli.exportPath);
+      std::string file = xml.filename().u8string();
+      std::string py = (xml.parent_path() / std::filesystem::u8path(xml.stem().u8string() + "_mjwarp.py")).u8string();
       if (!writeTextFile(py, mjwarpLoaderScript(doc, file, nullptr), &err)) {
         std::fprintf(stderr, "%s\n", err.c_str());
         return 1;

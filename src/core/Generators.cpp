@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "core/Ops.h"
 
@@ -62,12 +64,28 @@ struct Ctx {
   Document& doc;
   Id body;
   const Body& b;
+  std::unordered_set<std::string> names;  // geom names in use: thousands of stones stay linear
   double p(const char* k) const { return genParam(b, k); }
   int pi(const char* k) const { return int(std::lround(genParam(b, k))); }
-  Id box(const Vec3& half, const Vec3& pos, const Quat& q, const Color& c, const std::string& name = "") {
-    Id g = addGeom(doc, body, GeomType::Box, half, {pos, q}, name);
-    doc.geom(g)->rgba = c;
-    return g;
+  // A piece is named after the body plus its key ("_step3"), which identifies it when the body
+  // is generated again.
+  Id box(const Vec3& half, const Vec3& pos, const Quat& q, const Color& c, const std::string& key) {
+    return geom(GeomType::Box, half, pos, q, c, key);
+  }
+  Id geom(GeomType type, const Vec3& size, const Vec3& pos, const Quat& q, const Color& c, const std::string& key) {
+    Geom g;
+    g.id = doc.newId();
+    g.body = body;
+    g.type = type;
+    g.size = size;
+    g.pos = pos;
+    g.quat = canonical(q);
+    g.rgba = c;
+    g.genKey = key;
+    g.name = b.name + key;
+    for (int k = 2; !names.insert(g.name).second; ++k) g.name = b.name + key + "_" + std::to_string(k);
+    doc.geoms.push_back(g);
+    return g.id;
   }
 };
 
@@ -75,19 +93,17 @@ void genStairs(Ctx& c) {
   int n = std::max(1, c.pi("steps"));
   double w = c.p("width"), d = c.p("tread"), r = c.p("rise"), top = c.p("top");
   bool down = c.p("descend") > 0.5;
-  std::string base = c.b.name;
   for (int i = 0; i < n; ++i) {
     double h = (i + 1) * r;
-    c.box({d / 2, w / 2, h / 2}, {i * d + d / 2, 0, h / 2}, {}, kConcrete, base + "_step" + std::to_string(i + 1));
+    c.box({d / 2, w / 2, h / 2}, {i * d + d / 2, 0, h / 2}, {}, kConcrete, "_step" + std::to_string(i + 1));
   }
   double H = n * r, x = n * d;
-  if (top > 0) c.box({top / 2, w / 2, H / 2}, {x + top / 2, 0, H / 2}, {}, kConcrete, base + "_top");
+  if (top > 0) c.box({top / 2, w / 2, H / 2}, {x + top / 2, 0, H / 2}, {}, kConcrete, "_top");
   if (down) {
     double x0 = x + top;
     for (int i = 0; i < n; ++i) {
       double h = (n - i) * r;
-      c.box({d / 2, w / 2, h / 2}, {x0 + i * d + d / 2, 0, h / 2}, {}, kConcrete,
-            base + "_down" + std::to_string(i + 1));
+      c.box({d / 2, w / 2, h / 2}, {x0 + i * d + d / 2, 0, h / 2}, {}, kConcrete, "_down" + std::to_string(i + 1));
     }
   }
 }
@@ -95,17 +111,18 @@ void genStairs(Ctx& c) {
 void genRamp(Ctx& c) {
   double L = c.p("length"), w = c.p("width"), th = deg2rad(c.p("angle")), top = c.p("top"), t = 0.05;
   bool down = c.p("descend") > 0.5;
-  std::string base = c.b.name;
   // The top surface runs from (0, 0, 0) up to (L cos, 0, L sin).
-  auto slope = [&](double x0, double sign, const std::string& name) {
+  auto slope = [&](double x0, double sign, const std::string& key) {
     Vec3 mid{x0 + sign * L / 2 * std::cos(th), 0, L / 2 * std::sin(th)};
     Vec3 n{-sign * std::sin(th), 0, std::cos(th)};
-    c.box({L / 2, w / 2, t / 2}, mid - n * (t / 2), axisAngle({0, 1, 0}, -sign * th), kConcrete, name);
+    c.box({L / 2, w / 2, t / 2}, mid - n * (t / 2), axisAngle({0, 1, 0}, -sign * th), kConcrete, key);
   };
-  slope(0, 1, base + "_slope");
+  slope(0, 1, "_slope");
   double H = L * std::sin(th), x = L * std::cos(th);
-  if (top > 0) c.box({top / 2, w / 2, H / 2}, {x + top / 2, 0, H / 2}, {}, kConcrete, base + "_top");
-  if (down) slope(x + top + x, -1, base + "_slope_down");
+  // The platform fills the space under it, or is a slab like the slope when the ramp is (almost) flat.
+  double hz = std::max(H, t) / 2;
+  if (top > 0) c.box({top / 2, w / 2, hz}, {x + top / 2, 0, H - hz}, {}, kConcrete, "_top");
+  if (down) slope(x + top + x, -1, "_slope_down");
 }
 
 // Height fields are centered on the body; heights are normalized to [0, 1] of the elevation.
@@ -125,9 +142,9 @@ void setHfield(Ctx& c, Id reuse, int nrow, int ncol, double sx, double sy, doubl
   h->size = Vec4(sx / 2, sy / 2, std::max(1e-3, elevation), std::max(0.02, 0.25 * elevation));
   h->data = std::make_shared<const std::vector<float>>(data);
   // 1 mm above the body so its flat parts don't coincide with a floor plane at the same height.
-  Id g = addGeom(c.doc, c.body, GeomType::Hfield, {sx / 2, sy / 2, elevation}, {{0, 0, 0.001}, {}}, c.b.name + "_surface");
-  c.doc.geom(g)->hfield = h->id;
-  c.doc.geom(g)->rgba = kTerrain;
+  Id hid = h->id;
+  c.geom(GeomType::Hfield, {sx / 2, sy / 2, elevation}, {0, 0, 0.001}, {}, kTerrain, "_surface");
+  c.doc.geoms.back().hfield = hid;
 }
 
 // Samples f(x, y) in meters (body frame) on an nrow x ncol grid, flattening a spawn disc at the
@@ -183,7 +200,7 @@ void genStones(Ctx& c) {
     for (int k = 0; k < cols; ++k) {
       double hi = std::max(0.01, h + rng.uniform(-var, var));
       Vec3 pos{s / 2 + r * pitch, (k - (cols - 1) / 2.0) * pitch, hi / 2};
-      c.box({s / 2, s / 2, hi / 2}, pos, {}, kStone, c.b.name + "_" + std::to_string(r + 1) + "_" + std::to_string(k + 1));
+      c.box({s / 2, s / 2, hi / 2}, pos, {}, kStone, "_" + std::to_string(r + 1) + "_" + std::to_string(k + 1));
     }
 }
 
@@ -198,24 +215,21 @@ void genObstacles(Ctx& c) {
     double s = rng.uniform(smin, smax);
     if (std::hypot(p.x, p.y) < clear + s) continue;  // keep the spawn area free
     double hgt = rng.uniform(smin, smax);
-    std::string name = c.b.name + "_" + std::to_string(++placed);
+    std::string key = "_" + std::to_string(++placed);
     if (rng.uniform() < 0.6) {
-      Id g = c.box({s, s * rng.uniform(0.5, 1.0), hgt}, {p.x, p.y, hgt}, axisAngle({0, 0, 1}, rng.uniform(0, kPi)), kStone, name);
-      (void)g;
+      c.box({s, s * rng.uniform(0.5, 1.0), hgt}, {p.x, p.y, hgt}, axisAngle({0, 0, 1}, rng.uniform(0, kPi)), kStone, key);
     } else {
-      Id g = addGeom(c.doc, c.body, GeomType::Cylinder, {s, hgt, 0}, {{p.x, p.y, hgt}, {}}, name);
-      c.doc.geom(g)->rgba = kStone;
+      c.geom(GeomType::Cylinder, {s, hgt, 0}, {p.x, p.y, hgt}, {}, kStone, key);
     }
   }
 }
 
 void genArena(Ctx& c) {
   double sx = c.p("sizex"), sy = c.p("sizey"), h = c.p("wallheight"), t = c.p("thickness");
-  std::string base = c.b.name;
-  c.box({sx / 2 + t, t / 2, h / 2}, {0, sy / 2 + t / 2, h / 2}, {}, kWall, base + "_north");
-  c.box({sx / 2 + t, t / 2, h / 2}, {0, -sy / 2 - t / 2, h / 2}, {}, kWall, base + "_south");
-  c.box({t / 2, sy / 2, h / 2}, {sx / 2 + t / 2, 0, h / 2}, {}, kWall, base + "_east");
-  c.box({t / 2, sy / 2, h / 2}, {-sx / 2 - t / 2, 0, h / 2}, {}, kWall, base + "_west");
+  c.box({sx / 2 + t, t / 2, h / 2}, {0, sy / 2 + t / 2, h / 2}, {}, kWall, "_north");
+  c.box({sx / 2 + t, t / 2, h / 2}, {0, -sy / 2 - t / 2, h / 2}, {}, kWall, "_south");
+  c.box({t / 2, sy / 2, h / 2}, {sx / 2 + t / 2, 0, h / 2}, {}, kWall, "_east");
+  c.box({t / 2, sy / 2, h / 2}, {-sx / 2 - t / 2, 0, h / 2}, {}, kWall, "_west");
 }
 
 }  // namespace
@@ -310,20 +324,44 @@ bool regenerate(Document& doc, Id bodyId) {
   if (!body) return false;
   const GeneratorInfo* info = findGenerator(body->generator);
   if (!info) return false;
+  // Parameters missing from an older or hand-edited file take their defaults; NaN or out-of-range
+  // values are brought back into range.
+  size_t have = body->genParams.size();
   body->genParams.resize(info->params.size());
-  for (size_t i = 0; i < info->params.size(); ++i)
-    body->genParams[i] = std::clamp(body->genParams[i], info->params[i].min, info->params[i].max);
-  // Replace the body's own geoms; a height field asset is reused so references stay valid.
-  std::vector<Id> old;
+  for (size_t i = 0; i < info->params.size(); ++i) {
+    double& v = body->genParams[i];
+    if (i >= have || std::isnan(v)) v = info->params[i].def;
+    v = std::clamp(v, info->params[i].min, info->params[i].max);
+  }
+  // The body's pieces are generated again. A piece that comes back (same key) keeps its ID and
+  // what was edited on it (friction, contact settings, material, color, name...), so contact
+  // pairs, sensors and edits that refer to it survive a parameter change; only its shape and place
+  // are new. A geom added to the body by hand has no key and is left alone, as is a copy of a
+  // piece (which becomes hand-made).
+  std::unordered_map<std::string, Geom> before;  // key -> piece
+  std::unordered_set<Id> pieces;
   Id hfield = kNoId;
-  for (const Geom& g : doc.geoms)
-    if (g.body == bodyId) {
-      old.push_back(g.id);
-      if (g.type == GeomType::Hfield) hfield = g.hfield;
+  for (Geom& g : doc.geoms) {
+    if (g.body != bodyId || g.genKey.empty()) continue;
+    if (before.count(g.genKey)) {
+      g.genKey.clear();
+      continue;
     }
-  deleteElements(doc, old);
+    pieces.insert(g.id);
+    before.emplace(g.genKey, g);
+    if (g.type == GeomType::Hfield) hfield = g.hfield;
+  }
+  // The height field asset is reused, unless something else uses it (a duplicated terrain).
+  for (const Geom& g : doc.geoms)
+    if (hfield != kNoId && g.hfield == hfield && !pieces.count(g.id)) hfield = kNoId;
+  doc.geoms.erase(std::remove_if(doc.geoms.begin(), doc.geoms.end(), [&](const Geom& g) { return pieces.count(g.id) > 0; }),
+                  doc.geoms.end());
+  doc.touch();
   Body copy = *doc.body(bodyId);  // stable reference while geoms are added
-  Ctx c{doc, bodyId, copy};
+  Ctx c{doc, bodyId, copy, {}};
+  for (const Geom& g : doc.geoms) c.names.insert(g.name);
+  for (const auto& kv : before) c.names.insert(kv.second.name);  // new pieces never take a kept one's name
+  size_t first = doc.geoms.size();
   const std::string& t = copy.generator;
   if (t == "stairs") genStairs(c);
   else if (t == "ramp") genRamp(c);
@@ -332,6 +370,25 @@ bool regenerate(Document& doc, Id bodyId) {
   else if (t == "stones") genStones(c);
   else if (t == "obstacles") genObstacles(c);
   else if (t == "arena") genArena(c);
+  std::unordered_set<Id> kept;
+  for (size_t i = first; i < doc.geoms.size(); ++i) {
+    Geom& g = doc.geoms[i];
+    auto it = before.find(g.genKey);
+    if (it == before.end()) continue;
+    Geom fresh = g;
+    g = it->second;
+    g.type = fresh.type;
+    g.size = fresh.size;
+    g.pos = fresh.pos;
+    g.quat = fresh.quat;
+    g.hfield = fresh.hfield;
+    kept.insert(g.id);
+  }
+  // Pieces that are gone take what referred to them along (pairs, sensors, tendon wraps).
+  std::vector<Id> gone;
+  for (Id id : pieces)
+    if (!kept.count(id)) gone.push_back(id);
+  if (!gone.empty()) deleteElements(doc, gone);
   doc.touch();
   return true;
 }
