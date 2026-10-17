@@ -42,7 +42,7 @@ void applyAppearance(const Document& doc, DrawItem& it, const Color& rgba, Id ma
   it.specular = float(m->specular);
   it.shininess = float(m->shininess);
   it.emission = float(m->emission);
-  bool geomOverrides = rgba != def && rgba != Color{1, 1, 1, 1};
+  bool geomOverrides = rgba != def;  // as in MuJoCo: a non-default color overrides the material
   if (!geomOverrides) it.color = m->rgba;
   const Texture* t = doc.texture(m->texture);
   if (t && t->type == TextureType::TwoD && t->builtin == TextureBuiltin::Checker && isPlane) {

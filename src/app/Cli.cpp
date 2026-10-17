@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 
 #include "analysis/Analysis.h"
 #include "core/MjcfWriter.h"
@@ -24,7 +25,8 @@ const char* cliUsage() {
          "\n"
          "Headless commands:\n"
          "  --export <out.xml>     Export the project to MJCF and exit\n"
-         "  --scope <s>            Export scope: all | models | environment (default all)\n"
+         "  --scope <s>            Export scope: all | models | environment | split (default all; split\n"
+         "                         writes <name>.xml for the scene and <name>_model.xml for the models)\n"
          "  --angle <u>            Angle unit in the MJCF: radian | degree (default radian)\n"
          "  --loader               With --export: also write <name>_mjwarp.py (MuJoCo Warp loader)\n"
          "  --validate             Compile with MuJoCo, print a report and exit (non-zero on errors)\n"
@@ -73,7 +75,7 @@ bool parseCli(int argc, char** argv, CliOptions& o, std::string& error) {
       o.input = a;
     }
   }
-  if (o.scope != "all" && o.scope != "models" && o.scope != "environment") {
+  if (o.scope != "all" && o.scope != "models" && o.scope != "environment" && o.scope != "split") {
     error = "Bad --scope: " + o.scope;
     return false;
   }
@@ -118,10 +120,12 @@ int runHeadless(const CliOptions& cli) {
             : cli.scope == "environment" ? ExportOptions::Scope::Environment
                                          : ExportOptions::Scope::All;
   opt.angle = cli.angle == "degree" ? AngleUnit::Degree : AngleUnit::Radian;
-  std::string xml = writeMjcf(doc, opt);
+  ExportMap map;
+  std::string xml = writeMjcf(doc, opt, &map);
   int rc = 0;
   if (cli.validate) {
     CompileResult r = compileMjcf(xml);
+    r.map = map;  // lets the analysis name the geoms of the start contacts
     if (!r.ok) {
       std::printf("ERROR  MuJoCo compile failed: %s\n", r.error.c_str());
       rc = 1;
@@ -151,11 +155,17 @@ int runHeadless(const CliOptions& cli) {
   }
   if (!cli.exportPath.empty()) {
     std::vector<std::string> written;
-    if (!exportMjcfFile(doc, cli.exportPath, opt, &err, "", &written)) {
+    std::error_code ec;
+    std::filesystem::path parent = std::filesystem::path(cli.exportPath).parent_path();
+    if (!parent.empty()) std::filesystem::create_directories(parent, ec);
+    bool ok = cli.scope == "split" ? exportSplitMjcf(doc, cli.exportPath, opt, &err, &written)
+                                   : exportMjcfFile(doc, cli.exportPath, opt, &err, "", &written);
+    if (!ok) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
-    if (written.size() > 1) std::printf("Wrote %d asset files (meshes, textures)\n", int(written.size() - 1));
+    int xmlFiles = cli.scope == "split" ? 2 : 1;
+    if (int(written.size()) > xmlFiles) std::printf("Wrote %d asset files (meshes, textures)\n", int(written.size()) - xmlFiles);
     std::printf("Wrote %s\n", cli.exportPath.c_str());
     if (cli.loader) {
       std::string path = cli.exportPath, file = path.substr(path.find_last_of("/\\") + 1);

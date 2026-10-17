@@ -94,14 +94,31 @@ template <int N> bool nearly(const VecN<N>& a, const VecN<N>& b) {
   return true;
 }
 
+// Split export: the model file is written first and included by the scene file. The scene pass
+// sees the model's bodies and skips what the model file already defines.
+struct SplitState {
+  std::unordered_set<Id> bodies;    // bodies in the model file
+  std::unordered_set<Id> written;   // elements and assets the model file defines
+  std::unordered_set<std::string> files;  // asset file names already used in the shared folder
+  std::vector<const Joint*> joints;       // model joints and actuators in compiled order (they
+  std::vector<Id> actuators;              // come first in the scene: the include is at the top)
+};
+
 class Writer {
  public:
-  Writer(const Document& d, const ExportOptions& o, ExportMap* m, std::vector<ExportFile>* f)
-      : doc_(d), opt_(o), map_(m), files_(f) {}
+  Writer(const Document& d, const ExportOptions& o, ExportMap* m, std::vector<ExportFile>* f, SplitState* split = nullptr)
+      : doc_(d), opt_(o), map_(m), files_(f), split_(split) {
+    if (scenePass()) assetFiles_ = split_->files;
+  }
 
   std::string run() {
     selectContent();
     computeNames();
+    // Height of each height field's lowest sample: MuJoCo moves it to 0 (see writeAssets). Known
+    // before any geom is written, also for geoms whose height field another split file defines.
+    for (const Hfield& h : doc_.hfields)
+      if (h.data && !h.data->empty() && h.data->size() == size_t(h.nrow) * size_t(h.ncol))
+        hfieldOffset_[h.id] = *std::min_element(h.data->begin(), h.data->end()) * h.size.z;
 
     XmlNode root("mujoco");
     root.set("model", doc_.modelName.empty() ? "mjforge" : doc_.modelName);
@@ -116,7 +133,16 @@ class Writer {
     writeTendons(root);
     writeActuators(root);
     writeSensors(root);
-    writeKeyframes(root);
+    if (!modelPass()) writeKeyframes(root);  // split export: the scene holds complete keyframes
+    if (modelPass()) {
+      split_->bodies = bodies_;
+      for (const auto* set : {&tendons_, &equalities_, &pairs_, &excludes_, &actuators_, &sensors_, &materials_, &textures_,
+                              &meshes_, &hfields_})
+        split_->written.insert(set->begin(), set->end());
+      split_->files = assetFiles_;
+      split_->joints = writtenJoints_;
+      split_->actuators = writtenActuators_;
+    }
 
     std::string out;
     if (opt_.header) {
@@ -196,13 +222,23 @@ class Writer {
     return true;
   }
   bool worldContent() const { return opt_.scope != ExportOptions::Scope::Models; }
+  bool modelPass() const { return split_ && opt_.scope == ExportOptions::Scope::Models; }
+  bool scenePass() const { return split_ && opt_.scope == ExportOptions::Scope::Environment; }
   bool bodyIncluded(Id b) const { return b == kWorldId || bodies_.count(b) > 0; }
-  // Elements attached to the world are only exported with environment content. Elements on a
-  // missing body count as world elements, as in the document index.
+  // Bodies this file can refer to: its own, plus the included model file's in a split scene.
+  bool bodyVisible(Id b) const { return bodyIncluded(b) || (scenePass() && split_->bodies.count(b) > 0); }
+  // Elements on a missing body count as world elements, as in the document index.
+  Id bodyOf(Id body) const { return body != kWorldId && !doc_.body(body) ? kWorldId : body; }
+  // Elements attached to the world are only exported with environment content.
   bool attachedIncluded(Id body) const {
-    if (body != kWorldId && !doc_.body(body)) body = kWorldId;
+    body = bodyOf(body);
     return body == kWorldId ? worldContent() : bodies_.count(body) > 0;
   }
+  bool attachedVisible(Id body) const {
+    body = bodyOf(body);
+    return body == kWorldId ? worldContent() : bodyVisible(body);
+  }
+  bool alreadyWritten(Id id) const { return scenePass() && split_->written.count(id) > 0; }
 
   void selectContent() {
     // Top-level bodies as the index sees them (a body with a missing parent hangs from the world).
@@ -211,52 +247,59 @@ class Writer {
       if (!includeRoot(b)) continue;
       for (Id id : doc_.subtree(b.id)) bodies_.insert(id);
     }
-    auto elementIncluded = [&](Id id) -> bool {
+    // Whether an element referenced by a tendon, actuator, sensor... exists in this file (or in the
+    // model file a split scene includes).
+    auto visible = [&](Id id) -> bool {
       switch (doc_.kindOf(id)) {
-        case Kind::Body: return bodyIncluded(id);
-        case Kind::Joint: return attachedIncluded(doc_.joint(id)->body);
-        case Kind::Geom: return attachedIncluded(doc_.geom(id)->body);
-        case Kind::Site: return attachedIncluded(doc_.site(id)->body);
-        case Kind::Camera: return attachedIncluded(doc_.camera(id)->body);
-        case Kind::Tendon: return tendons_.count(id) > 0;
+        case Kind::Body: return bodyVisible(id);
+        case Kind::Joint: return attachedVisible(doc_.joint(id)->body);
+        case Kind::Geom: return attachedVisible(doc_.geom(id)->body);
+        case Kind::Site: return attachedVisible(doc_.site(id)->body);
+        case Kind::Camera: return attachedVisible(doc_.camera(id)->body);
+        case Kind::Tendon: return tendons_.count(id) > 0 || alreadyWritten(id);
+        case Kind::Actuator: return actuators_.count(id) > 0 || alreadyWritten(id);
         default: return false;
       }
     };
-    // Tendons whose joints / path elements are all exported (before the actuators using them).
+    // Tendons whose joints / path elements all exist (before the actuators using them).
     for (const Tendon& t : doc_.tendons) {
+      if (alreadyWritten(t.id)) continue;
       bool ok = t.type == TendonType::Fixed ? !t.joints.empty() : t.path.size() >= 2;
-      for (const TendonJoint& j : t.joints) ok &= j.joint != kNoId && elementIncluded(j.joint);
+      for (const TendonJoint& j : t.joints) ok &= j.joint != kNoId && visible(j.joint);
       for (const TendonPoint& p : t.path) {
-        if (p.type != TendonPoint::Type::Pulley) ok &= p.obj != kNoId && elementIncluded(p.obj);
-        if (p.sidesite) ok &= elementIncluded(p.sidesite);
+        if (p.type != TendonPoint::Type::Pulley) ok &= p.obj != kNoId && visible(p.obj);
+        if (p.sidesite) ok &= visible(p.sidesite);
       }
       if (ok) tendons_.insert(t.id);
     }
     for (const Equality& e : doc_.equalities) {
-      bool ok = e.obj1 != kNoId && elementIncluded(e.obj1) && (e.obj2 == kNoId || elementIncluded(e.obj2));
-      if (ok) equalities_.insert(e.id);
+      bool ok = e.obj1 != kNoId && visible(e.obj1) && (e.obj2 == kNoId || visible(e.obj2));
+      if (ok && !alreadyWritten(e.id)) equalities_.insert(e.id);
     }
     for (const ContactPair& c : doc_.pairs)
-      if (c.geom1 && c.geom2 && elementIncluded(c.geom1) && elementIncluded(c.geom2)) pairs_.insert(c.id);
+      if (c.geom1 && c.geom2 && visible(c.geom1) && visible(c.geom2) && !alreadyWritten(c.id)) pairs_.insert(c.id);
+    for (const Exclude& e : doc_.excludes) {
+      if (e.body1 == kNoId || e.body2 == kNoId || (e.body1 == kWorldId && e.body2 == kWorldId)) continue;
+      if (bodyVisible(e.body1) && bodyVisible(e.body2) && !alreadyWritten(e.id)) excludes_.insert(e.id);
+    }
     for (const Actuator& a : doc_.actuators) {
-      bool ok = a.target != kNoId && elementIncluded(a.target);
-      if (ok && a.refsite != kNoId) ok = elementIncluded(a.refsite);
-      if (ok && a.trn == TrnType::SliderCrank) ok = a.slidersite != kNoId && elementIncluded(a.slidersite);
-      if (ok) actuators_.insert(a.id);
+      bool ok = a.target != kNoId && visible(a.target);
+      if (ok && a.refsite != kNoId) ok = visible(a.refsite);
+      if (ok && a.trn == TrnType::SliderCrank) ok = a.slidersite != kNoId && visible(a.slidersite);
+      if (ok && !alreadyWritten(a.id)) actuators_.insert(a.id);
     }
     for (const Sensor& s : doc_.sensors) {
       const SensorInfo& info = sensorInfo(s.type);
       bool ok = true;
-      if (info.obj == SensorObj::Actuator) ok = actuators_.count(s.obj) > 0;
-      else if (info.obj == SensorObj::Contact) ok = s.obj == kNoId || elementIncluded(s.obj);  // no object: any contact
-      else if (info.obj != SensorObj::None) ok = s.obj != kNoId && elementIncluded(s.obj);
-      else ok = worldContent() || opt_.scope == ExportOptions::Scope::Models;
-      if (ok && s.ref != kNoId) ok = elementIncluded(s.ref);
+      if (info.obj == SensorObj::Contact) ok = s.obj == kNoId || visible(s.obj);  // no object: any contact
+      else if (info.obj != SensorObj::None) ok = s.obj != kNoId && visible(s.obj);
+      if (ok && s.ref != kNoId) ok = visible(s.ref);
       bool needsRef = info.obj == SensorObj::GeomPair || info.obj == SensorObj::Inside || info.obj == SensorObj::CamProj;
       if (needsRef && s.ref == kNoId) ok = false;
-      if (ok) sensors_.insert(s.id);
+      if (ok && !alreadyWritten(s.id)) sensors_.insert(s.id);
     }
-    // Assets referenced by exported geoms/sites (+ skyboxes with environment content).
+    // Assets referenced by exported geoms/sites/tendons (+ skyboxes with environment content); a
+    // split scene does not redefine the model file's.
     for (const Geom& g : doc_.geoms) {
       if (!attachedIncluded(g.body)) continue;
       if (g.material != kNoId) materials_.insert(g.material);
@@ -274,6 +317,9 @@ class Writer {
     if (worldContent())
       for (const Texture& t : doc_.textures)
         if (t.type == TextureType::Skybox) textures_.insert(t.id);
+    if (scenePass())
+      for (auto* set : {&materials_, &textures_, &meshes_, &hfields_})
+        for (auto it = set->begin(); it != set->end();) it = split_->written.count(*it) ? set->erase(it) : std::next(it);
   }
 
   void computeNames() {
@@ -309,10 +355,19 @@ class Writer {
     for (const Camera& c : doc_.cameras) referenced.insert(c.target);
     for (const Light& l : doc_.lights) referenced.insert(l.target);
 
+    // Generated names ("joint12") must not collide with names the user chose for that kind.
     auto assign = [&](const auto& vec, Kind kind, bool alwaysName) {
+      std::unordered_set<std::string> used;
+      for (const auto& e : vec)
+        if (!e.name.empty()) used.insert(e.name);
       for (const auto& e : vec) {
         std::string n = e.name;
-        if (n.empty() && (alwaysName || referenced.count(e.id))) n = std::string(kindName(kind)) + std::to_string(e.id);
+        if (n.empty() && (alwaysName || referenced.count(e.id))) {
+          std::string base = std::string(kindName(kind)) + std::to_string(e.id);
+          n = base;
+          for (int k = 2; used.count(n); ++k) n = base + "_" + std::to_string(k);
+          used.insert(n);
+        }
         names_[e.id] = n;
       }
     };
@@ -532,24 +587,35 @@ class Writer {
       XmlNode& e = n.add("hfield");
       setName(e, h.id);
       bool complete = h.data && h.data->size() == size_t(h.nrow) * size_t(h.ncol) && h.nrow > 0 && h.ncol > 0;
+      // MuJoCo rescales elevation data to [0, 1]. Write it normalized, with the height scale and the
+      // geoms' offset adjusted, so the terrain keeps exactly the heights the editor shows.
+      Hfield out = h;
+      if (complete) {
+        auto [lo, hi] = std::minmax_element(h.data->begin(), h.data->end());
+        double l = *lo, span = double(*hi) - double(*lo);
+        auto data = std::make_shared<std::vector<float>>(h.data->size());
+        for (size_t i = 0; i < data->size(); ++i) (*data)[i] = span > 1e-12 ? float(((*h.data)[i] - l) / span) : 0.0f;
+        out.data = data;
+        if (span > 1e-12) out.size.z = h.size.z * span;
+      }
       if (files_ && complete && h.data->size() > opt_.externalHfieldSamples) {
         // Big terrains go to MuJoCo's binary height field format: exact float32 values and no
         // multi-megabyte attribute for the XML parser.
         std::string path = opt_.assetDir + "/" + assetFileName(nameOf(h.id), ".bin");
-        files_->push_back({path, hfieldToBin(h)});
+        files_->push_back({path, hfieldToBin(out)});
         e.set("file", path);
-        e.set("size", vec(h.size));
+        e.set("size", vec(out.size));
         continue;
       }
       e.set("nrow", std::to_string(h.nrow));
       e.set("ncol", std::to_string(h.ncol));
-      e.set("size", vec(h.size));
-      if (h.data && !h.data->empty()) {
+      e.set("size", vec(out.size));
+      if (complete) {
         std::string s;
-        s.reserve(h.data->size() * 6);
-        for (size_t i = 0; i < h.data->size(); ++i) {
+        s.reserve(out.data->size() * 8);
+        for (size_t i = 0; i < out.data->size(); ++i) {
           if (i) s += ' ';
-          s += formatNumber((*h.data)[i], 6);
+          s += formatNumber((*out.data)[i], 7);
         }
         e.set("elevation", s);
       }
@@ -621,7 +687,8 @@ class Writer {
         n.set("axis", vec(normalize(j.axis)));
     }
     if (j.type != JointType::Free) {
-      Vec2 r = angular ? Vec2{ang(j.range.x), ang(j.range.y)} : j.range;
+      // MuJoCo converts a degree range to radians only when the joint is limited.
+      Vec2 r = angular && j.limited ? Vec2{ang(j.range.x), ang(j.range.y)} : j.range;
       writeLimited(n, "limited", "range", j.limited, r);
     }
     if (!nearly(j.ref, 0.0)) n.set("ref", num(angular ? ang(j.ref) : j.ref));
@@ -650,10 +717,15 @@ class Writer {
     if (sc > 0) n.set("size", sizeStr(g.size, sc));
     if (g.type == GeomType::Hfield && g.hfield != kNoId) n.set("hfield", nameOf(g.hfield));
     if (g.type == GeomType::Mesh && g.mesh != kNoId) n.set("mesh", nameOf(g.mesh));
-    setPose(n, g.pos, g.quat);
+    Vec3 pos = g.pos;
+    if (g.type == GeomType::Hfield) {  // the lowest sample moved to 0 by the normalization above
+      auto it = hfieldOffset_.find(g.hfield);
+      if (it != hfieldOffset_.end()) pos = pos + rotate(g.quat, Vec3{0, 0, it->second});
+    }
+    setPose(n, pos, g.quat);
     bool hasMat = g.material != kNoId && materials_.count(g.material);
     if (hasMat) n.set("material", nameOf(g.material));
-    if (g.rgba != d.rgba && (!hasMat || g.rgba != Color{1, 1, 1, 1})) n.set("rgba", color(g.rgba));
+    if (g.rgba != d.rgba) n.set("rgba", color(g.rgba));  // MuJoCo: any non-default rgba overrides the material
     if (g.contype != d.contype) n.set("contype", std::to_string(g.contype));
     if (g.conaffinity != d.conaffinity) n.set("conaffinity", std::to_string(g.conaffinity));
     if (g.condim != d.condim) n.set("condim", std::to_string(g.condim));
@@ -697,9 +769,11 @@ class Writer {
     if (map_) map_->cameras.push_back(c.id);
     XmlNode& n = parent.add("camera");
     setName(n, c.id);
-    if (c.mode != CameraMode::Fixed) n.set("mode", toXml(c.mode));
-    if (c.target != kNoId && (c.mode == CameraMode::TargetBody || c.mode == CameraMode::TargetBodyCom))
-      n.set("target", nameOf(c.target));
+    // A target outside this file (another export scope) would not load: fall back to fixed.
+    bool targeted = c.mode == CameraMode::TargetBody || c.mode == CameraMode::TargetBodyCom;
+    bool targetOk = c.target != kNoId && bodyVisible(c.target);
+    if (c.mode != CameraMode::Fixed && (!targeted || targetOk)) n.set("mode", toXml(c.mode));
+    if (targeted && targetOk) n.set("target", nameOf(c.target));
     setPose(n, c.pos, c.quat);
     if (!nearly(c.fovy, 45.0)) n.set("fovy", num(c.fovy));
   }
@@ -709,9 +783,10 @@ class Writer {
     const Light d;
     XmlNode& n = parent.add("light");
     setName(n, l.id);
-    if (l.mode != CameraMode::Fixed) n.set("mode", toXml(l.mode));
-    if (l.target != kNoId && (l.mode == CameraMode::TargetBody || l.mode == CameraMode::TargetBodyCom))
-      n.set("target", nameOf(l.target));
+    bool targeted = l.mode == CameraMode::TargetBody || l.mode == CameraMode::TargetBodyCom;
+    bool targetOk = l.target != kNoId && bodyVisible(l.target);
+    if (l.mode != CameraMode::Fixed && (!targeted || targetOk)) n.set("mode", toXml(l.mode));
+    if (targeted && targetOk) n.set("target", nameOf(l.target));
     if (l.type != LightType::Spot) n.set("type", toXml(l.type));
     if (!nearly(l.pos, Vec3{})) n.set("pos", vec(l.pos));
     if (!nearly(normalize(l.dir), Vec3{0, 0, -1})) n.set("dir", vec(normalize(l.dir)));
@@ -728,9 +803,7 @@ class Writer {
   void writeContact(XmlNode& root) {
     XmlNode n("contact");
     for (const Exclude& e : doc_.excludes) {
-      if (e.body1 == kNoId || e.body2 == kNoId) continue;
-      if (!bodyIncluded(e.body1) || !bodyIncluded(e.body2)) continue;
-      if (e.body1 == kWorldId && e.body2 == kWorldId) continue;
+      if (!excludes_.count(e.id)) continue;
       XmlNode& x = n.add("exclude");
       setName(x, e.id);
       x.set("body1", nameOf(e.body1));
@@ -809,8 +882,8 @@ class Writer {
       if (!nearly(t.solreffriction, kDefaultSolref)) x.set("solreffriction", vec(t.solreffriction));
       if (!nearly(t.solimpfriction, kDefaultSolimp)) x.set("solimpfriction", vec(t.solimpfriction));
       if (spatial && !nearly(t.width, d.width)) x.set("width", num(t.width));
-      if (t.rgba != d.rgba) x.set("rgba", color(t.rgba));
-      if (t.material != kNoId && materials_.count(t.material)) x.set("material", nameOf(t.material));
+      if (spatial && t.rgba != d.rgba) x.set("rgba", color(t.rgba));  // <fixed> has no appearance
+      if (spatial && t.material != kNoId && materials_.count(t.material)) x.set("material", nameOf(t.material));
       if (t.group != 0) x.set("group", std::to_string(t.group));
       if (!spatial) {
         for (const TendonJoint& j : t.joints) {
@@ -848,12 +921,88 @@ class Writer {
     }
   }
 
+  // MJCF shortcut elements accept only some transmissions and attributes (mjcf.schema): a motor on
+  // a body or a geared adhesion actuator is written as the equivalent <general> element.
+  static bool shortcutFits(const Actuator& a) {
+    switch (a.type) {
+      case ActuatorType::General: return true;
+      case ActuatorType::Adhesion:
+        return a.trn == TrnType::Body && nearly(a.gear[0], 1.0) && nearly(a.lengthrange, Vec2{}) && nearly(a.damping, 0.0) &&
+               nearly(a.armature, 0.0);
+      case ActuatorType::Muscle: return a.trn != TrnType::Body && a.trn != TrnType::Site;
+      default: return a.trn != TrnType::Body;
+    }
+  }
+  // The gain / bias / dynamics a shortcut stands for (MuJoCo's mjs_setTo* functions). A positive
+  // biasprm[2] on a position-like actuator is MuJoCo's damping ratio, exactly as for <position>.
+  static Actuator asGeneral(const Actuator& a) {
+    Actuator g = a;
+    g.type = ActuatorType::General;
+    g.dyntype = DynType::None;
+    g.gaintype = GainType::Fixed;
+    g.biastype = BiasType::None;
+    g.dynprm = g.gainprm = g.biasprm = Vec10{};
+    g.dynprm[0] = 1;
+    switch (a.type) {
+      case ActuatorType::General: return a;
+      case ActuatorType::Motor: g.gainprm[0] = 1; break;
+      case ActuatorType::Position:
+      case ActuatorType::IntVelocity:
+        g.gainprm[0] = a.kp;
+        g.biastype = BiasType::Affine;
+        g.biasprm[1] = -a.kp;
+        g.biasprm[2] = a.dampratio > 0 ? a.dampratio : -a.kv;
+        if (a.type == ActuatorType::IntVelocity) g.dyntype = DynType::Integrator;
+        else if (a.timeconst > 0) {
+          g.dyntype = DynType::FilterExact;
+          g.dynprm[0] = a.timeconst;
+        }
+        break;
+      case ActuatorType::Velocity:
+        g.gainprm[0] = a.kv;
+        g.biastype = BiasType::Affine;
+        g.biasprm[2] = -a.kv;
+        break;
+      case ActuatorType::Damper:
+        g.gaintype = GainType::Affine;
+        g.gainprm[2] = -a.kv;
+        g.ctrllimited = true;
+        break;
+      case ActuatorType::Cylinder:
+        g.dyntype = DynType::Filter;
+        g.dynprm[0] = a.cylTimeconst;
+        g.gainprm[0] = a.diameter > 0 ? 0.25 * kPi * a.diameter * a.diameter : a.area;
+        g.biastype = BiasType::Affine;
+        for (int i = 0; i < 3; ++i) g.biasprm[i] = a.cylBias[i];
+        break;
+      case ActuatorType::Muscle: {
+        g.dyntype = DynType::Muscle;
+        g.gaintype = GainType::Muscle;
+        g.biastype = BiasType::Muscle;
+        g.dynprm[0] = a.muscleTimeconst.x;
+        g.dynprm[1] = a.muscleTimeconst.y;
+        g.dynprm[2] = a.tausmooth;
+        double prm[9] = {a.muscleRange.x, a.muscleRange.y, a.muscleForce, a.muscleScale, a.lmin, a.lmax, a.vmax, a.fpmax, a.fvmax};
+        for (int i = 0; i < 9; ++i) g.gainprm[i] = g.biasprm[i] = prm[i];
+        break;
+      }
+      case ActuatorType::Adhesion:
+        g.gainprm[0] = a.adhesionGain;
+        g.ctrllimited = true;
+        break;
+    }
+    return g;
+  }
+
   void writeActuators(XmlNode& root) {
     XmlNode n("actuator");
-    for (const Actuator& a : doc_.actuators) {
-      if (!actuators_.count(a.id)) continue;
-      if (map_) map_->actuators.push_back(a.id);
-      writtenActuators_.push_back(a.id);
+    for (const Actuator& orig : doc_.actuators) {
+      if (!actuators_.count(orig.id)) continue;
+      if (map_) map_->actuators.push_back(orig.id);
+      writtenActuators_.push_back(orig.id);
+      Actuator converted;
+      if (!shortcutFits(orig)) converted = asGeneral(orig);
+      const Actuator& a = shortcutFits(orig) ? orig : converted;
       XmlNode& e = n.add(toXml(a.type));
       setName(e, a.id);
       switch (a.trn) {
@@ -875,12 +1024,27 @@ class Writer {
       // gear: write only the meaningful prefix
       int glen = 0;
       for (int i = 0; i < 6; ++i) if (!nearly(a.gear[i], 0.0)) glen = i + 1;
-      if (!(glen == 1 && nearly(a.gear[0], 1.0))) e.set("gear", vec(a.gear, std::max(1, glen)));
-      writeLimited(e, "ctrllimited", "ctrlrange", a.ctrllimited, a.ctrlrange);
-      writeLimited(e, "forcelimited", "forcerange", a.forcelimited, a.forcerange);
-      if (a.type == ActuatorType::IntVelocity || a.type == ActuatorType::General)
+      if (a.type != ActuatorType::Adhesion && !(glen == 1 && nearly(a.gear[0], 1.0))) e.set("gear", vec(a.gear, std::max(1, glen)));
+      // inheritrange makes MuJoCo derive the range of a servo (its activation range for
+      // intvelocity / integrator dynamics) from the joint: the range itself must then be absent.
+      bool integrator = a.type == ActuatorType::IntVelocity || (a.type == ActuatorType::General && a.dyntype == DynType::Integrator);
+      bool inherits = a.inheritrange > 0 && (a.type == ActuatorType::Position || a.type == ActuatorType::IntVelocity ||
+                                             a.type == ActuatorType::General);
+      if (a.type == ActuatorType::Damper || a.type == ActuatorType::Adhesion) {
+        // These elements have no ctrllimited attribute: their control range is always enforced.
+        if (!nearly(a.ctrlrange, Vec2{})) e.set("ctrlrange", vec(a.ctrlrange));
+      } else if (!(inherits && !integrator)) {
+        writeLimited(e, "ctrllimited", "ctrlrange", a.ctrllimited, a.ctrlrange);
+      } else if (!doc_.compiler.autolimits) {
+        e.set("ctrllimited", "true");  // the inherited range is a limit; without autolimits MuJoCo wants it said
+      }
+      if (a.type != ActuatorType::Adhesion || !nearly(a.forcerange, Vec2{}))
+        writeLimited(e, "forcelimited", "forcerange", a.forcelimited, a.forcerange);
+      if ((a.type == ActuatorType::IntVelocity || a.type == ActuatorType::General) && !(inherits && integrator))
         writeLimited(e, "actlimited", "actrange", a.actlimited, a.actrange);
-      if (!nearly(a.lengthrange, Vec2{})) e.set("lengthrange", vec(a.lengthrange));
+      else if (inherits && integrator && !doc_.compiler.autolimits)
+        e.set("actlimited", "true");
+      if (a.type != ActuatorType::Adhesion && !nearly(a.lengthrange, Vec2{})) e.set("lengthrange", vec(a.lengthrange));
       if (a.delay > 0) e.set("delay", num(a.delay));
       if (a.nsample > 0) e.set("nsample", std::to_string(a.nsample));
       if (a.interp == 1 || a.interp == 2) e.set("interp", a.interp == 1 ? "linear" : "cubic");
@@ -894,14 +1058,15 @@ class Writer {
         case ActuatorType::Motor: break;
         case ActuatorType::Position:
           if (!nearly(a.kp, 1.0)) e.set("kp", num(a.kp));
-          if (!nearly(a.kv, 0.0)) e.set("kv", num(a.kv));
+          // MuJoCo refuses both (the analysis reports it); the damping ratio wins.
+          if (!nearly(a.kv, 0.0) && !(a.dampratio > 0)) e.set("kv", num(a.kv));
           if (!nearly(a.dampratio, 0.0)) e.set("dampratio", num(a.dampratio));
           if (!nearly(a.timeconst, 0.0)) e.set("timeconst", num(a.timeconst));
           if (!nearly(a.inheritrange, 0.0)) e.set("inheritrange", num(a.inheritrange));
           break;
         case ActuatorType::IntVelocity:
           if (!nearly(a.kp, 1.0)) e.set("kp", num(a.kp));
-          if (!nearly(a.kv, 0.0)) e.set("kv", num(a.kv));
+          if (!nearly(a.kv, 0.0) && !(a.dampratio > 0)) e.set("kv", num(a.kv));
           if (!nearly(a.dampratio, 0.0)) e.set("dampratio", num(a.dampratio));
           if (!nearly(a.inheritrange, 0.0)) e.set("inheritrange", num(a.inheritrange));
           break;
@@ -937,6 +1102,7 @@ class Writer {
           if (!nearly(a.dynprm, d.dynprm)) e.set("dynprm", trimmedVec(a.dynprm));
           if (!nearly(a.gainprm, d.gainprm)) e.set("gainprm", trimmedVec(a.gainprm));
           if (!nearly(a.biasprm, d.biasprm)) e.set("biasprm", trimmedVec(a.biasprm));
+          if (!nearly(a.inheritrange, 0.0)) e.set("inheritrange", num(a.inheritrange));
           if (a.actearly) e.set("actearly", "true");
           break;
       }
@@ -947,16 +1113,23 @@ class Writer {
   // Keyframes list every exported joint in compiled order; joints without a value get their
   // reference position. qpos values are raw MuJoCo state (radians), never converted to degrees.
   void writeKeyframes(XmlNode& root) {
-    if (doc_.keyframes.empty() || writtenJoints_.empty()) return;
-    // Split scene: the included model file carries the keyframes (its joints come first, MuJoCo
-    // pads the rest with reference positions); a second copy here would misalign and clash.
-    if (opt_.scope == ExportOptions::Scope::Environment && !opt_.includeFile.empty()) return;
+    if (doc_.keyframes.empty()) return;
+    // A scene that includes a model file written separately (not through the split export) cannot
+    // know the model's joints: leave keyframes to that file.
+    if (opt_.scope == ExportOptions::Scope::Environment && !opt_.includeFile.empty() && !scenePass()) return;
+    std::vector<const Joint*> joints = writtenJoints_;
+    std::vector<Id> actuators = writtenActuators_;
+    if (scenePass()) {  // the include comes first: the model's joints and actuators precede ours
+      joints.insert(joints.begin(), split_->joints.begin(), split_->joints.end());
+      actuators.insert(actuators.begin(), split_->actuators.begin(), split_->actuators.end());
+    }
+    if (joints.empty()) return;
     XmlNode n("keyframe");
     for (const Keyframe& k : doc_.keyframes) {
       std::string qpos, qvel, ctrl;
       bool anyVel = false, anyCtrl = false;
       auto add = [&](std::string& out, double v) { out += (out.empty() ? "" : " ") + num(v); };
-      for (const Joint* j : writtenJoints_) {
+      for (const Joint* j : joints) {
         int nq = j->type == JointType::Free ? 7 : j->type == JointType::Ball ? 4 : 1;
         int nv = j->type == JointType::Free ? 6 : j->type == JointType::Ball ? 3 : 1;
         const std::vector<double>* q = k.jointQpos(j->id);
@@ -980,7 +1153,7 @@ class Writer {
           add(qvel, v);
         }
       }
-      for (Id a : writtenActuators_) {
+      for (Id a : actuators) {
         double v = 0;
         for (const auto& e : k.ctrl) if (e.first == a) v = e.second;
         anyCtrl |= v != 0;
@@ -1102,13 +1275,64 @@ class Writer {
   const ExportOptions& opt_;
   ExportMap* map_;
   std::vector<ExportFile>* files_ = nullptr;
+  SplitState* split_ = nullptr;
   std::unordered_set<std::string> assetFiles_;
+  std::unordered_map<Id, double> hfieldOffset_;  // height of the lowest sample, per height field
   std::unordered_map<Id, std::string> names_;
   std::unordered_set<Id> bodies_, actuators_, sensors_, materials_, textures_, hfields_, meshes_, tendons_, equalities_,
-      pairs_;
+      pairs_, excludes_;
 };
 
 }  // namespace
+
+namespace {
+bool writeExportFiles(const std::filesystem::path& dir, const std::string& assetDir, const std::vector<ExportFile>& files,
+                      std::string* error, std::vector<std::string>* written) {
+  namespace fs = std::filesystem;
+  if (!files.empty()) {
+    std::error_code ec;
+    fs::create_directories(dir / assetDir, ec);
+    if (ec) {
+      if (error) *error = "Cannot create " + (dir / assetDir).string() + ": " + ec.message();
+      return false;
+    }
+  }
+  for (const ExportFile& f : files) {
+    std::string fp = (dir / f.path).string();
+    if (!writeTextFile(fp, f.content, error)) return false;
+    if (written) written->push_back(fp);
+  }
+  return true;
+}
+}  // namespace
+
+bool exportSplitMjcf(const Document& doc, const std::string& scenePath, const ExportOptions& optIn, std::string* error,
+                     std::vector<std::string>* written) {
+  namespace fs = std::filesystem;
+  fs::path p(scenePath);
+  std::string stem = p.stem().string();
+  fs::path modelPath = p.parent_path() / (stem + "_model.xml");
+  ExportOptions base = optIn;
+  base.externalMeshVertices = 1000;
+  base.externalHfieldSamples = 64 * 64;
+  base.assetDir = stem + "_assets";  // one folder for both files
+  ExportOptions mo = base, so = base;
+  mo.scope = ExportOptions::Scope::Models;
+  mo.modelRoot = kNoId;
+  mo.includeFile.clear();
+  so.scope = ExportOptions::Scope::Environment;
+  so.includeFile = modelPath.filename().string();
+  SplitState split;
+  std::vector<ExportFile> files;
+  std::string modelXml = Writer(doc, mo, nullptr, &files, &split).run();
+  std::string sceneXml = Writer(doc, so, nullptr, &files, &split).run();
+  if (!writeExportFiles(p.parent_path(), base.assetDir, files, error, written)) return false;
+  if (!writeTextFile(modelPath.string(), modelXml, error)) return false;
+  if (written) written->push_back(modelPath.string());
+  if (!writeTextFile(scenePath, sceneXml, error)) return false;
+  if (written) written->push_back(scenePath);
+  return true;
+}
 
 std::string writeMjcf(const Document& doc, const ExportOptions& opt, ExportMap* map, std::vector<ExportFile>* files) {
   if (map) *map = {};
@@ -1126,19 +1350,7 @@ bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOp
   opt.assetDir = (assetStem.empty() ? p.stem().string() : assetStem) + "_assets";
   std::vector<ExportFile> files;
   std::string xml = writeMjcf(doc, opt, nullptr, &files);
-  if (!files.empty()) {
-    std::error_code ec;
-    fs::create_directories(p.parent_path() / opt.assetDir, ec);
-    if (ec) {
-      if (error) *error = "Cannot create " + (p.parent_path() / opt.assetDir).string() + ": " + ec.message();
-      return false;
-    }
-  }
-  for (const ExportFile& f : files) {
-    std::string fp = (p.parent_path() / f.path).string();
-    if (!writeTextFile(fp, f.content, error)) return false;
-    if (written) written->push_back(fp);
-  }
+  if (!writeExportFiles(p.parent_path(), opt.assetDir, files, error, written)) return false;
   if (!writeTextFile(path, xml, error)) return false;
   if (written) written->push_back(path);
   return true;

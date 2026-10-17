@@ -1,8 +1,9 @@
 // Writes a Document as MJCF XML.
 //
 // The output is deterministic and minimal: attributes equal to MuJoCo's defaults are omitted.
-// Orientations are always written as quaternions, and <compiler angle=...> is always explicit, so
-// the files behave the same when they are included into other models.
+// Orientations are always written as quaternions and <compiler angle=...> is always explicit.
+// Note that MuJoCo applies the last <compiler angle> to the whole model, so an exported file
+// included into a scene with another angle unit changes meaning; <attach> keeps both intact.
 #pragma once
 
 #include <string>
@@ -59,6 +60,13 @@ std::string hfieldToBin(const Hfield& hfield);
 // `written` (optional) receives the written paths.
 bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOptions& opt, std::string* error,
                     const std::string& assetStem = "", std::vector<std::string>* written = nullptr);
+
+// Writes a scene for training setups that swap robots or terrains: <stem>_model.xml holds the
+// models (bodies with the Model role) and scene.xml the environment, including the model file.
+// Assets go to <stem>_assets/ once; elements that tie models to the environment (contact pairs,
+// exclusions, constraints, tendons, actuators, sensors) and the keyframes live in the scene.
+bool exportSplitMjcf(const Document& doc, const std::string& scenePath, const ExportOptions& opt, std::string* error,
+                     std::vector<std::string>* written = nullptr);
 
 // Number formatting used by the writer (exposed for tests and the UI).
 // precision <= 0 gives the shortest text that reads back as exactly v.

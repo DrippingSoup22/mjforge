@@ -7,7 +7,9 @@
 
 namespace mjf {
 
-constexpr int kProjectFormatVersion = 2;  // 2: height field data as base64
+// 2: height field data as base64. 3: a geom color other than the default overrides its material,
+// as in MuJoCo (older files used white for "show the material").
+constexpr int kProjectFormatVersion = 3;
 
 std::string projectToJson(const Document& doc, const std::string& editorStateJson = "");
 // Replaces `doc` on success. `editorStateJson` (optional) receives the "editor" object.

@@ -595,6 +595,9 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
                     ? Id(next->get<uint64_t>()) : 0;
     doc.nextId = std::max<Id>(stored, maxId + 1);
     repairReferences(doc);
+    if (version < 3)
+      for (Geom& g : doc.geoms)
+        if (g.material != kNoId && g.rgba == Color{1, 1, 1, 1}) g.rgba = Geom{}.rgba;
     doc.touch();
     if (editorStateJson) *editorStateJson = root.contains("editor") ? root["editor"].dump() : std::string();
     out = std::move(doc);

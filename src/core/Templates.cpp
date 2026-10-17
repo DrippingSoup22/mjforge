@@ -98,8 +98,7 @@ void addDefaultEnvironment(Document& doc) {
   Id gm = addMaterial(doc, mat);
 
   Id floor = addGeom(doc, kWorldId, GeomType::Plane, {0, 0, 0.05}, {}, "floor");
-  doc.geom(floor)->material = gm;
-  doc.geom(floor)->rgba = {1, 1, 1, 1};
+  doc.geom(floor)->material = gm;  // default geom color: the material's color shows
 
   Id light = addLight(doc, kWorldId, {0, 0, 3.5}, {0, 0, -1}, "sun");
   doc.light(light)->type = LightType::Directional;

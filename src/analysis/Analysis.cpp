@@ -295,6 +295,17 @@ class Analyzer {
             "Pick the joint (or site/body) this actuator drives in the inspector.", {a.id});
         continue;
       }
+      bool trnOk = a.type == ActuatorType::Adhesion ? a.trn == TrnType::Body
+                   : a.type == ActuatorType::Muscle ? a.trn != TrnType::Body && a.trn != TrnType::Site
+                                                    : true;
+      if (!trnOk) {
+        add(Severity::Error, IssueArea::Model, "actuator-transmission",
+            fmt(a.type == ActuatorType::Adhesion ? "Adhesion actuator %s needs a body transmission"
+                                                 : "Muscle %s needs a joint or tendon transmission", quote(a.name).c_str()),
+            a.type == ActuatorType::Adhesion ? "Adhesion pulls on the contacts of a body. Pick the body in the inspector."
+                                             : "A muscle's force depends on its length, which only joints and tendons have.",
+            {a.id});
+      }
       if (a.delay > 0 && a.nsample <= 0) {
         Issue& i = add(Severity::Error, IssueArea::Model, "delay-history",
                        fmt("Actuator %s has a delay but no history buffer", quote(a.name).c_str()),

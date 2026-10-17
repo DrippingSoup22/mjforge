@@ -670,14 +670,23 @@ void Editor::inspectActuator(Actuator& a) {
       setActuatorType(doc_, a, t);
       applyToSelected<Actuator>([&](Actuator& o) { setActuatorType(doc_, o, t); });
     }
-    const EnumEntry<TrnType> trns[] = {{TrnType::Joint, "joint", "Joint"},
-                                       {TrnType::JointInParent, "jointinparent", "Joint (in parent frame)"},
-                                       {TrnType::Tendon, "tendon", "Tendon"},
-                                       {TrnType::Site, "site", "Site (Cartesian)"},
-                                       {TrnType::Body, "body", "Body (adhesion)"}};
-    TrnType tr = a.trn;
-    if (props::combo("Transmission", &tr, trns, TrnType::Joint, "What the actuator acts on.")) {
-      a.trn = tr;
+    // Only the transmissions MuJoCo accepts for this actuator type.
+    std::vector<std::pair<TrnType, const char*>> trns;
+    if (a.type == ActuatorType::Adhesion) {
+      trns = {{TrnType::Body, "Body (its contacts)"}};
+    } else {
+      trns = {{TrnType::Joint, "Joint"}, {TrnType::JointInParent, "Joint (in parent frame)"}, {TrnType::Tendon, "Tendon"}};
+      if (a.type != ActuatorType::Muscle) trns.push_back({TrnType::Site, "Site (Cartesian)"});
+      if (a.type == ActuatorType::General) trns.push_back({TrnType::Body, "Body (adhesion-like)"});
+    }
+    std::vector<std::string> trnLabels;
+    int trnIndex = 0;
+    for (size_t i = 0; i < trns.size(); ++i) {
+      trnLabels.push_back(trns[i].second);
+      if (trns[i].first == a.trn) trnIndex = int(i);
+    }
+    if (props::comboIndex("Transmission", &trnIndex, trnLabels, 0, "What the actuator acts on.") && trns[trnIndex].first != a.trn) {
+      a.trn = trns[trnIndex].first;
       a.target = kNoId;
     }
     switch (a.trn) {
@@ -694,14 +703,19 @@ void Editor::inspectActuator(Actuator& a) {
     if (a.trn == TrnType::Site) {
       props::vec3("Gear (force)", reinterpret_cast<Vec3*>(&a.gear.v[0]), {1, 0, 0}, O(D("general.gear"), nullptr, 0.01));
       props::vec3("Gear (torque)", reinterpret_cast<Vec3*>(&a.gear.v[3]), {0, 0, 0}, O(D("general.gear"), nullptr, 0.01));
-    } else {
+    } else if (a.type != ActuatorType::Adhesion) {
       if (props::real("Gear", &a.gear[0], 1.0, O(D("general.gear"), nullptr, 0.01))) applyToSelected<Actuator>([&](Actuator& o) { o.gear[0] = a.gear[0]; });
     }
   }
   if (props::section("Control range")) {
-    if (props::checkbox("Limit control", &a.ctrllimited, true, D("general.ctrllimited")))
+    bool alwaysLimited = a.type == ActuatorType::Damper || a.type == ActuatorType::Adhesion;
+    bool inherited = a.inheritrange > 0 && a.type == ActuatorType::Position;
+    if (alwaysLimited) a.ctrllimited = true;  // MJCF has no ctrllimited for these
+    else if (!inherited && props::checkbox("Limit control", &a.ctrllimited, true, D("general.ctrllimited")))
       applyToSelected<Actuator>([&](Actuator& o) { o.ctrllimited = a.ctrllimited; });
-    if (a.ctrllimited) {
+    if (inherited) {
+      props::info("Control range", "from the joint range (x %.3g)", a.inheritrange);
+    } else if (a.ctrllimited) {
       bool c = (a.type == ActuatorType::Position && angular) ? props::angleRange("Control range", &a.ctrlrange, O(D("general.ctrlrange")))
                                                             : props::vec2("Control range", &a.ctrlrange, {0, 0}, O(D("general.ctrlrange"), nullptr, 0.01));
       if (c) applyToSelected<Actuator>([&](Actuator& o) { o.ctrlrange = a.ctrlrange; });

@@ -105,6 +105,24 @@ Id addLight(Document& doc, Id body, const Vec3& pos, const Vec3& dir, const std:
 }
 
 void setActuatorType(Document& doc, Actuator& a, ActuatorType type) {
+  // Adhesion acts on a body's contacts; muscles need a joint or tendon length.
+  if (type == ActuatorType::Adhesion && a.trn != TrnType::Body) {
+    Id body = doc.ownerBody(a.target);
+    a.trn = TrnType::Body;
+    a.target = body != kWorldId ? body : kNoId;
+    a.refsite = a.slidersite = kNoId;
+    a.gear = Vec6{{1, 0, 0, 0, 0, 0}};
+  } else if (a.trn == TrnType::Body && type != ActuatorType::Adhesion && type != ActuatorType::General) {
+    Id joint = kNoId;
+    for (const Joint& j : doc.joints)
+      if (j.body == a.target && joint == kNoId) joint = j.id;
+    a.trn = TrnType::Joint;
+    a.target = joint;
+  } else if (type == ActuatorType::Muscle && a.trn == TrnType::Site) {
+    a.trn = TrnType::Joint;
+    a.target = kNoId;
+    a.refsite = kNoId;
+  }
   a.type = type;
   a.kp = actuatorDefaultKp(type);
   a.kv = actuatorDefaultKv(type);

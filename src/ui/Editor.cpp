@@ -313,20 +313,13 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
   std::string err;
   fs::path p(path);
   if (split) {
-    // model file next to the scene file; the scene includes it.
+    // The model file next to the scene file; the scene includes it.
     std::string stem = p.stem().string();
-    fs::path modelPath = p.parent_path() / (stem + "_model.xml");
-    ExportOptions mo = opt;
-    mo.scope = ExportOptions::Scope::Models;
-    ExportOptions so = opt;
-    so.scope = ExportOptions::Scope::Environment;
-    so.includeFile = modelPath.filename().string();
-    // Both files share one mesh folder named after the scene.
-    if (!exportMjcfFile(doc_, modelPath.string(), mo, &err, stem) || !exportMjcfFile(doc_, path, so, &err, stem)) {
+    if (!exportSplitMjcf(doc_, path, opt, &err)) {
       notify("Export failed: " + err, pal::kError, 6);
       return false;
     }
-    notify("Exported " + p.filename().string() + " + " + modelPath.filename().string() + meshNote(stem), pal::kOk, 5);
+    notify("Exported " + p.filename().string() + " + " + stem + "_model.xml" + meshNote(stem), pal::kOk, 5);
   } else {
     opt.scope = scope;
     if (!exportMjcfFile(doc_, path, opt, &err)) {
