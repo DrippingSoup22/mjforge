@@ -17,6 +17,7 @@
 #include "core/Ops.h"
 #include "core/ProjectIO.h"
 #include "core/Templates.h"
+#include "sim/MjcfImport.h"
 #include "ui/Icons.h"
 #include "ui/Theme.h"
 
@@ -102,6 +103,7 @@ void Editor::applyCli(const CliOptions& cli) {
     else if (a.rfind("import:", 0) == 0) beginImport(a.substr(7));
     else if (a.rfind("gen:", 0) == 0) addGeneratedEnvironment(a.substr(4));
     else if (a == "addmodel") addModelRoot();
+    else if (a.rfind("addmesh:", 0) == 0) addMeshFromFile(targetBody(), a.substr(8));
     else if (a == "notoasts") toasts_.clear();
     else if (a == "shortcuts") showShortcuts_ = true;
     else if (a.rfind("export:", 0) == 0) exportTo(a.substr(7), ExportOptions::Scope::All, false);
@@ -273,6 +275,13 @@ void Editor::openDialog() {
 void Editor::exportDialog() { showExport_ = true; }
 
 bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool split) {
+  // Big meshes and texture images are written into a folder next to the XML; mention it.
+  auto meshNote = [&](const std::string& stem) -> std::string {
+    bool assets = false;
+    for (const MeshAsset& m : doc_.meshes) assets |= m.vertexCount() > 1000;
+    for (const Texture& t : doc_.textures) assets |= t.builtin == TextureBuiltin::None && !t.file.empty();
+    return assets ? " (assets in " + stem + "_assets/)" : "";
+  };
   ExportOptions opt;
   opt.angle = exportAngle_ == 1 ? AngleUnit::Degree : AngleUnit::Radian;
   std::string err;
@@ -286,18 +295,19 @@ bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool 
     ExportOptions so = opt;
     so.scope = ExportOptions::Scope::Environment;
     so.includeFile = modelPath.filename().string();
-    if (!writeTextFile(modelPath.string(), writeMjcf(doc_, mo), &err) || !writeTextFile(path, writeMjcf(doc_, so), &err)) {
+    // Both files share one mesh folder named after the scene.
+    if (!exportMjcfFile(doc_, modelPath.string(), mo, &err, stem) || !exportMjcfFile(doc_, path, so, &err, stem)) {
       notify("Export failed: " + err, pal::kError, 6);
       return false;
     }
-    notify("Exported " + p.filename().string() + " + " + modelPath.filename().string(), pal::kOk, 5);
+    notify("Exported " + p.filename().string() + " + " + modelPath.filename().string() + meshNote(stem), pal::kOk, 5);
   } else {
     opt.scope = scope;
-    if (!writeTextFile(path, writeMjcf(doc_, opt), &err)) {
+    if (!exportMjcfFile(doc_, path, opt, &err)) {
       notify("Export failed: " + err, pal::kError, 6);
       return false;
     }
-    notify("Exported " + p.filename().string(), pal::kOk, 5);
+    notify("Exported " + p.filename().string() + meshNote(p.stem().string()), pal::kOk, 5);
   }
   if (exportLoader_) {
     bool measured = false;
@@ -475,6 +485,7 @@ void Editor::frame() {
       case kPurposeOpen: openPath(p); break;
       case kPurposeSaveAs: savePath(p); break;
       case kPurposeImport: beginImport(p); break;
+      case kPurposeMesh: addMeshFromFile(meshTarget_, p); break;
       case kPurposeExport:
         exportTo(p, exportScope_ == 1 ? ExportOptions::Scope::Models
                     : exportScope_ == 2 ? ExportOptions::Scope::Environment
@@ -542,6 +553,8 @@ void Editor::drawAddMenuItems(Id ctxBody) {
       if (e.value == GeomType::Hfield || e.value == GeomType::Mesh) continue;
       if (ImGui::MenuItem(e.label)) addGeomTo(body, e.value);
     }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Mesh from file...")) openMeshDialog(body);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Joint", !inWorld)) {
@@ -1098,7 +1111,7 @@ void Editor::focusSelection() {
     if (k == Kind::Geom) {
       const Geom* g = doc_.geom(id);
       if (g->type == GeomType::Plane) box.add(elementWorldPose(doc_, poses, id).pos);
-      else box.add(primitiveWorldAabb(g->type, g->size, elementWorldPose(doc_, poses, id)));
+      else box.add(geomWorldAabb(doc_, *g, elementWorldPose(doc_, poses, id)));
     }
     if (k == Kind::Joint || k == Kind::Site || k == Kind::Camera || k == Kind::Light) {
       // Frame the element together with the body it belongs to.
@@ -1129,7 +1142,7 @@ void Editor::frameAll() {
   for (const Body& b : doc_.bodies)
     if (b.parent == kWorldId) box.add(subtreeAabb(doc_, poses, b.id));
   for (const Geom& g : doc_.geoms)
-    if (g.body == kWorldId && g.type != GeomType::Plane) box.add(primitiveWorldAabb(g.type, g.size, {g.pos, g.quat}));
+    if (g.body == kWorldId && g.type != GeomType::Plane) box.add(geomWorldAabb(doc_, g, {g.pos, g.quat}));
   if (!box.valid()) {
     vp_.cam.target = {0, 0, 0.3};
     vp_.cam.distance = 3;
@@ -1197,6 +1210,58 @@ Id Editor::addGeomTo(Id body, GeomType type) {
   Id g = addGeom(doc_, body, type, size, local);
   if (body == kWorldId) doc_.geom(g)->rgba = {0.62f, 0.64f, 0.68f, 1};
   sel_.set(g);
+  return g;
+}
+
+void Editor::openMeshDialog(Id body) {
+  meshTarget_ = body;
+  fileDialog_.open(FileDialog::Mode::Open, "Add a mesh (STL, OBJ or MSH)", {".stl", ".obj", ".msh"}, lastDir_, "", kPurposeMesh);
+}
+
+Id Editor::addMeshFromFile(Id body, const std::string& path) {
+  if (!doc_.body(body)) body = kWorldId;
+  Document tmp;
+  Pose frame;
+  std::string err;
+  Id mid = loadMeshFile(tmp, path, 1.0, &frame, &err);
+  bool mm = false;
+  if (mid && length(meshBounds(*tmp.mesh(mid)).extent()) > 20) {
+    // CAD files are usually in millimeters; a part over 20 m across is unlikely.
+    Document scaled;
+    Pose f;
+    if (Id m = loadMeshFile(scaled, path, 0.001, &f, &err)) {
+      tmp = std::move(scaled);
+      mid = m;
+      frame = f;
+      mm = true;
+    }
+  }
+  if (!mid) {
+    notify("Could not load the mesh: " + err, pal::kError, 6);
+    return kNoId;
+  }
+  checkpoint("Add mesh");
+  MeshAsset a = *tmp.mesh(mid);
+  a.id = doc_.newId();
+  a.name = doc_.uniqueName(Kind::Mesh, a.name);
+  doc_.meshes.push_back(a);
+  Id g = addGeom(doc_, body, GeomType::Mesh, {}, frame, body == kWorldId ? a.name : doc_.body(body)->name + "_" + a.name);
+  Geom& geom = *doc_.geom(g);
+  geom.mesh = a.id;
+  if (body == kWorldId) {
+    // Props stand on the floor under the camera.
+    Aabb box = geomWorldAabb(doc_, geom, {geom.pos, geom.quat});
+    Vec3 p = groundPointUnderCamera(vp_.cam);
+    geom.pos += Vec3{p.x - box.center().x, p.y - box.center().y, -box.lo.z};
+    geom.rgba = {0.62f, 0.64f, 0.68f, 1};
+  }
+  doc_.touch();
+  sel_.set(g);
+  lastDir_ = fs::path(path).parent_path().string();
+  char msg[256];
+  std::snprintf(msg, sizeof msg, "Added mesh %s (%zu vertices, %zu triangles)%s", a.name.c_str(), a.vertexCount(), a.faceCount(),
+                mm ? ", scaled from millimeters to meters" : "");
+  notify(msg, pal::kOk, 5);
   return g;
 }
 

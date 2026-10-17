@@ -1,8 +1,12 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <filesystem>
 
 #include "analysis/Analysis.h"
+#include "core/Geometry.h"
+#include "core/Kinematics.h"
 #include "core/Merge.h"
 #include "core/MjcfWriter.h"
 #include "core/Ops.h"
@@ -165,8 +169,12 @@ TEST_CASE("import: MuJoCo features are resolved (defaults, degrees, fromto, mesh
   REQUIRE(importMjcfString(xml, doc, &err, &rep));
   CHECK(doc.modelName == "probe");
   CHECK(doc.option.timestep == 0.004);
-  CHECK(rep.approximatedGeoms == 1);
-  CHECK(rep.notes.size() == 4);  // mesh, tendon, actuator, sensor
+  CHECK(rep.approximatedGeoms == 0);
+  CHECK(rep.notes.size() == 3);  // tendon, actuator, sensor
+  REQUIRE(doc.meshes.size() == 1);
+  CHECK(doc.meshes[0].name == "tetra");
+  CHECK(doc.meshes[0].vertexCount() == 4);
+  CHECK(doc.meshes[0].faceCount() == 4);  // MuJoCo built the convex hull
   REQUIRE(doc.keyframes.size() == 1);
   CHECK(doc.keyframes[0].name == "home");
   CHECK(doc.keyframes[0].qpos.size() == 2);  // free joint + hinge
@@ -383,4 +391,226 @@ TEST_CASE("keyframes: the analysis and the floor fix use the start pose") {
   CompileResult cr2 = compileMjcf(writeMjcf(doc));
   AnalysisReport r2 = analyzeModel(doc, &cr2, true);
   for (const Issue& i : r2.issues) CHECK(i.code != "floating");
+}
+
+TEST_CASE("meshes: exact mass properties, import, export and project round trip") {
+  // A 0.2 x 0.1 x 0.4 m box as a triangle mesh (12 triangles, outward winding).
+  const char* xml = R"(
+<mujoco model="meshes">
+  <asset>
+    <mesh name="brick"
+      vertex="-0.1 -0.05 -0.2  0.1 -0.05 -0.2  0.1 0.05 -0.2  -0.1 0.05 -0.2
+              -0.1 -0.05 0.2   0.1 -0.05 0.2   0.1 0.05 0.2   -0.1 0.05 0.2"
+      face="0 2 1  0 3 2  4 5 6  4 6 7  0 1 5  0 5 4  1 2 6  1 6 5  2 3 7  2 7 6  3 0 4  3 4 7"/>
+  </asset>
+  <worldbody>
+    <geom type="plane" size="0 0 1"/>
+    <body name="block" pos="0 0 0.5">
+      <freejoint/>
+      <geom name="brick_geom" type="mesh" mesh="brick" pos="0.3 0 0" density="500"/>
+    </body>
+  </worldbody>
+</mujoco>)";
+  Document doc;
+  std::string err;
+  REQUIRE(importMjcfString(xml, doc, &err));
+  REQUIRE(doc.meshes.size() == 1);
+  const MeshAsset& m = doc.meshes[0];
+  const MeshMass& mm = meshMassProps(m);
+  CHECK(mm.volume == doctest::Approx(0.2 * 0.1 * 0.4));
+  // Box inertia about its center for density 1: V/12 (b^2 + c^2) ... MuJoCo compiles mesh vertices
+  // into the principal frame (axes may be reordered; the geom orientation compensates).
+  double V = 0.008;
+  std::vector<double> got{mm.inertia(0, 0), mm.inertia(1, 1), mm.inertia(2, 2)};
+  std::vector<double> want{V / 12 * (0.1 * 0.1 + 0.4 * 0.4), V / 12 * (0.2 * 0.2 + 0.4 * 0.4), V / 12 * (0.2 * 0.2 + 0.1 * 0.1)};
+  std::sort(got.begin(), got.end());
+  std::sort(want.begin(), want.end());
+  for (int i = 0; i < 3; ++i) CHECK(got[i] == doctest::Approx(want[i]));
+  CHECK(std::fabs(mm.inertia(0, 1)) < 1e-12);
+  // Picking hits the mesh surface.
+  const Geom* g = nullptr;
+  for (const Geom& x : doc.geoms) if (x.type == GeomType::Mesh) g = &x;
+  REQUIRE(g);
+  auto poses = computeBodyPoses(doc);
+  Pose gp = poses[doc.bodyIndex(g->body)] * Pose{g->pos, g->quat};
+  Vec3 n;
+  double t = rayGeom(doc, {{0.3, 0, 2}, {0, 0, -1}}, *g, gp, 50, &n);
+  CHECK(t == doctest::Approx(2 - 0.5 - 0.2).epsilon(1e-6));
+  CHECK(n.z == doctest::Approx(1.0));
+  Aabb box = geomWorldAabb(doc, *g, gp);
+  CHECK(box.lo.z == doctest::Approx(0.3));
+  // Same physics after export (inline mesh) and after a project round trip.
+  ModelPtr a = compileXml(xml);
+  ModelPtr b = compileDoc(doc);
+  checkClose(a->body_mass, b->body_mass, a->nbody, 1e-6, "body_mass");
+  checkClose(a->body_inertia, b->body_inertia, 3 * a->nbody, 1e-6, "body_inertia");
+  Document loaded;
+  REQUIRE(projectFromJson(loaded, projectToJson(doc, ""), &err, nullptr));
+  CHECK(writeMjcf(loaded) == writeMjcf(doc));
+  // Our own mass estimate agrees with MuJoCo when the body infers mass from the mesh.
+  for (Body& body : doc.bodies) body.hasInertial = false;
+  ModelPtr c = compileDoc(doc);
+  MassProps mp = bodyMassProps(doc, computeBodyPoses(doc), doc.bodies[1].id);
+  CHECK(mp.mass == doctest::Approx(c->body_mass[1]).epsilon(1e-6));
+  CHECK(mp.mass == doctest::Approx(500 * V).epsilon(1e-6));
+}
+
+TEST_CASE("meshes: files for big meshes and textures, deduplication, merging") {
+  namespace fs = std::filesystem;
+  // A UV sphere written as a triangle soup (every triangle has its own three vertices, like STL).
+  const int rings = 24, segs = 48;
+  std::vector<Vec3> pts{{0, 0, 0.1}};
+  for (int r = 1; r < rings; ++r)
+    for (int s = 0; s < segs; ++s) {
+      double th = kPi * r / rings, ph = 2 * kPi * s / segs;
+      pts.push_back(Vec3{std::sin(th) * std::cos(ph), std::sin(th) * std::sin(ph), std::cos(th)} * 0.1);
+    }
+  pts.push_back({0, 0, -0.1});
+  auto ring = [&](int r, int s) { return 1 + (r - 1) * segs + (s % segs); };
+  std::vector<int> tris;
+  for (int s = 0; s < segs; ++s) {
+    tris.insert(tris.end(), {0, ring(1, s), ring(1, s + 1)});
+    tris.insert(tris.end(), {int(pts.size()) - 1, ring(rings - 1, s + 1), ring(rings - 1, s)});
+    for (int r = 1; r < rings - 1; ++r) {
+      tris.insert(tris.end(), {ring(r, s), ring(r + 1, s), ring(r + 1, s + 1)});
+      tris.insert(tris.end(), {ring(r, s), ring(r + 1, s + 1), ring(r, s + 1)});
+    }
+  }
+  std::string vs, fs_;
+  for (size_t i = 0; i < tris.size(); ++i) {
+    const Vec3& p = pts[size_t(tris[i])];
+    vs += formatNumber(p.x) + " " + formatNumber(p.y) + " " + formatNumber(p.z) + " ";
+    fs_ += std::to_string(i) + " ";
+  }
+  fs::path dir = fs::temp_directory_path() / "mjforge_test_assets";
+  fs::create_directories(dir);
+  // A 2x2 PNG for a texture.
+  const unsigned char png[] = {137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0,
+                               0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 56, 97, 100, 4, 68, 12, 16, 10,
+                               0, 35, 54, 4, 177, 70, 124, 22, 51, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130};
+  fs::path image = dir / "paint.png";
+  REQUIRE(writeTextFile(image.string(), std::string(reinterpret_cast<const char*>(png), sizeof png)));
+  std::string xml = R"(<mujoco model="ball">
+  <asset>
+    <texture name="paint" type="2d" file=")" + image.string() + R"("/>
+    <material name="painted" texture="paint"/>
+    <mesh name="ball" vertex=")" + vs + R"(" face=")" + fs_ + R"("/>
+  </asset>
+  <worldbody>
+    <geom type="plane" size="0 0 1"/>
+    <body name="ball" pos="0 0 0.3">
+      <freejoint/>
+      <geom type="mesh" mesh="ball" material="painted"/>
+    </body>
+  </worldbody>
+</mujoco>)";
+  Document doc;
+  std::string err;
+  REQUIRE(importMjcfString(xml, doc, &err));
+  REQUIRE(doc.meshes.size() == 1);
+  CHECK(doc.meshes[0].vertexCount() == pts.size());  // shared corners are stored once
+  CHECK(doc.meshes[0].faceCount() == tris.size() / 3);
+  ModelPtr inl = compileDoc(doc);
+
+  // Written to disk: the mesh becomes an STL file and the image is copied, both next to the XML.
+  fs::path out = dir / "export" / "ball.xml";
+  fs::create_directories(out.parent_path());
+  std::vector<std::string> written;
+  REQUIRE(exportMjcfFile(doc, out.string(), {}, &err, "", &written));
+  CHECK(written.size() == 3);
+  CHECK(fs::is_regular_file(dir / "export" / "ball_assets" / "ball.stl"));
+  CHECK(fs::is_regular_file(dir / "export" / "ball_assets" / "paint.png"));
+  std::string text;
+  REQUIRE(readTextFile(out.string(), text));
+  CHECK(text.find("file=\"ball_assets/ball.stl\"") != std::string::npos);
+  CHECK(text.find("vertex=") == std::string::npos);
+  char lerr[1000] = "";
+  mjModel* fromFile = mj_loadXML(out.string().c_str(), nullptr, lerr, sizeof lerr);
+  INFO(lerr);
+  REQUIRE(fromFile);
+  CHECK(fromFile->mesh_vertnum[0] == int(pts.size()));
+  checkClose(inl->body_mass, fromFile->body_mass, inl->nbody, 1e-6, "body_mass");
+  checkClose(inl->body_inertia, fromFile->body_inertia, 3 * inl->nbody, 1e-6, "body_inertia");
+  mj_deleteModel(fromFile);
+
+  // A missing image keeps the model loadable (flat color) and is reported.
+  fs::remove(image);
+  CompileResult cr = compileMjcf(writeMjcf(doc));
+  INFO(cr.error);
+  REQUIRE(cr.ok);
+  AnalysisReport r = analyzeModel(doc, &cr, true);
+  bool reported = false;
+  for (const Issue& i : r.issues) reported |= i.code == "texture-file";
+  CHECK(reported);
+
+  // Importing the model into another scene twice brings the mesh along, stored once.
+  Document scene;
+  REQUIRE(makeTemplate("empty", scene));
+  MergeOptions mo;
+  mo.environment = false;
+  mergeDocument(scene, doc, mo);
+  mo.modelOffset = {1, 0, 0};
+  mergeDocument(scene, doc, mo);
+  CHECK(scene.meshes.size() == 1);
+  int meshGeoms = 0;
+  for (const Geom& g : scene.geoms) meshGeoms += g.type == GeomType::Mesh && scene.mesh(g.mesh);
+  CHECK(meshGeoms == 2);
+  ModelPtr merged = compileDoc(scene);
+  CHECK(merged->nmesh == 1);
+  fs::remove_all(dir);
+}
+
+TEST_CASE("meshes: loading STL and OBJ files") {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "mjforge_test_meshfiles";
+  fs::create_directories(dir);
+  // A 0.2 x 0.1 x 0.4 m box centered at (1.1, 0, 0) in file coordinates.
+  MeshAsset box;
+  box.vert = std::make_shared<const std::vector<float>>(std::vector<float>{
+      1.0f, -0.05f, -0.2f, 1.2f, -0.05f, -0.2f, 1.2f, 0.05f, -0.2f, 1.0f, 0.05f, -0.2f,
+      1.0f, -0.05f, 0.2f, 1.2f, -0.05f, 0.2f, 1.2f, 0.05f, 0.2f, 1.0f, 0.05f, 0.2f});
+  box.face = std::make_shared<const std::vector<int>>(
+      std::vector<int>{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7});
+  std::string stl = meshToStl(box);
+  CHECK(stl.size() == 84 + 12 * 50);
+  REQUIRE(writeTextFile((dir / "brick.stl").string(), stl));
+  std::string obj = "# box\n";
+  for (size_t i = 0; i < 8; ++i)
+    obj += "v " + formatNumber((*box.vert)[3 * i]) + " " + formatNumber((*box.vert)[3 * i + 1]) + " " + formatNumber((*box.vert)[3 * i + 2]) + "\n";
+  for (size_t t = 0; t < 12; ++t)
+    obj += "f " + std::to_string((*box.face)[3 * t] + 1) + " " + std::to_string((*box.face)[3 * t + 1] + 1) + " " +
+           std::to_string((*box.face)[3 * t + 2] + 1) + "\n";
+  REQUIRE(writeTextFile((dir / "brick.obj").string(), obj));
+
+  for (const char* file : {"brick.stl", "brick.obj"}) {
+    INFO(file);
+    Document doc;
+    REQUIRE(makeTemplate("empty", doc));
+    Pose frame;
+    std::string err;
+    Id mesh = loadMeshFile(doc, (dir / file).string(), 2.0, &frame, &err);
+    INFO(err);
+    REQUIRE(mesh);
+    const MeshAsset& m = *doc.mesh(mesh);
+    CHECK(m.name == "brick");
+    CHECK(m.vertexCount() == 8);  // the STL's 36 corners are merged
+    CHECK(meshMassProps(m).volume == doctest::Approx(0.008 * 8).epsilon(1e-5));
+    CHECK(frame.pos.x == doctest::Approx(2.2).epsilon(1e-5));  // the center, scaled
+    CHECK(std::fabs(frame.pos.y) < 1e-6);
+    // A geom placed at the frame shows the mesh where the file puts it.
+    Id body = addBody(doc, kWorldId, {{0, 0, 1}, {}}, "holder", Role::Model);
+    Id g = addGeom(doc, body, GeomType::Mesh, {}, frame);
+    doc.geom(g)->mesh = mesh;
+    Aabb bb = geomWorldAabb(doc, *doc.geom(g), Pose{{0, 0, 1}, {}} * frame);
+    CHECK(bb.lo.x == doctest::Approx(2.0).epsilon(1e-5));
+    CHECK(bb.hi.z == doctest::Approx(1.4).epsilon(1e-5));
+    ModelPtr model = compileDoc(doc);
+    CHECK(model->nmesh == 1);
+    CHECK(model->body_mass[1] == doctest::Approx(1000 * 0.064).epsilon(1e-5));
+  }
+  Document doc;
+  std::string err;
+  CHECK_FALSE(loadMeshFile(doc, (dir / "missing.stl").string(), 1.0, nullptr, &err));
+  CHECK(err.find("not found") != std::string::npos);
+  fs::remove_all(dir);
 }

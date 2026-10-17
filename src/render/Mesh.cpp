@@ -225,4 +225,21 @@ void buildHfieldMesh(Mesh& mesh, int nrow, int ncol, const std::vector<float>& d
   mesh.upload(b.v, b.i);
 }
 
+void buildTriangleMesh(Mesh& mesh, const std::vector<float>& vert, const std::vector<int>& face) {
+  Builder b;
+  size_t nv = vert.size() / 3;
+  auto P = [&](int i) { return Vec3{vert[3 * size_t(i)], vert[3 * size_t(i) + 1], vert[3 * size_t(i) + 2]}; };
+  for (size_t t = 0; t + 2 < face.size(); t += 3) {
+    if (size_t(face[t]) >= nv || size_t(face[t + 1]) >= nv || size_t(face[t + 2]) >= nv) continue;
+    Vec3 a = P(face[t]), c1 = P(face[t + 1]), c2 = P(face[t + 2]);
+    Vec3 n = normalize(cross(c1 - a, c2 - a), {0, 0, 1});
+    b.tri(b.vert(a, n), b.vert(c1, n), b.vert(c2, n));
+  }
+  if (b.i.empty()) {
+    mesh.release();
+    return;
+  }
+  mesh.upload(b.v, b.i);
+}
+
 }  // namespace mjf

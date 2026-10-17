@@ -20,6 +20,7 @@ const char* kindName(Kind k) {
     case Kind::Material: return "material";
     case Kind::Texture: return "texture";
     case Kind::Hfield: return "hfield";
+    case Kind::Mesh: return "mesh";
     default: return "none";
   }
 }
@@ -90,6 +91,7 @@ const DocIndex& Document::index() const {
   addAll(materials, Kind::Material);
   addAll(textures, Kind::Texture);
   addAll(hfields, Kind::Hfield);
+  addAll(meshes, Kind::Mesh);
 
   auto bodyIdx = [&](Id id) -> int {
     auto it = ix.loc.find(id);
@@ -156,6 +158,7 @@ std::string Document::nameOf(Id id) const {
     case Kind::Material: return material(id)->name;
     case Kind::Texture: return texture(id)->name;
     case Kind::Hfield: return hfield(id)->name;
+    case Kind::Mesh: return mesh(id)->name;
     default: return "";
   }
 }
@@ -187,6 +190,7 @@ std::string Document::displayName(Id id) const {
     case Kind::Material: return "material";
     case Kind::Texture: return "texture";
     case Kind::Hfield: return "height field";
+    case Kind::Mesh: return "mesh";
     default: return "";
   }
 }
@@ -205,6 +209,7 @@ void Document::setName(Id id, const std::string& name) {
     case Kind::Material: material(id)->name = name; break;
     case Kind::Texture: texture(id)->name = name; break;
     case Kind::Hfield: hfield(id)->name = name; break;
+    case Kind::Mesh: mesh(id)->name = name; break;
     default: break;
   }
 }
@@ -296,6 +301,7 @@ bool Document::nameTaken(Kind kind, const std::string& name, Id except) const {
     case Kind::Material: return check(materials);
     case Kind::Texture: return check(textures);
     case Kind::Hfield: return check(hfields);
+    case Kind::Mesh: return check(meshes);
     default: return false;
   }
 }
@@ -314,6 +320,17 @@ std::string Document::uniqueName(Kind kind, const std::string& base_) const {
     if (!nameTaken(kind, cand)) return cand;
   }
   return stem + "_x";
+}
+
+}  // namespace mjf
+
+namespace mjf {
+
+Aabb MeshAsset::bounds() const {
+  Aabb box;
+  if (!vert) return box;
+  for (size_t i = 0; i + 2 < vert->size(); i += 3) box.add({(*vert)[i], (*vert)[i + 1], (*vert)[i + 2]});
+  return box;
 }
 
 }  // namespace mjf

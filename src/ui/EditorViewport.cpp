@@ -67,7 +67,7 @@ double bodyScale(const Document& doc, const std::vector<Pose>& poses, Id body) {
   for (uint32_t gi : doc.index().bodyGeoms[bi]) {
     const Geom& g = doc.geoms[gi];
     if (g.type == GeomType::Plane) continue;
-    box.add(primitiveWorldAabb(g.type, g.size, poses[bi] * Pose{g.pos, g.quat}));
+    box.add(geomWorldAabb(doc, g, poses[bi] * Pose{g.pos, g.quat}));
   }
   if (!box.valid()) return 0.1;
   return clampv(length(box.extent()) * 0.5, 0.03, 1.0);
@@ -118,6 +118,18 @@ void Editor::buildScene(std::vector<DrawItem>& items) {
         it.mesh = &entry.second;
         it.size = {hf->size.x, hf->size.y, hf->size.z};
         it.heightTint = true;
+      } else if (g.type == GeomType::Mesh) {
+        const MeshAsset* ma = doc_.mesh(g.mesh);
+        if (!ma || !ma->vert || !ma->face) continue;
+        static std::unordered_map<Id, std::pair<const void*, Mesh>> meshCache;
+        auto& entry = meshCache[ma->id];
+        if (entry.first != ma->vert.get()) {
+          buildTriangleMesh(entry.second, *ma->vert, *ma->face);
+          entry.first = ma->vert.get();
+        }
+        it.shape = Shape::Custom;
+        it.mesh = &entry.second;
+        it.size = {1, 1, 1};
       } else {
         it.shape = shapeOf(g.type);
       }
@@ -190,7 +202,7 @@ void Editor::buildOverlays() {
         Aabb box;
         for (uint32_t gi : ix.bodyGeoms[bi]) {
           const Geom& g = doc_.geoms[gi];
-          box.add(primitiveWorldAabb(g.type, g.size, poses_[bi] * Pose{g.pos, g.quat}));
+          box.add(geomWorldAabb(doc_, g, poses_[bi] * Pose{g.pos, g.quat}));
         }
         if (box.valid()) {
           Vec3 d = box.center() - anchor;
@@ -377,7 +389,7 @@ Id Editor::pick(const Ray& ray, double* tHit) {
         t = rayPrimitive(ray, GeomType::Box, {hf->size.x, hf->size.y, hf->size.z * 0.5},
                          p * Pose{{0, 0, hf->size.z * 0.5}, {}});
       } else {
-        t = rayPrimitive(ray, g.type, g.size, p, std::max(60.0, vp_.cam.distance * 30));
+        t = rayGeom(doc_, ray, g, p, std::max(60.0, vp_.cam.distance * 30));
       }
       if (t >= 0 && t < best) {
         best = t;

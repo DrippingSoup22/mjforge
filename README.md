@@ -13,9 +13,9 @@ ready-to-run MuJoCo Warp loader.
 ## Features
 
 **Build**
-- Bodies, geoms (box, sphere, capsule, cylinder, ellipsoid, plane, height field), joints (hinge,
-  slide, ball, free), sites, cameras and lights, with gizmos, snapping, undo and multi-selection
-  editing. Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's
+- Bodies, geoms (box, sphere, capsule, cylinder, ellipsoid, plane, height field, mesh), joints
+  (hinge, slide, ball, free), sites, cameras and lights, with gizmos, snapping, undo and
+  multi-selection editing. Meshes load from STL, OBJ or MSH files through MuJoCo itself. Every MuJoCo attribute that matters for physics is in the Inspector, with MuJoCo's
   documentation in the tooltips.
 - All actuator types: motor (torque), position servo (target angle), velocity, integrated velocity,
   damper, cylinder, muscle, adhesion and general, plus friction, armature, damping, mass and
@@ -54,13 +54,14 @@ ready-to-run MuJoCo Warp loader.
 - Models and environments can be built together or separately. *File > Import into scene*
   brings the models and/or the environment of another project or MJCF file into the current one
   (replace the environment, place models side by side, names kept unique).
-- MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes and
-  orientations behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (meshes are shown as
-  boxes for now; masses and inertias stay exact).
+- MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes, orientations
+  and meshes behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (Unitree Go2 and H1,
+  ANYmal C, Franka Panda): the re-exported files compile to the same masses, inertias and poses.
 - Keyframes: the first one is the start pose of simulations and exported models; capture one from
   the simulation.
 - Export one file, or a model file plus a scene file that includes it (the Menagerie layout), and
-  optionally a `name_mjwarp.py` loader with measured buffer sizes.
+  optionally a `name_mjwarp.py` loader with measured buffer sizes. Big meshes are written as STL
+  files and texture images are copied into `name_assets/`, so the export folder is self-contained.
 
 ## Building
 
@@ -160,8 +161,7 @@ The design and milestones are in [PLAN.md](PLAN.md).
 
 ## Limitations
 
-- Mesh geoms from imported files are approximated by boxes (bodies keep exact masses and inertias);
-  mesh assets are planned.
+- SDF geoms from imported files are approximated by boxes (bodies keep exact masses and inertias).
 - Tendons, equality constraints and explicit contact pairs are not edited yet (import reports them).
 - Keyframes can be captured from the simulation but not yet posed directly in the viewport.
 

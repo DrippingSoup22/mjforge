@@ -116,6 +116,8 @@ class Editor {
   Id addModelRoot();
   Id addBodyTo(Id parent);
   Id addGeomTo(Id body, GeomType type);
+  void openMeshDialog(Id body);
+  Id addMeshFromFile(Id body, const std::string& path);
   Id addJointTo(Id body, JointType type);
   Id addSiteTo(Id body);
   Id addCameraTo(Id body);
@@ -173,6 +175,7 @@ class Editor {
   // inspector sections
   void inspectBody(Body& b);
   void inspectGeom(Geom& g);
+  void inspectMesh(Geom& g);
   void inspectJoint(Joint& j);
   void inspectSite(Site& s);
   void inspectCamera(Camera& c);
@@ -304,6 +307,8 @@ class Editor {
   bool showArray_ = false;
   int arrayRadial_ = 0, arrayCopies_ = 3, arrayAxis_ = 2;
   float arrayAngle_ = 360.0f;
+  Id meshTarget_ = kNoId;   // body that receives the mesh picked in the file dialog
+  float meshScale_ = 2.0f;  // inspector: factor for rescaling a mesh
   float arrayOffset_[3] = {0.2f, 0, 0};
 
   // import
@@ -334,6 +339,6 @@ class Editor {
   bool focusRename_ = false;
 };
 
-enum FileDialogPurpose { kPurposeOpen = 1, kPurposeSaveAs = 2, kPurposeExport = 3, kPurposeImport = 4 };
+enum FileDialogPurpose { kPurposeOpen = 1, kPurposeSaveAs = 2, kPurposeExport = 3, kPurposeImport = 4, kPurposeMesh = 5 };
 
 }  // namespace mjf

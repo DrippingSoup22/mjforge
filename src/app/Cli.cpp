@@ -147,10 +147,12 @@ int runHeadless(const CliOptions& cli) {
                 rep.broadphaseAtRest);
   }
   if (!cli.exportPath.empty()) {
-    if (!writeTextFile(cli.exportPath, xml, &err)) {
+    std::vector<std::string> written;
+    if (!exportMjcfFile(doc, cli.exportPath, opt, &err, "", &written)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
+    if (written.size() > 1) std::printf("Wrote %d asset files (meshes, textures)\n", int(written.size() - 1));
     std::printf("Wrote %s\n", cli.exportPath.c_str());
     if (cli.loader) {
       std::string path = cli.exportPath, file = path.substr(path.find_last_of("/\\") + 1);

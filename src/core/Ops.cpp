@@ -283,10 +283,12 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
   erase(doc.materials);
   erase(doc.textures);
   erase(doc.hfields);
+  erase(doc.meshes);
   // Clear dangling soft references.
   for (Geom& g : doc.geoms) {
     if (del.count(g.material)) g.material = kNoId;
     if (del.count(g.hfield)) g.hfield = kNoId;
+    if (del.count(g.mesh)) g.mesh = kNoId;
   }
   for (Site& s : doc.sites) if (del.count(s.material)) s.material = kNoId;
   for (Material& m : doc.materials) if (del.count(m.texture)) m.texture = kNoId;
@@ -658,7 +660,7 @@ std::vector<Id> lowestGeoms(const Document& doc, Id root, double tolerance) {
     for (uint32_t gi : doc.index().bodyGeoms[bi]) {
       const Geom& g = doc.geoms[gi];
       if (g.type == GeomType::Plane || (colliding && !geomCollides(g))) continue;
-      Aabb gb = primitiveWorldAabb(g.type, g.size, poses[bi] * Pose{g.pos, g.quat});
+      Aabb gb = geomWorldAabb(doc, g, poses[bi] * Pose{g.pos, g.quat});
       if (gb.lo.z <= box.lo.z + tolerance) out.push_back(g.id);
     }
   }

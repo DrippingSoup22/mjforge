@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -13,6 +14,8 @@
 #include "ui/Icons.h"
 #include "ui/MjcfDocs.h"
 #include "ui/Theme.h"
+
+namespace fs = std::filesystem;
 
 namespace mjf {
 
@@ -254,6 +257,8 @@ void Editor::inspectBody(Body& b) {
       if (e.value == GeomType::Hfield || e.value == GeomType::Mesh) continue;
       if (ImGui::MenuItem(e.label)) addGeomTo(b.id, e.value);
     }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Mesh from file...")) openMeshDialog(b.id);
     ImGui::EndPopup();
   }
   if (ImGui::BeginPopup("addjoint")) {
@@ -263,6 +268,49 @@ void Editor::inspectBody(Body& b) {
 }
 
 // ------------------------------------------------------------------------------------ geom
+
+void Editor::inspectMesh(Geom& g) {
+  std::vector<std::pair<Id, std::string>> items;
+  for (const MeshAsset& m : doc_.meshes) items.emplace_back(m.id, m.name);
+  if (props::element("Mesh", &g.mesh, items, false,
+                     "The triangle mesh this geom shows. MuJoCo collides with its convex hull and computes mass "
+                     "and inertia from the enclosed volume. Add meshes with Add > Geom > Mesh from file.")) {
+    Id id = g.mesh;
+    applyToSelected<Geom>([&](Geom& o) { if (o.type == GeomType::Mesh) o.mesh = id; });
+  }
+  MeshAsset* ma = doc_.mesh(g.mesh);
+  if (!ma || !ma->vert) {
+    props::info("", "No mesh: pick one, or the model will not compile.");
+    return;
+  }
+  Vec3 ext = meshBounds(*ma).extent();
+  props::info("Size", "%.3g x %.3g x %.3g m", ext.x, ext.y, ext.z);
+  props::info("Triangles", "%zu  (%zu vertices)", ma->faceCount(), ma->vertexCount());
+  if (!ma->source.empty()) {
+    props::info("File", "%s", fs::path(ma->source).filename().string().c_str());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", ma->source.c_str());
+  }
+  int users = 0;
+  for (const Geom& o : doc_.geoms) users += o.type == GeomType::Mesh && o.mesh == ma->id;
+  bool reset = false;
+  props::beginRow("Rescale", false,
+                  "Scales the mesh vertices around the mesh's center (e.g. 0.001 for a file in millimeters). "
+                  "Every geom using this mesh changes.",
+                  &reset);
+  float w = ImGui::GetContentRegionAvail().x;
+  ImGui::SetNextItemWidth(std::max(40.0f, w - 70 * scale_));
+  ImGui::DragFloat("##factor", &meshScale_, 0.01f, 1e-4f, 1e4f, "x %.4g", ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  if (ImGui::Button("Apply", ImVec2(-1, 0)) && meshScale_ > 0 && meshScale_ != 1) {
+    checkpoint("Scale mesh");
+    auto v = std::make_shared<std::vector<float>>(*ma->vert);
+    for (float& x : *v) x *= meshScale_;
+    ma->vert = std::move(v);
+    doc_.touch();
+  }
+  props::endRow();
+  if (users > 1) props::info("", "Shared by %d geoms.", users);
+}
 
 void Editor::inspectGeom(Geom& g) {
   nameHeader(*this, g.id, Icon::Box, pal::kGeom, "Geom", g.name);
@@ -280,6 +328,9 @@ void Editor::inspectGeom(Geom& g) {
         case GeomType::Box:
         case GeomType::Ellipsoid: g.size = {r, r, (before == GeomType::Capsule || before == GeomType::Cylinder) ? h : r}; break;
         case GeomType::Plane: g.size = {0, 0, 0.05}; break;
+        case GeomType::Mesh:
+          if (!doc_.mesh(g.mesh) && !doc_.meshes.empty()) g.mesh = doc_.meshes.front().id;
+          break;
         default: break;
       }
       GeomType t = g.type;
@@ -298,6 +349,7 @@ void Editor::inspectGeom(Geom& g) {
         applyToSelected<Geom>([&](Geom& o) { if (o.type == g.type) o.size[i] = v; });
       }
     }
+    if (g.type == GeomType::Mesh) inspectMesh(g);
     if (g.type == GeomType::Capsule || g.type == GeomType::Cylinder) {
       Vec3 a, b;
       geomEndpoints(g, &a, &b);
@@ -313,13 +365,14 @@ void Editor::inspectGeom(Geom& g) {
   }
   if (g.body != kWorldId && props::section("Mass")) {
     int mode = g.mass >= 0 ? 1 : 0;
-    double volume = primitiveVolume(g.type, g.size);
+    const MeshAsset* ma = g.type == GeomType::Mesh ? doc_.mesh(g.mesh) : nullptr;
+    double volume = ma ? meshMassProps(*ma).volume : primitiveVolume(g.type, g.size);
     if (props::comboIndex("Specify by", &mode, {"Density", "Mass"}, 0,
                           "MuJoCo computes each geom's mass from its volume and density, unless an explicit mass is given.")) {
-      if (mode == 1) g.mass = geomMass(g);
+      if (mode == 1) g.mass = geomMass(doc_, g);
       else g.mass = -1;
       double m = g.mass;
-      applyToSelected<Geom>([&](Geom& o) { o.mass = m >= 0 ? geomMass(o) : -1; });
+      applyToSelected<Geom>([&](Geom& o) { o.mass = m >= 0 ? geomMass(doc_, o) : -1; });
     }
     if (g.mass >= 0) {
       if (props::real("Mass", &g.mass, -1, O(D("geom.mass"), "kg", 0.01, 0, 1e9))) applyToSelected<Geom>([&](Geom& o) { o.mass = g.mass; });
@@ -327,8 +380,9 @@ void Editor::inspectGeom(Geom& g) {
       if (props::real("Density", &g.density, 1000, O(D("geom.density"), "kg/m^3", 5, 0, 1e7)))
         applyToSelected<Geom>([&](Geom& o) { o.density = g.density; });
     }
-    props::info("Resulting mass", "%.4g kg   (volume %.4g L)", geomMass(g), volume * 1000);
-    if (!geomHasMass(g)) props::info("", "This geom does not contribute mass (group outside 0..5 or plane).");
+    props::info("Resulting mass", "%.4g kg   (volume %.4g L)", geomMass(doc_, g), volume * 1000);
+    if (ma) props::info("", "Mesh volume assumes a closed surface (MuJoCo's default 'legacy' mesh inertia agrees for closed meshes).");
+    else if (!geomHasMass(g)) props::info("", "This geom does not contribute mass (group outside 0..5 or plane).");
   }
   if (props::section("Contact & friction")) {
     if (props::real("Sliding friction", &g.friction.x, 1.0, O(D("geom.friction"), nullptr, 0.01, 0, 100)))

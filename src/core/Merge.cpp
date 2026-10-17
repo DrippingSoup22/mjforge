@@ -154,6 +154,24 @@ class Merger {
     return h.id;
   }
 
+  Id mesh(Id srcId) {
+    if (!srcId) return kNoId;
+    if (Id m = map(srcId)) return m;
+    const MeshAsset* sm = src_.mesh(srcId);
+    if (!sm) return kNoId;
+    // The same mesh imported twice (e.g. two copies of one robot) is stored once.
+    for (const MeshAsset& dm : dst_.meshes)
+      if (dm.vert == sm->vert && dm.face == sm->face) return remap_[srcId] = dm.id;
+    MeshAsset m = *sm;  // vertex data is shared, never modified in place
+    m.id = dst_.newId();
+    m.name = name(Kind::Mesh, m.name);
+    remap_[srcId] = m.id;
+    dst_.meshes.push_back(m);
+    dst_.touch();
+    ++res_.elements;
+    return m.id;
+  }
+
   // ---------------------------------------------------------------- copying
   void copyBodies() {
     for (Id top : topBodies_) {
@@ -190,6 +208,7 @@ class Merger {
       g.body = mapBody(sg->body);
       g.material = material(sg->material);
       g.hfield = hfield(sg->hfield);
+      g.mesh = mesh(sg->mesh);
       remap_[sg->id] = g.id;
       dst_.geoms.push_back(g);
       if (g.body == kWorldId) res_.topLevel.push_back(g.id);

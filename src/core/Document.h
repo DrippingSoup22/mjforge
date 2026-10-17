@@ -21,7 +21,7 @@ constexpr Id kNoId = 0;
 constexpr Id kWorldId = 1;  // the world body always exists and has this ID
 
 enum class Kind : uint8_t {
-  None, Body, Geom, Joint, Site, Camera, Light, Actuator, Sensor, Exclude, Material, Texture, Hfield
+  None, Body, Geom, Joint, Site, Camera, Light, Actuator, Sensor, Exclude, Material, Texture, Hfield, Mesh
 };
 const char* kindName(Kind k);  // "body", "geom", ...
 
@@ -90,6 +90,7 @@ struct Geom {
   Id material = kNoId;
   int group = 0;
   Id hfield = kNoId;
+  Id mesh = kNoId;  // type mesh
   // Editor metadata.
   bool hidden = false;
   bool locked = false;
@@ -291,6 +292,20 @@ struct Keyframe {
   }
 };
 
+// Triangle mesh asset. Vertices are in the frame the geom places them in (meshes imported or
+// loaded through MuJoCo are already centered on their center of volume, as MuJoCo compiles them).
+// Exported inline (<mesh vertex=... face=...>), or as STL files next to big exported models.
+struct MeshAsset {
+  Id id = kNoId;
+  std::string name;
+  std::shared_ptr<const std::vector<float>> vert;  // x y z per vertex, copy-on-write
+  std::shared_ptr<const std::vector<int>> face;    // three vertex indices per triangle
+  std::string source;                              // file it was loaded from (information only)
+  size_t vertexCount() const { return vert ? vert->size() / 3 : 0; }
+  size_t faceCount() const { return face ? face->size() / 3 : 0; }
+  Aabb bounds() const;  // in the mesh frame
+};
+
 struct OptionSettings {
   double timestep = 0.002;
   Vec3 gravity{0, 0, -9.81};
@@ -373,6 +388,7 @@ class Document {
   std::vector<Material> materials;
   std::vector<Texture> textures;
   std::vector<Hfield> hfields;
+  std::vector<MeshAsset> meshes;
   std::vector<Keyframe> keyframes;  // keyframes[0] is the start state
 
   Id nextId = 2;
@@ -398,6 +414,7 @@ class Document {
   Material* material(Id id) { return find(materials, Kind::Material, id); }
   Texture* texture(Id id) { return find(textures, Kind::Texture, id); }
   Hfield* hfield(Id id) { return find(hfields, Kind::Hfield, id); }
+  MeshAsset* mesh(Id id) { return find(meshes, Kind::Mesh, id); }
   const Body* body(Id id) const { return const_cast<Document*>(this)->body(id); }
   const Geom* geom(Id id) const { return const_cast<Document*>(this)->geom(id); }
   const Joint* joint(Id id) const { return const_cast<Document*>(this)->joint(id); }
@@ -410,6 +427,7 @@ class Document {
   const Material* material(Id id) const { return const_cast<Document*>(this)->material(id); }
   const Texture* texture(Id id) const { return const_cast<Document*>(this)->texture(id); }
   const Hfield* hfield(Id id) const { return const_cast<Document*>(this)->hfield(id); }
+  const MeshAsset* mesh(Id id) const { return const_cast<Document*>(this)->mesh(id); }
 
   int bodyIndex(Id id) const;  // -1 if not a body
   Ref ref(Id id) const { return {kindOf(id), id}; }

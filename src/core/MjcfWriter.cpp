@@ -1,10 +1,15 @@
 #include "core/MjcfWriter.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <deque>
+#include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
+
+#include "core/ProjectIO.h"
 
 namespace mjf {
 
@@ -73,7 +78,8 @@ template <int N> bool nearly(const VecN<N>& a, const VecN<N>& b) {
 
 class Writer {
  public:
-  Writer(const Document& d, const ExportOptions& o, ExportMap* m) : doc_(d), opt_(o), map_(m) {}
+  Writer(const Document& d, const ExportOptions& o, ExportMap* m, std::vector<ExportFile>* f)
+      : doc_(d), opt_(o), map_(m), files_(f) {}
 
   std::string run() {
     selectContent();
@@ -136,7 +142,8 @@ class Writer {
       case GeomType::Sphere: return 1;
       case GeomType::Capsule:
       case GeomType::Cylinder: return 2;
-      case GeomType::Hfield: return 0;
+      case GeomType::Hfield:
+      case GeomType::Mesh: return 0;
       default: return 3;
     }
   }
@@ -206,6 +213,7 @@ class Writer {
       if (!attachedIncluded(g.body)) continue;
       if (g.material != kNoId) materials_.insert(g.material);
       if (g.type == GeomType::Hfield && g.hfield != kNoId) hfields_.insert(g.hfield);
+      if (g.type == GeomType::Mesh && g.mesh != kNoId && doc_.mesh(g.mesh)) meshes_.insert(g.mesh);
     }
     for (const Site& s : doc_.sites)
       if (attachedIncluded(s.body) && s.material != kNoId) materials_.insert(s.material);
@@ -255,6 +263,7 @@ class Writer {
     assign(doc_.materials, Kind::Material, true);
     assign(doc_.textures, Kind::Texture, true);
     assign(doc_.hfields, Kind::Hfield, true);
+    assign(doc_.meshes, Kind::Mesh, true);
   }
 
   // ---------------------------------------------------------------- sections
@@ -365,7 +374,23 @@ class Writer {
         e.set("width", std::to_string(t.width));
         e.set("height", std::to_string(t.height));
       } else if (!t.file.empty()) {
-        e.set("file", t.file);
+        std::error_code ec;
+        std::string image;
+        if (!std::filesystem::is_regular_file(t.file, ec)) {
+          // A missing image would stop MuJoCo from loading the model; a flat color keeps it usable
+          // (the analysis reports the missing file).
+          e.set("builtin", "flat");
+          e.set("rgb1", vec(t.rgb1));
+          e.set("width", "16");
+          e.set("height", "16");
+        } else if (files_ && readTextFile(t.file, image)) {
+          std::filesystem::path src(t.file);
+          std::string path = opt_.assetDir + "/" + assetFileName(src.stem().string(), src.extension().string());
+          files_->push_back({path, std::move(image)});
+          e.set("file", path);
+        } else {
+          e.set("file", t.file);
+        }
       }
     }
     for (const Material& m : doc_.materials) {
@@ -381,6 +406,32 @@ class Writer {
       if (!nearly(m.specular, d.specular)) e.set("specular", num(m.specular));
       if (!nearly(m.shininess, d.shininess)) e.set("shininess", num(m.shininess));
       if (!nearly(m.reflectance, d.reflectance)) e.set("reflectance", num(m.reflectance));
+    }
+    for (const MeshAsset& m : doc_.meshes) {
+      if (!meshes_.count(m.id) || !m.vert || !m.face) continue;
+      // Vertices are already in the geom's frame (centered like MuJoCo compiles them), so MuJoCo's
+      // recentering is a no-op. Big meshes go to STL files, small ones inline (no files needed).
+      XmlNode& e = n.add("mesh");
+      setName(e, m.id);
+      if (files_ && m.vertexCount() > opt_.externalMeshVertices) {
+        std::string path = opt_.assetDir + "/" + assetFileName(nameOf(m.id), ".stl");
+        files_->push_back({path, meshToStl(m)});
+        e.set("file", path);
+        continue;
+      }
+      std::string vs, fs;
+      vs.reserve(m.vert->size() * 10);
+      for (size_t i = 0; i < m.vert->size(); ++i) {
+        if (i) vs += ' ';
+        vs += formatNumber((*m.vert)[i], 7);
+      }
+      fs.reserve(m.face->size() * 5);
+      for (size_t i = 0; i < m.face->size(); ++i) {
+        if (i) fs += ' ';
+        fs += std::to_string((*m.face)[i]);
+      }
+      e.set("vertex", vs);
+      e.set("face", fs);
     }
     for (const Hfield& h : doc_.hfields) {
       if (!hfields_.count(h.id)) continue;
@@ -501,6 +552,7 @@ class Writer {
     int sc = geomSizeCount(g.type);
     if (sc > 0) n.set("size", sizeStr(g.size, sc));
     if (g.type == GeomType::Hfield && g.hfield != kNoId) n.set("hfield", nameOf(g.hfield));
+    if (g.type == GeomType::Mesh && g.mesh != kNoId) n.set("mesh", nameOf(g.mesh));
     setPose(n, g.pos, g.quat);
     bool hasMat = g.material != kNoId && materials_.count(g.material);
     if (hasMat) n.set("material", nameOf(g.material));
@@ -771,21 +823,86 @@ class Writer {
     if (!n.children.empty()) root.children.push_back(n);
   }
 
+  // File names are restricted to portable characters and kept unique after that.
+  std::string assetFileName(const std::string& name, const std::string& ext) {
+    std::string base;
+    for (char c : name) base += std::isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.' ? c : '_';
+    if (base.empty()) base = "asset";
+    std::string file = base + ext;
+    for (int k = 2; !assetFiles_.insert(file).second; ++k) file = base + "_" + std::to_string(k) + ext;
+    return file;
+  }
+
+  std::vector<ExportFile>* files_ = nullptr;
+  std::unordered_set<std::string> assetFiles_;
   std::vector<const Joint*> writtenJoints_;
   std::vector<Id> writtenActuators_;
   const Document& doc_;
   const ExportOptions& opt_;
   ExportMap* map_;
   std::unordered_map<Id, std::string> names_;
-  std::unordered_set<Id> bodies_, actuators_, sensors_, materials_, textures_, hfields_;
+  std::unordered_set<Id> bodies_, actuators_, sensors_, materials_, textures_, hfields_, meshes_;
 };
 
 }  // namespace
 
-std::string writeMjcf(const Document& doc, const ExportOptions& opt, ExportMap* map) {
+std::string writeMjcf(const Document& doc, const ExportOptions& opt, ExportMap* map, std::vector<ExportFile>* files) {
   if (map) *map = {};
-  Writer w(doc, opt, map);
+  Writer w(doc, opt, map, files);
   return w.run();
+}
+
+bool exportMjcfFile(const Document& doc, const std::string& path, const ExportOptions& optIn, std::string* error,
+                    const std::string& assetStem, std::vector<std::string>* written) {
+  namespace fs = std::filesystem;
+  fs::path p(path);
+  ExportOptions opt = optIn;
+  opt.externalMeshVertices = 1000;
+  opt.assetDir = (assetStem.empty() ? p.stem().string() : assetStem) + "_assets";
+  std::vector<ExportFile> files;
+  std::string xml = writeMjcf(doc, opt, nullptr, &files);
+  if (!files.empty()) {
+    std::error_code ec;
+    fs::create_directories(p.parent_path() / opt.assetDir, ec);
+    if (ec) {
+      if (error) *error = "Cannot create " + (p.parent_path() / opt.assetDir).string() + ": " + ec.message();
+      return false;
+    }
+  }
+  for (const ExportFile& f : files) {
+    std::string fp = (p.parent_path() / f.path).string();
+    if (!writeTextFile(fp, f.content, error)) return false;
+    if (written) written->push_back(fp);
+  }
+  if (!writeTextFile(path, xml, error)) return false;
+  if (written) written->push_back(path);
+  return true;
+}
+
+std::string meshToStl(const MeshAsset& mesh) {
+  // Binary STL (little endian): 80-byte header, triangle count, then per triangle the normal, three
+  // vertices and a 16-bit attribute word.
+  size_t ntri = mesh.faceCount();
+  std::string out(84 + ntri * 50, '\0');
+  const char header[] = "MJForge mesh";
+  std::memcpy(&out[0], header, sizeof header - 1);
+  uint32_t n32 = uint32_t(ntri);
+  std::memcpy(&out[80], &n32, 4);
+  const std::vector<float>& v = *mesh.vert;
+  const std::vector<int>& f = *mesh.face;
+  char* p = &out[84];
+  for (size_t t = 0; t < ntri; ++t, p += 50) {
+    float tri[12] = {};
+    for (int k = 0; k < 3; ++k)
+      for (int c = 0; c < 3; ++c) tri[3 + 3 * k + c] = v[3 * size_t(f[3 * t + k]) + c];
+    Vec3 a{tri[3], tri[4], tri[5]}, b{tri[6], tri[7], tri[8]}, c{tri[9], tri[10], tri[11]};
+    Vec3 nrm = normalize(cross(b - a, c - a), {0, 0, 1});
+    tri[0] = float(nrm.x);
+    tri[1] = float(nrm.y);
+    tri[2] = float(nrm.z);
+    std::memcpy(p, tri, sizeof tri);
+  }
+  return out;
 }
 
 }  // namespace mjf

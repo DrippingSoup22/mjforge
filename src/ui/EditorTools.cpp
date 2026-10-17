@@ -40,7 +40,7 @@ bool Editor::pickSurface(const Ray& ray, Id* geomOut, Vec3* point, Vec3* normal)
       const Geom& g = doc_.geoms[gi];
       if (g.hidden || !vp_.groupShown(g.group) || g.type == GeomType::Hfield) continue;
       Vec3 n;
-      double t = rayPrimitive(ray, g.type, g.size, poses_[bi] * Pose{g.pos, g.quat}, 60.0, &n);
+      double t = rayGeom(doc_, ray, g, poses_[bi] * Pose{g.pos, g.quat}, 60.0, &n);
       if (t >= 0 && t < best) {
         best = t;
         bestGeom = g.id;

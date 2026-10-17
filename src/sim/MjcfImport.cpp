@@ -1,6 +1,7 @@
 #include "sim/MjcfImport.h"
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <unordered_map>
@@ -12,6 +13,39 @@ namespace fs = std::filesystem;
 namespace mjf {
 
 namespace {
+
+// OBJ files keep one vertex per distinct normal / texture coordinate, so the same position appears
+// several times; keep each position once (about half the data for typical robot meshes).
+void dedupVertices(const float* v, int nv, const int* f, int nf, std::vector<float>& vo, std::vector<int>& fo) {
+  struct Key {
+    uint32_t x, y, z;
+    bool operator==(const Key& o) const { return x == o.x && y == o.y && z == o.z; }
+  };
+  struct KeyHash {
+    size_t operator()(const Key& k) const {
+      return (size_t(k.x) * 73856093u) ^ (size_t(k.y) * 19349663u) ^ (size_t(k.z) * 83492791u);
+    }
+  };
+  auto bits = [](float x) {
+    x += 0.0f;  // -0 and +0 are the same position
+    uint32_t u;
+    std::memcpy(&u, &x, 4);
+    return u;
+  };
+  std::unordered_map<Key, int, KeyHash> seen;
+  seen.reserve(size_t(nv));
+  std::vector<int> remap(static_cast<size_t>(nv));
+  vo.clear();
+  vo.reserve(3 * size_t(nv));
+  for (int i = 0; i < nv; ++i) {
+    const float* p = v + 3 * size_t(i);
+    auto [it, fresh] = seen.try_emplace(Key{bits(p[0]), bits(p[1]), bits(p[2])}, int(vo.size() / 3));
+    if (fresh) vo.insert(vo.end(), p, p + 3);
+    remap[size_t(i)] = it->second;
+  }
+  fo.resize(3 * size_t(nf));
+  for (size_t i = 0; i < fo.size(); ++i) fo[i] = remap[size_t(f[i])];
+}
 
 struct SpecHolder {
   mjSpec* s = nullptr;
@@ -219,7 +253,9 @@ class Builder {
         } else {
           fs::path p = fs::path(file);
           if (p.is_relative()) p = fs::path(baseDir_) / specString(spec_->compiler.texturedir) / p;
-          x.file = p.lexically_normal().string();
+          std::error_code ec;
+          fs::path abs = fs::absolute(p, ec);  // exports can be written anywhere
+          x.file = (ec ? p : abs).lexically_normal().string();
         }
       }
       texIds_[id] = x.id;
@@ -272,7 +308,8 @@ class Builder {
     forEachSpec(spec_, mjOBJ_BODY, [&](mjsElement* el, int id) {
       if (id < m_->nbody) explicitInertial[id] = mjs_asBody(el)->explicitinertial;
     });
-    // Mesh / SDF geoms become boxes; keep the exact compiled inertia of their bodies.
+    // SDF geoms become boxes, and mesh inertia depends on mesh options that are not edited here
+    // (inertia="shell", refpos, ...): keep the exact compiled inertia of their bodies.
     for (int g = 0; g < m_->ngeom; ++g)
       if (m_->geom_type[g] == mjGEOM_MESH || m_->geom_type[g] == mjGEOM_SDF) explicitInertial[m_->geom_bodyid[g]] = 1;
     for (int b = 1; b < m_->nbody; ++b) {
@@ -351,8 +388,12 @@ class Builder {
       x.size = v3(m_->geom_size + 3 * g);
       x.pos = v3(m_->geom_pos + 3 * g);
       x.quat = q4(m_->geom_quat + 4 * g);
-      if (type == mjGEOM_MESH || type == mjGEOM_SDF) {
-        // Approximate by the geom's bounding box (the body keeps its exact inertia).
+      if (type == mjGEOM_MESH && m_->geom_dataid[g] >= 0) {
+        // Compiled vertices are in the frame the compiled geom pose places them in.
+        x.type = GeomType::Mesh;
+        x.mesh = meshAsset(m_->geom_dataid[g]);
+      } else if (type == mjGEOM_SDF) {
+        // SDF plugins: approximate by the geom's bounding box (the body keeps its exact inertia).
         const mjtNum* aabb = m_->geom_aabb + 6 * g;
         x.type = GeomType::Box;
         x.pos = x.pos + rotate(x.quat, v3(aabb));
@@ -384,7 +425,26 @@ class Builder {
     }
     if (rep_.approximatedGeoms > 0)
       note(std::to_string(rep_.approximatedGeoms) +
-           " mesh geom(s) were replaced by their bounding boxes (bodies keep their exact mass and inertia)");
+           " SDF geom(s) were replaced by their bounding boxes (bodies keep their exact mass and inertia)");
+  }
+
+  Id meshAsset(int mesh) {
+    auto it = meshIds_.find(mesh);
+    if (it != meshIds_.end()) return it->second;
+    MeshAsset a;
+    a.id = doc_.newId();
+    a.name = objName(m_, mjOBJ_MESH, mesh);
+    if (a.name.empty()) a.name = "mesh_" + std::to_string(mesh);
+    int va = m_->mesh_vertadr[mesh], vn = m_->mesh_vertnum[mesh];
+    int fa = m_->mesh_faceadr[mesh], fn = m_->mesh_facenum[mesh];
+    std::vector<float> vert;
+    std::vector<int> face;
+    dedupVertices(m_->mesh_vert + 3 * size_t(va), vn, m_->mesh_face + 3 * size_t(fa), fn, vert, face);
+    a.vert = std::make_shared<const std::vector<float>>(std::move(vert));
+    a.face = std::make_shared<const std::vector<int>>(std::move(face));
+    doc_.meshes.push_back(a);
+    meshIds_[mesh] = a.id;
+    return a.id;
   }
 
   void sitesCamerasLights() {
@@ -697,6 +757,7 @@ class Builder {
   Document& doc_;
   ImportReport& rep_;
   std::vector<Id> texIds_, matIds_, hfIds_, bodyIds_, jointIds_, geomIds_, siteIds_, camIds_, actIds_;
+  std::unordered_map<int, Id> meshIds_;
 };
 
 bool importSpec(mjSpec* spec, const std::string& baseDir, Document& out, std::string* error, ImportReport* report) {
@@ -719,6 +780,52 @@ bool importSpec(mjSpec* spec, const std::string& baseDir, Document& out, std::st
 }
 
 }  // namespace
+
+Id loadMeshFile(Document& doc, const std::string& path, double scale, Pose* frame, std::string* error) {
+  std::error_code ec;
+  fs::path abs = fs::absolute(fs::path(path), ec);
+  if (ec || !fs::is_regular_file(abs, ec)) {
+    if (error) *error = "File not found: " + path;
+    return kNoId;
+  }
+  std::string file;
+  for (char c : abs.string()) {
+    if (c == '&') file += "&amp;";
+    else if (c == '"') file += "&quot;";
+    else if (c == '<') file += "&lt;";
+    else file += c;
+  }
+  std::string sc = std::to_string(scale);
+  std::string xml = "<mujoco><asset><mesh name=\"m\" file=\"" + file + "\" scale=\"" + sc + " " + sc + " " + sc +
+                    "\"/></asset><worldbody><geom type=\"mesh\" mesh=\"m\"/></worldbody></mujoco>";
+  CompileResult cr = compileMjcf(xml);
+  if (!cr.ok) {
+    if (error) *error = cr.error;
+    return kNoId;
+  }
+  const mjModel* m = cr.model.get();
+  if (m->nmesh != 1 || m->ngeom != 1) {
+    if (error) *error = "MuJoCo did not produce a mesh from " + path;
+    return kNoId;
+  }
+  MeshAsset a;
+  a.id = doc.newId();
+  a.name = doc.uniqueName(Kind::Mesh, abs.stem().string().empty() ? "mesh" : abs.stem().string());
+  a.source = abs.string();
+  std::vector<float> vert;
+  std::vector<int> face;
+  dedupVertices(m->mesh_vert + 3 * size_t(m->mesh_vertadr[0]), m->mesh_vertnum[0], m->mesh_face + 3 * size_t(m->mesh_faceadr[0]),
+                m->mesh_facenum[0], vert, face);
+  a.vert = std::make_shared<const std::vector<float>>(std::move(vert));
+  a.face = std::make_shared<const std::vector<int>>(std::move(face));
+  doc.meshes.push_back(a);
+  doc.touch();
+  if (frame) {
+    frame->pos = {m->geom_pos[0], m->geom_pos[1], m->geom_pos[2]};
+    frame->quat = Quat{m->geom_quat[0], m->geom_quat[1], m->geom_quat[2], m->geom_quat[3]};
+  }
+  return a.id;
+}
 
 bool importMjcfFile(const std::string& path, Document& out, std::string* error, ImportReport* report) {
   char err[1024] = "";

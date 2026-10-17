@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -285,6 +286,13 @@ class Analyzer {
     dupes(doc_.actuators, Kind::Actuator);
     dupes(doc_.sensors, Kind::Sensor);
 
+    for (const Texture& t : doc_.textures) {
+      std::error_code ec;
+      if (t.builtin != TextureBuiltin::None || t.file.empty() || std::filesystem::is_regular_file(t.file, ec)) continue;
+      add(Severity::Warning, IssueArea::Model, "texture-file", fmt("Texture image not found: %s", t.file.c_str()),
+          fmt("Texture %s is exported as a flat color until the file exists again.", quote(t.name).c_str()), {});
+    }
+
     for (const Actuator& a : doc_.actuators) {
       bool ok = false;
       switch (a.trn) {
@@ -409,7 +417,7 @@ class Analyzer {
     }
     for (const Geom& g : doc_.geoms) {
       int n = g.type == GeomType::Sphere ? 1 : (g.type == GeomType::Capsule || g.type == GeomType::Cylinder) ? 2 : 3;
-      if (g.type == GeomType::Plane || g.type == GeomType::Hfield) n = 0;
+      if (g.type == GeomType::Plane || g.type == GeomType::Hfield || g.type == GeomType::Mesh) n = 0;
       bool bad = false;
       for (int i = 0; i < n; ++i) bad |= !(g.size[i] > 0);
       if (bad) add(Severity::Error, IssueArea::Model, "geom-size", fmt("Geom %s has a zero or negative size", quote(g.name).c_str()), "", {g.id});
@@ -419,6 +427,18 @@ class Analyzer {
       }
       if (g.type == GeomType::Hfield && !doc_.hfield(g.hfield))
         add(Severity::Error, IssueArea::Model, "hfield-missing", fmt("Height field geom %s has no height field data", quote(g.name).c_str()), "", {g.id});
+      if (g.type == GeomType::Mesh && !doc_.mesh(g.mesh)) {
+        Issue& i = add(Severity::Error, IssueArea::Model, "mesh-missing", fmt("Mesh geom %s has no mesh", quote(g.name).c_str()),
+                       "Pick a mesh in the inspector, load one with Add > Geom > Mesh from file, or use a primitive shape.", {g.id});
+        Id id = g.id;
+        i.fixLabel = "Make it a box";
+        i.fix = [id](Document& d) {
+          if (Geom* x = d.geom(id)) {
+            x->type = GeomType::Box;
+            x->size = {0.05, 0.05, 0.05};
+          }
+        };
+      }
     }
   }
 
@@ -541,7 +561,7 @@ class Analyzer {
         for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
           const Geom& g = doc_.geoms[gi];
           if (g.type == GeomType::Plane || !geomCollides(g)) continue;
-          own.add(primitiveWorldAabb(g.type, g.size, poses_[bi] * Pose{g.pos, g.quat}));
+          own.add(geomWorldAabb(doc_, g, poses_[bi] * Pose{g.pos, g.quat}));
         }
         if (!own.valid() || own.lo.z > box.lo.z + tol) continue;
         // The leg is identified by the root's child that leads to this foot.
@@ -630,7 +650,7 @@ class Analyzer {
       for (uint32_t gi : doc_.index().bodyGeoms[fb]) {
         const Geom& g = doc_.geoms[gi];
         if (g.type != GeomType::Box) continue;
-        flat |= primitiveWorldAabb(g.type, g.size, poses_[fb] * Pose{g.pos, g.quat}).lo.z <= floorLevel;
+        flat |= geomWorldAabb(doc_, g, poses_[fb] * Pose{g.pos, g.quat}).lo.z <= floorLevel;
       }
       if (!flat) return;  // point-like feet: covered by the stance check
       MassProps fm = subtreeMassProps(doc_, poses_, doc_.bodies[fb].id);
@@ -858,7 +878,7 @@ class Analyzer {
           for (uint32_t gi : doc_.index().bodyGeoms[bi]) {
             const Geom& g = doc_.geoms[gi];
             if (g.type == GeomType::Plane || !geomCollides(g)) continue;
-            Aabb ab = primitiveWorldAabb(g.type, g.size, poses_[bi] * Pose{g.pos, g.quat});
+            Aabb ab = geomWorldAabb(doc_, g, poses_[bi] * Pose{g.pos, g.quat});
             if (ab.lo.z - floorZ < 0.01) {
               // Use the footprint corners for boxes, the center for round shapes.
               if (g.type == GeomType::Box) {
@@ -1025,7 +1045,7 @@ class Analyzer {
         e.g = &g;
         e.body = int(bi);
         e.pose = poses_[bi] * Pose{g.pos, g.quat};
-        e.box = primitiveWorldAabb(g.type, g.size, e.pose);
+        e.box = geomWorldAabb(doc_, g, e.pose);
         e.rb = rbound(doc_, g);
         e.root = doc_.rootOf(doc_.bodies[bi].id);
         geoms.push_back(e);

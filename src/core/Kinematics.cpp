@@ -170,6 +170,17 @@ void accumulateBodyMass(const Document& doc, const std::vector<Pose>& poses, Id 
   int bi = doc.bodyIndex(bodyId);
   for (uint32_t gi : doc.index().bodyGeoms[bi]) {
     const Geom& g = doc.geoms[gi];
+    if (g.type == GeomType::Mesh) {
+      const MeshAsset* ma = doc.mesh(g.mesh);
+      double m = geomMass(doc, g);
+      if (!ma || m <= 0) continue;
+      const MeshMass& mm = meshMassProps(*ma);
+      if (mm.volume <= 0) continue;
+      Pose gp = bp * Pose{g.pos, g.quat};
+      Mat3 R = toMat3(gp.quat);
+      acc.add(m, gp.apply(mm.center), R * (mm.inertia * (m / mm.volume)) * R.transposed());
+      continue;
+    }
     double m = geomMass(g);
     if (m <= 0) continue;
     Pose gp = bp * Pose{g.pos, g.quat};
@@ -206,7 +217,7 @@ Aabb subtreeAabb(const Document& doc, const std::vector<Pose>& poses, Id body, b
       const Geom& g = doc.geoms[gi];
       if (g.type == GeomType::Plane || g.type == GeomType::Hfield) continue;
       if (collidingOnly && !geomCollides(g)) continue;
-      box.add(primitiveWorldAabb(g.type, g.size, bp * Pose{g.pos, g.quat}));
+      box.add(geomWorldAabb(doc, g, bp * Pose{g.pos, g.quat}));
     }
   }
   return box;

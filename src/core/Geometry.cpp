@@ -1,6 +1,9 @@
 #include "core/Geometry.h"
 
 #include <cmath>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 
 namespace mjf {
 
@@ -238,6 +241,146 @@ double raySegmentDistance(const Ray& ray, const Vec3& a, const Vec3& b, double* 
   if (tRay) *tRay = sc;
   if (tSeg) *tSeg = tc;
   return length(pr - ps);
+}
+
+// ------------------------------------------------------------------------------------ meshes
+
+namespace {
+
+struct MeshCache {
+  std::weak_ptr<const std::vector<float>> vert;
+  size_t faces = 0;
+  Aabb bounds;
+  bool hasMass = false;
+  MeshMass mass;
+};
+
+// Element references stay valid when the map grows; the mutex makes lookups safe from any thread.
+MeshCache& meshCache(const MeshAsset& m) {
+  static std::unordered_map<const void*, MeshCache> cache;
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
+  MeshCache& c = cache[m.vert.get()];
+  if (c.vert.lock() != m.vert || c.faces != m.faceCount()) {
+    c = {};
+    c.vert = m.vert;
+    c.faces = m.faceCount();
+    c.bounds = m.bounds();
+  }
+  return c;
+}
+
+}  // namespace
+
+const Aabb& meshBounds(const MeshAsset& m) { return meshCache(m).bounds; }
+
+const MeshMass& meshMassProps(const MeshAsset& m) {
+  MeshCache& c = meshCache(m);
+  if (c.hasMass) return c.mass;
+  c.hasMass = true;
+  if (!m.vert || !m.face) return c.mass;
+  const std::vector<float>& v = *m.vert;
+  const std::vector<int>& f = *m.face;
+  auto P = [&](int i) { return Vec3{v[3 * size_t(i)], v[3 * size_t(i) + 1], v[3 * size_t(i) + 2]}; };
+  double vol = 0;
+  Vec3 first;
+  double M[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};  // second moments about the origin
+  size_t nv = v.size() / 3;
+  for (size_t t = 0; t + 2 < f.size(); t += 3) {
+    if (size_t(f[t]) >= nv || size_t(f[t + 1]) >= nv || size_t(f[t + 2]) >= nv) continue;
+    Vec3 a = P(f[t]), b = P(f[t + 1]), cc = P(f[t + 2]);
+    double V = dot(a, cross(b, cc)) / 6.0;  // signed tetrahedron (origin, a, b, c)
+    Vec3 sum = a + b + cc;
+    vol += V;
+    first += sum * (V / 4.0);
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) M[i][j] += V / 20.0 * (a[i] * a[j] + b[i] * b[j] + cc[i] * cc[j] + sum[i] * sum[j]);
+  }
+  if (vol < 0) {  // inside-out
+    vol = -vol;
+    first = -first;
+    for (auto& row : M)
+      for (double& x : row) x = -x;
+  }
+  if (vol <= 1e-15) return c.mass;
+  Vec3 center = first / vol;
+  double tr = M[0][0] + M[1][1] + M[2][2];
+  Mat3 I;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) I(i, j) = (i == j ? tr : 0.0) - M[i][j];
+  // Parallel axis theorem to the center of volume.
+  double cc2 = dot(center, center);
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) I(i, j) -= vol * ((i == j ? cc2 : 0.0) - center[i] * center[j]);
+  c.mass = {vol, center, I};
+  return c.mass;
+}
+
+double geomMass(const Document& doc, const Geom& g) {
+  if (g.type != GeomType::Mesh) return geomMass(g);
+  const MeshAsset* m = doc.mesh(g.mesh);
+  if (!m || g.group < 0 || g.group > 5) return 0.0;
+  if (g.mass >= 0) return g.mass;
+  return g.density * meshMassProps(*m).volume;
+}
+
+Aabb geomWorldAabb(const Document& doc, const Geom& g, const Pose& world) {
+  if (g.type == GeomType::Mesh) {
+    const MeshAsset* m = doc.mesh(g.mesh);
+    Aabb out;
+    if (!m || !meshBounds(*m).valid()) {
+      out.add(world.pos);
+      return out;
+    }
+    const Aabb& l = meshBounds(*m);
+    for (int k = 0; k < 8; ++k)
+      out.add(world.apply({k & 1 ? l.hi.x : l.lo.x, k & 2 ? l.hi.y : l.lo.y, k & 4 ? l.hi.z : l.lo.z}));
+    return out;
+  }
+  return primitiveWorldAabb(g.type, g.size, world);
+}
+
+double rayGeom(const Document& doc, const Ray& ray, const Geom& g, const Pose& world, double infiniteExtent,
+               Vec3* normal) {
+  if (g.type != GeomType::Mesh) return rayPrimitive(ray, g.type, g.size, world, infiniteExtent, normal);
+  const MeshAsset* m = doc.mesh(g.mesh);
+  if (!m || !m->vert || !m->face) return -1;
+  // Ray in the mesh frame; reject by the bounding box first.
+  Quat qi = conj(world.quat);
+  Vec3 o = rotate(qi, ray.origin - world.pos), d = rotate(qi, ray.dir);
+  const Aabb& b = meshBounds(*m);
+  Vec3 half = b.extent() * 0.5;
+  if (rayPrimitive({o, d}, GeomType::Box, half, {b.center(), {}}) < 0) return -1;
+  const std::vector<float>& v = *m->vert;
+  const std::vector<int>& f = *m->face;
+  size_t nv = v.size() / 3;
+  double best = -1;
+  Vec3 bestN;
+  for (size_t t = 0; t + 2 < f.size(); t += 3) {
+    if (size_t(f[t]) >= nv || size_t(f[t + 1]) >= nv || size_t(f[t + 2]) >= nv) continue;
+    Vec3 p0{v[3 * size_t(f[t])], v[3 * size_t(f[t]) + 1], v[3 * size_t(f[t]) + 2]};
+    Vec3 p1{v[3 * size_t(f[t + 1])], v[3 * size_t(f[t + 1]) + 1], v[3 * size_t(f[t + 1]) + 2]};
+    Vec3 p2{v[3 * size_t(f[t + 2])], v[3 * size_t(f[t + 2]) + 1], v[3 * size_t(f[t + 2]) + 2]};
+    // Moller-Trumbore.
+    Vec3 e1 = p1 - p0, e2 = p2 - p0, pv = cross(d, e2);
+    double det = dot(e1, pv);
+    if (std::fabs(det) < 1e-14) continue;
+    double inv = 1.0 / det;
+    Vec3 tv = o - p0;
+    double u = dot(tv, pv) * inv;
+    if (u < 0 || u > 1) continue;
+    Vec3 qv = cross(tv, e1);
+    double w = dot(d, qv) * inv;
+    if (w < 0 || u + w > 1) continue;
+    double hit = dot(e2, qv) * inv;
+    if (hit >= 0 && (best < 0 || hit < best)) {
+      best = hit;
+      bestN = normalize(cross(e1, e2), {0, 0, 1});
+      if (dot(bestN, d) > 0) bestN = -bestN;
+    }
+  }
+  if (best >= 0 && normal) *normal = rotate(world.quat, bestN);
+  return best;
 }
 
 }  // namespace mjf

@@ -183,7 +183,9 @@ headless settle).
 ### M5 — Polish
 - [x] Keyframes (per-joint storage, start pose, capture from simulation)
 - [ ] Pose mode (edit keyframes in the viewport)
-- [ ] Mesh assets (STL/OBJ via MuJoCo) with convex-hull preview
+- [x] Mesh assets: imported with MJCF files and loaded from STL/OBJ/MSH through MuJoCo, exact
+      volume, mass and inertia, rendering and picking; projects store them as base64, exports write
+      big meshes as STL files and copy texture images next to the XML
 - [x] Keyboard & mouse help (F1), README with screenshots, user guide (docs/USER_GUIDE.md)
 - [ ] Preferences window
 - [x] Unit/integration tests (export → MuJoCo compile, JSON and MJCF round trips, analysis,

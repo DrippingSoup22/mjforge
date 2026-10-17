@@ -57,6 +57,13 @@ self-collisions, or only the feet touch the world (the cheapest setup for locomo
 **Sensors.** *Tools > Add sensors* adds an IMU at the model root or touch sensors on the feet; the
 Sensors panel adds joint position and velocity sensors in one click.
 
+**Meshes.** *Add > Geom > Mesh from file* (or *+ Geom* on a body) loads an STL, OBJ or MSH file
+through MuJoCo, so it is read exactly as in training. The mesh keeps the position it has in the file
+relative to the body; files that look like millimeters (over 20 m across) are scaled to meters. The
+Inspector shows the triangle count and size and can rescale the mesh. MuJoCo computes mass and
+inertia from the enclosed volume and collides with the convex hull: for feet and limbs that touch
+the ground often, primitives (capsules, spheres) are much cheaper in MuJoCo Warp.
+
 ## Physics properties
 
 - **Mass.** By default MuJoCo computes mass and inertia from the geoms and their density
@@ -143,9 +150,9 @@ robot adds broadphase work in every world.
 Clashing names are made unique. *File > Open* also opens MJCF files directly as a new project.
 
 MJCF is read with MuJoCo's own parser and compiler, so defaults classes, `<include>`, Euler angles,
-`fromto` and degree units are resolved exactly. Not yet supported: mesh geoms are replaced by boxes
-of the same extent (the bodies keep MuJoCo's exact mass and inertia), tendons, equality constraints,
-explicit contact pairs and flex objects are reported and skipped.
+`fromto`, degree units and meshes are resolved exactly. Not yet supported: SDF geoms are replaced by
+boxes of the same extent (the bodies keep MuJoCo's exact mass and inertia); tendons, equality
+constraints, explicit contact pairs and flex objects are reported and skipped.
 
 ## Exporting
 
@@ -159,11 +166,15 @@ explicit contact pairs and flex objects are reported and skipped.
 - **MuJoCo Warp loader**: writes `name_mjwarp.py`, which loads the file with `mujoco_warp`, resets
   to the start keyframe and sets `nconmax`/`njmax` from the contact peaks of your last simulation
   (or of a short settle computed during export).
+- **Assets**: meshes with more than 1000 vertices are written as binary STL files and texture
+  images are copied into `name_assets/` next to the XML; smaller meshes stay inline. Copy the XML
+  together with that folder.
 
 ## Files and settings
 
 Projects are JSON (`.mjforge`) and keep editor metadata the MJCF can't (roles, generator
-parameters, hidden/locked flags, the camera). Preferences and recent files are stored in
+parameters, hidden/locked flags, the camera). Mesh data is stored inside the project (base64), so
+a project does not depend on the original mesh files; texture images are referenced by path. Preferences and recent files are stored in
 `$XDG_CONFIG_HOME/mjforge` (usually `~/.config/mjforge`).
 
 ## Keyboard and mouse

@@ -10,7 +10,7 @@ jobs:
     name: Build, unit tests, headless validation
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: System packages
         run: |
@@ -18,7 +18,7 @@ jobs:
           sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxinerama-dev \
             libxcursor-dev libxi-dev libgl1-mesa-dev
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -46,7 +46,7 @@ jobs:
             ./build/bin/mjforge --template "$t" --export "out/$t.xml" --loader
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: exported-mjcf
           path: out
@@ -56,16 +56,16 @@ jobs:
     needs: build-test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: MuJoCo and MuJoCo Warp
         run: python -m pip install mujoco==3.16.0 mujoco-warp==3.16.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: exported-mjcf
           path: out

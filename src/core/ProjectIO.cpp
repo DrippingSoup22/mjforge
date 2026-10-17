@@ -1,6 +1,7 @@
 #include "core/ProjectIO.h"
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
@@ -104,6 +105,55 @@ struct Loader {
   }
 };
 
+// ---------------------------------------------------------------- binary blobs
+// Large numeric arrays (mesh vertices) are stored as base64 of little-endian 32-bit values.
+const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+template <class T> std::string toBase64(const std::vector<T>& v) {
+  static_assert(sizeof(T) == 4, "32-bit values");
+  const auto* p = reinterpret_cast<const unsigned char*>(v.data());
+  size_t n = v.size() * 4;
+  std::string out;
+  out.reserve((n + 2) / 3 * 4);
+  for (size_t i = 0; i < n; i += 3) {
+    uint32_t x = uint32_t(p[i]) << 16 | (i + 1 < n ? uint32_t(p[i + 1]) << 8 : 0) | (i + 2 < n ? p[i + 2] : 0);
+    out += kB64[(x >> 18) & 63];
+    out += kB64[(x >> 12) & 63];
+    out += i + 1 < n ? kB64[(x >> 6) & 63] : '=';
+    out += i + 2 < n ? kB64[x & 63] : '=';
+  }
+  return out;
+}
+
+template <class T> std::vector<T> fromBase64(const std::string& s) {
+  int map[256];
+  for (int& m : map) m = -1;
+  for (int i = 0; i < 64; ++i) map[(unsigned char)kB64[i]] = i;
+  std::vector<unsigned char> bytes;
+  bytes.reserve(s.size() / 4 * 3);
+  uint32_t acc = 0;
+  int bits = 0;
+  for (char ch : s) {
+    int v = map[(unsigned char)ch];
+    if (v < 0) continue;  // '=' padding and whitespace
+    acc = acc << 6 | uint32_t(v);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push_back((unsigned char)((acc >> bits) & 0xFF));
+    }
+  }
+  std::vector<T> out(bytes.size() / 4);
+  std::memcpy(out.data(), bytes.data(), out.size() * 4);
+  return out;
+}
+
+template <class T> std::vector<T> readNumbers(const json& j) {
+  if (j.is_string()) return fromBase64<T>(j.get<std::string>());
+  if (j.is_array()) return j.get<std::vector<T>>();
+  return {};
+}
+
 // ---------------------------------------------------------------- field lists
 template <class V> void visit(V& v, Body& b) {
   v("id", b.id); v("name", b.name); v("parent", b.parent); v("pos", b.pos); v("quat", b.quat);
@@ -118,7 +168,8 @@ template <class V> void visit(V& v, Geom& g) {
   v("condim", g.condim); v("priority", g.priority); v("friction", g.friction); v("solmix", g.solmix);
   v("solref", g.solref); v("solimp", g.solimp); v("margin", g.margin); v("gap", g.gap);
   v("density", g.density); v("mass", g.mass); v("shellinertia", g.shellinertia); v("rgba", g.rgba);
-  v("material", g.material); v("group", g.group); v("hfield", g.hfield); v("hidden", g.hidden); v("locked", g.locked);
+  v("material", g.material); v("group", g.group); v("hfield", g.hfield); v("mesh", g.mesh); v("hidden", g.hidden);
+  v("locked", g.locked);
 }
 template <class V> void visit(V& v, Joint& j) {
   v("id", j.id); v("name", j.name); v("body", j.body); v("type", j.type); v("pos", j.pos); v("axis", j.axis);
@@ -256,6 +307,17 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
     hf.push_back(o);
   }
   root["hfields"] = hf;
+  json meshes = json::array();
+  for (const MeshAsset& m : doc.meshes) {
+    json o;
+    o["id"] = m.id;
+    o["name"] = m.name;
+    o["source"] = m.source;
+    o["vertex"] = m.vert ? toBase64(*m.vert) : std::string();  // float32, base64
+    o["face"] = m.face ? toBase64(*m.face) : std::string();    // int32, base64
+    meshes.push_back(o);
+  }
+  root["meshes"] = meshes;
   json keys = json::array();
   for (const Keyframe& k : doc.keyframes) {
     json o;
@@ -321,6 +383,17 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
         doc.hfields.push_back(std::move(h));
       }
     }
+    if (root.contains("meshes") && root["meshes"].is_array()) {
+      for (const auto& item : root["meshes"]) {
+        MeshAsset m;
+        m.id = item.value("id", Id(0));
+        m.name = item.value("name", std::string());
+        m.source = item.value("source", std::string());
+        if (item.contains("vertex")) m.vert = std::make_shared<const std::vector<float>>(readNumbers<float>(item["vertex"]));
+        if (item.contains("face")) m.face = std::make_shared<const std::vector<int>>(readNumbers<int>(item["face"]));
+        doc.meshes.push_back(std::move(m));
+      }
+    }
     if (root.contains("keyframes") && root["keyframes"].is_array()) {
       for (const auto& item : root["keyframes"]) {
         Keyframe k;
@@ -356,6 +429,7 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     scan(doc.bodies); scan(doc.geoms); scan(doc.joints); scan(doc.sites); scan(doc.cameras); scan(doc.lights);
     scan(doc.actuators); scan(doc.sensors); scan(doc.excludes); scan(doc.materials); scan(doc.textures);
     scan(doc.hfields);
+    scan(doc.meshes);
     doc.nextId = std::max<Id>(root.value("nextId", 0u), maxId + 1);
     doc.touch();
     if (editorStateJson) *editorStateJson = root.contains("editor") ? root["editor"].dump() : std::string();

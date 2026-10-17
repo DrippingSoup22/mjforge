@@ -30,4 +30,7 @@ struct PrimitiveMeshes {
 // spanning [-1,1]^2 in xy and [0,1] in z, with a box base down to z = -base/elevation_z.
 void buildHfieldMesh(Mesh& mesh, int nrow, int ncol, const std::vector<float>& data, double baseRatio);
 
+// Flat-shaded triangle mesh from vertex positions (x y z) and triangle indices; drawn unscaled.
+void buildTriangleMesh(Mesh& mesh, const std::vector<float>& vert, const std::vector<int>& face);
+
 }  // namespace mjf
