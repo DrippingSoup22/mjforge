@@ -998,7 +998,8 @@ void Editor::drawShortcutsWindow() {
                     {"Ctrl+R  Right arrow", "reset, single step while paused"}});
     ImGui::SeparatorText("Files");
     table("##files", {{"Ctrl+O  Ctrl+S  Ctrl+Shift+S", "open (project or MJCF), save, save as"},
-                      {"Ctrl+I  Ctrl+E  Ctrl+Q", "import into scene, export MJCF, quit"}});
+                      {"Ctrl+I  Ctrl+E  Ctrl+Q", "import into scene, export MJCF, quit"},
+                      {"Ctrl+,", "preferences"}});
   }
   ImGui::End();
 }

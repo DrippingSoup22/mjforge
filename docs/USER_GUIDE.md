@@ -247,3 +247,4 @@ Windows, `~/Library/Application Support/mjforge` on macOS).
 | X, J, C, L | x-ray, joints, centers of mass, names |
 | Ctrl+O, Ctrl+S, Ctrl+Shift+S | open (project or MJCF), save, save as (*File > New* for templates) |
 | Ctrl+I, Ctrl+E, Ctrl+Q | import into scene, export MJCF, quit |
+| Ctrl+, | preferences |
