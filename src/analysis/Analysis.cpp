@@ -601,25 +601,11 @@ class Analyzer {
           add(Severity::Error, IssueArea::Model, "tendon-joints", fmt("Fixed tendon %s needs hinge or slide joints", n.c_str()),
               "A fixed tendon's length is a weighted sum of joint positions. Add joints in the inspector.", {t.id});
       } else {
-        // MuJoCo: the path starts and ends at sites, every wrapping geom and pulley sits between
-        // sites, and geoms must be spheres or cylinders.
-        bool ok = t.path.size() >= 2 && t.path.front().type == TendonPoint::Type::Site &&
-                  t.path.back().type == TendonPoint::Type::Site;
-        for (size_t i = 0; i < t.path.size() && ok; ++i) {
-          const TendonPoint& p = t.path[i];
-          if (p.type == TendonPoint::Type::Site) ok = doc_.site(p.obj) != nullptr;
-          else if (p.type == TendonPoint::Type::Geom) {
-            const Geom* g = doc_.geom(p.obj);
-            ok = g && (g->type == GeomType::Sphere || g->type == GeomType::Cylinder) && (!p.sidesite || doc_.site(p.sidesite)) &&
-                 i + 1 < t.path.size() && t.path[i + 1].type == TendonPoint::Type::Site;
-          } else {
-            ok = p.divisor > 0 && i + 1 < t.path.size() && t.path[i + 1].type == TendonPoint::Type::Site;
-          }
-        }
-        if (!ok)
+        std::string why = spatialPathError(doc_, t);  // MuJoCo's own path rules
+        if (!why.empty())
           add(Severity::Error, IssueArea::Model, "tendon-path", fmt("Spatial tendon %s has an invalid path", n.c_str()),
-              "The path must start and end at sites. Wrapping geoms (spheres or cylinders) and pulleys must be followed by a "
-              "site.", {t.id});
+              "MuJoCo refuses it: " + why + ". Paths run through sites; wrapping geoms (spheres or cylinders) sit between "
+              "two sites; a pulley starts a new branch of sites.", {t.id});
       }
       if (t.limited && t.range.x >= t.range.y)
         add(Severity::Error, IssueArea::Model, "tendon-range", fmt("Tendon %s: lower limit is not below the upper limit", n.c_str()), "",

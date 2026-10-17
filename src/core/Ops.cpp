@@ -292,6 +292,42 @@ Id addTendon(Document& doc, TendonType type, const std::string& name) {
   return t.id;
 }
 
+std::string spatialPathError(const Document& doc, const Tendon& t) {
+  using T = TendonPoint::Type;
+  const auto& path = t.path;
+  size_t n = path.size();
+  if (n < 2) return "the path needs at least two points";
+  if (t.width <= 0) return "the width must be positive";
+  for (size_t i = 0; i < n; ++i) {
+    const TendonPoint& p = path[i];
+    bool prevPulley = i == 0 || path[i - 1].type == T::Pulley;
+    bool nextPulley = i + 1 == n || path[i + 1].type == T::Pulley;
+    switch (p.type) {
+      case T::Pulley:
+        if (i > 0 && path[i - 1].type == T::Pulley) return "two pulleys follow each other";
+        if (i + 1 == n) return "the path ends with a pulley";
+        if (!(p.divisor > 0)) return "a pulley divisor must be positive";
+        break;
+      case T::Site:
+        if (!doc.site(p.obj)) return "a point refers to a missing site";
+        if (prevPulley && nextPulley) return "every site needs a neighbor that is not a pulley";
+        if (i + 1 < n && path[i + 1].type == T::Site && path[i + 1].obj == p.obj) return "a site is repeated";
+        break;
+      case T::Geom: {
+        const Geom* g = doc.geom(p.obj);
+        if (!g) return "a point refers to a missing geom";
+        if (g->type != GeomType::Sphere && g->type != GeomType::Cylinder) return "wrapping geoms must be spheres or cylinders";
+        if (i == 0 || i + 1 == n || path[i - 1].type != T::Site || path[i + 1].type != T::Site)
+          return "every wrapping geom must sit between two sites";
+        if (p.sidesite && !doc.site(p.sidesite)) return "a side site is missing";
+        if (t.armature > 0) return "tendon armature cannot be combined with geom wrapping";
+        break;
+      }
+    }
+  }
+  return "";
+}
+
 Id addTexture(Document& doc, const Texture& t_) {
   Texture t = t_;
   t.id = doc.newId();
@@ -347,6 +383,9 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
   for (const Site& s : doc.sites) if (bodyDeleted(s.body)) del.insert(s.id);
   for (const Camera& c : doc.cameras) if (bodyDeleted(c.body)) del.insert(c.id);
   for (const Light& l : doc.lights) if (bodyDeleted(l.body)) del.insert(l.id);
+  // Height field and mesh geoms cannot exist without their asset.
+  for (const Geom& g : doc.geoms)
+    if ((g.type == GeomType::Hfield && del.count(g.hfield)) || (g.type == GeomType::Mesh && del.count(g.mesh))) del.insert(g.id);
   // Tendons lose deleted joints / path points; one with nothing usable left goes too.
   for (Tendon& t : doc.tendons) {
     if (del.count(t.id)) continue;
@@ -355,10 +394,9 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
     t.path.erase(std::remove_if(t.path.begin(), t.path.end(), [&](const TendonPoint& p) { return p.obj && del.count(p.obj) > 0; }),
                  t.path.end());
     for (TendonPoint& p : t.path) if (del.count(p.sidesite)) p.sidesite = kNoId;
-    int sites = 0;
-    for (const TendonPoint& p : t.path) sites += p.type == TendonPoint::Type::Site;
-    if ((t.type == TendonType::Fixed && t.joints.empty()) || (t.type == TendonType::Spatial && sites < 2) ||
-        (t.type == TendonType::Spatial && !t.path.empty() && t.path.front().type != TendonPoint::Type::Site))
+    // A path MuJoCo would refuse (a wrapping geom that lost a bracketing site, a pulley branch with
+    // a single site...) goes with what it lost, rather than leaving a model that does not compile.
+    if ((t.type == TendonType::Fixed && t.joints.empty()) || (t.type == TendonType::Spatial && !spatialPathError(doc, t).empty()))
       del.insert(t.id);
   }
   // Dependents.
@@ -658,8 +696,16 @@ CopyResult copyElements(Document& doc, const std::vector<Id>& ids, const RenameF
     doc.equalities.push_back(x);
     doc.touch();
   }
-  for (Camera& c : doc.cameras) if (r.remap.count(c.id) && r.remap.count(c.target)) c.target = mapId(c.target);
-  for (Light& l : doc.lights) if (r.remap.count(l.id) && r.remap.count(l.target)) l.target = mapId(l.target);
+  // A copied camera or light that follows a copied body follows the copy (the original keeps its target).
+  for (const auto& [oldId, newId] : r.remap) {
+    if (Camera* nc = doc.camera(newId)) {
+      const Camera* oc = doc.camera(oldId);
+      if (oc && r.remap.count(oc->target)) nc->target = r.remap.at(oc->target);
+    } else if (Light* nl = doc.light(newId)) {
+      const Light* ol = doc.light(oldId);
+      if (ol && r.remap.count(ol->target)) nl->target = r.remap.at(ol->target);
+    }
+  }
   // Copies start in the same keyframe poses as the originals.
   for (Keyframe& k : doc.keyframes) {
     auto copyEntries = [&](auto& v) {
@@ -720,6 +766,19 @@ std::vector<Id> arrayDuplicate(Document& doc, Id element, int copies, const Pose
     current = step * current;
     setElementLocalPose(doc, r.tops[0], current);
     out.push_back(r.tops[0]);
+    // Keyframe poses of free joints are world poses: move them with the copy (else every copy
+    // starts inside the original).
+    if (k == Kind::Body) {
+      Pose delta = bodyWorldPose(doc, r.tops[0]) * inverse(bodyWorldPose(doc, element));
+      for (const Joint& j : doc.joints)
+        if (j.body == r.tops[0] && j.type == JointType::Free)
+          for (Keyframe& key : doc.keyframes)
+            for (auto& [jid, q] : key.qpos)
+              if (jid == j.id && q.size() == 7) {
+                Pose p = delta * Pose{{q[0], q[1], q[2]}, normalize(Quat{q[3], q[4], q[5], q[6]})};
+                q = {p.pos.x, p.pos.y, p.pos.z, p.quat.w, p.quat.x, p.quat.y, p.quat.z};
+              }
+    }
   }
   doc.touch();
   return out;
@@ -829,6 +888,41 @@ Aabb elementWorldBounds(const Document& doc, Id id) {
   return box;
 }
 
+namespace {
+// Moves each element by want[i] along an axis. An element inside a moved body already moves with
+// it: it only gets the difference (top-down), so a body and its own geom are not moved twice.
+void translateEach(Document& doc, const std::vector<Id>& ids, const std::vector<double>& want, int axis) {
+  std::unordered_map<Id, size_t> at;
+  for (size_t i = 0; i < ids.size(); ++i) at[ids[i]] = i;
+  auto movedAncestors = [&](Id id) {
+    std::vector<size_t> out;
+    Id b = doc.kindOf(id) == Kind::Body ? (doc.body(id) ? doc.body(id)->parent : kNoId) : doc.ownerBody(id);
+    for (int guard = 0; b != kNoId && b != kWorldId && guard < 100000; ++guard) {
+      auto it = at.find(b);
+      if (it != at.end()) out.push_back(it->second);
+      b = doc.body(b) ? doc.body(b)->parent : kNoId;
+    }
+    return out;
+  };
+  std::vector<std::vector<size_t>> anc(ids.size());
+  std::vector<size_t> order(ids.size());
+  for (size_t i = 0; i < ids.size(); ++i) {
+    anc[i] = movedAncestors(ids[i]);
+    order[i] = i;
+  }
+  std::sort(order.begin(), order.end(), [&](size_t x, size_t y) { return anc[x].size() < anc[y].size(); });
+  std::vector<double> applied(ids.size(), 0.0);
+  for (size_t i : order) {
+    double inherited = 0;
+    for (size_t a : anc[i]) inherited += applied[a];
+    applied[i] = want[i] - inherited;
+    Vec3 d;
+    d[axis] = applied[i];
+    if (std::fabs(d[axis]) > 1e-12) translateWorld(doc, ids[i], d);
+  }
+}
+}  // namespace
+
 void alignElements(Document& doc, const std::vector<Id>& ids, int axis, int side) {
   if (ids.size() < 2 || axis < 0 || axis > 2) return;
   std::vector<Aabb> boxes;
@@ -839,25 +933,22 @@ void alignElements(Document& doc, const std::vector<Id>& ids, int axis, int side
     else if (side > 0) target = std::max(target, b.hi[axis]);
     else target += b.center()[axis] / double(boxes.size());
   }
-  for (size_t i = 0; i < ids.size(); ++i) {
-    double cur = side < 0 ? boxes[i].lo[axis] : side > 0 ? boxes[i].hi[axis] : boxes[i].center()[axis];
-    Vec3 d;
-    d[axis] = target - cur;
-    if (std::fabs(d[axis]) > 1e-12) translateWorld(doc, ids[i], d);
-  }
+  std::vector<double> want(ids.size());
+  for (size_t i = 0; i < ids.size(); ++i)
+    want[i] = target - (side < 0 ? boxes[i].lo[axis] : side > 0 ? boxes[i].hi[axis] : boxes[i].center()[axis]);
+  translateEach(doc, ids, want, axis);
 }
 
 void distributeElements(Document& doc, const std::vector<Id>& ids, int axis) {
   if (ids.size() < 3 || axis < 0 || axis > 2) return;
-  std::vector<std::pair<double, Id>> order;
-  for (Id id : ids) order.push_back({elementWorldBounds(doc, id).center()[axis], id});
+  std::vector<std::pair<double, size_t>> order;
+  for (size_t i = 0; i < ids.size(); ++i) order.push_back({elementWorldBounds(doc, ids[i]).center()[axis], i});
   std::sort(order.begin(), order.end());
   double a = order.front().first, b = order.back().first;
-  for (size_t i = 1; i + 1 < order.size(); ++i) {
-    Vec3 d;
-    d[axis] = a + (b - a) * double(i) / double(order.size() - 1) - order[i].first;
-    if (std::fabs(d[axis]) > 1e-12) translateWorld(doc, order[i].second, d);
-  }
+  std::vector<double> want(ids.size(), 0.0);
+  for (size_t k = 1; k + 1 < order.size(); ++k)
+    want[order[k].second] = a + (b - a) * double(k) / double(order.size() - 1) - order[k].first;
+  translateEach(doc, ids, want, axis);
 }
 
 Keyframe& startKeyframe(Document& doc) {
@@ -944,6 +1035,9 @@ int mirrorKeyPose(const Document& doc, Keyframe& key, Id root, bool leftToRight)
       double v = t.ref + sign * (keyJointValue(&key, *j) - j->ref);
       if (t.limited && t.range.y > t.range.x) v = std::clamp(v, t.range.x, t.range.y);
       setKeyJointQpos(key, t.id, {v});
+    } else if (q && j->type == JointType::Ball && q->size() == 4) {
+      // Mirrored across the model's y: (w, -x, y, -z), exact for limbs made with mirrorSubtree.
+      setKeyJointQpos(key, t.id, {(*q)[0], -(*q)[1], (*q)[2], -(*q)[3]});
     } else if (q) {
       setKeyJointQpos(key, t.id, *q);
     } else {
@@ -1125,7 +1219,15 @@ Id mirrorSubtree(Document& doc, Id body, int axis) {
   }
   for (Geom& g : doc.geoms) if (newIds.count(g.id)) { g.pos = M(g.pos); g.quat = Mq(g.quat); }
   for (Site& s : doc.sites) if (newIds.count(s.id)) { s.pos = M(s.pos); s.quat = Mq(s.quat); }
-  for (Camera& c : doc.cameras) if (newIds.count(c.id)) { c.pos = M(c.pos); c.quat = Mq(c.quat); }
+  // Cameras: conjugating by the mirror would flip their up axis (an upside-down image). Flip their
+  // right axis instead: the extra half turn about the camera axis that is neither the mirror axis
+  // nor the right axis.
+  Quat camFix = axis == 1 ? Quat{0, 0, 0, 1} : axis == 2 ? Quat{0, 0, 1, 0} : Quat{};
+  for (Camera& c : doc.cameras)
+    if (newIds.count(c.id)) {
+      c.pos = M(c.pos);
+      c.quat = canonical(normalize(Mq(c.quat) * camFix));
+    }
   for (Light& l : doc.lights) if (newIds.count(l.id)) { l.pos = M(l.pos); l.dir = M(l.dir); }
   for (Joint& j : doc.joints) {
     if (!newIds.count(j.id)) continue;
@@ -1140,6 +1242,21 @@ Id mirrorSubtree(Document& doc, Id body, int axis) {
     e.relpos = M(e.relpos);
     e.relquat = Mq(e.relquat);
   }
+  // The copied start pose: hinge and slide values already give mirrored motion with the mirrored
+  // axes; ball rotations and free-joint poses are mirrored like the frames.
+  for (Keyframe& key : doc.keyframes)
+    for (auto& [jid, q] : key.qpos) {
+      const Joint* j = newIds.count(jid) ? doc.joint(jid) : nullptr;
+      if (!j) continue;
+      if (j->type == JointType::Ball && q.size() == 4) {
+        Quat m = Mq(normalize(Quat{q[0], q[1], q[2], q[3]}));
+        q = {m.w, m.x, m.y, m.z};
+      } else if (j->type == JointType::Free && q.size() == 7) {
+        Vec3 p = M(Vec3{q[0], q[1], q[2]});
+        Quat m = Mq(normalize(Quat{q[3], q[4], q[5], q[6]}));
+        q = {p.x, p.y, p.z, m.w, m.x, m.y, m.z};
+      }
+    }
   doc.touch();
   return r.tops.front();
 }

@@ -26,6 +26,9 @@ void pairParamsFromGeoms(const Document& doc, ContactPair& pair);
 // obj1/obj2: bodies or sites (connect, weld; obj2 may be kNoId for the world), joints, tendons.
 Id addEquality(Document& doc, EqualityType type, Id obj1, Id obj2);
 Id addTendon(Document& doc, TendonType type, const std::string& name = "tendon");
+// Why MuJoCo would refuse a spatial tendon's path ("" if it compiles): its rules on sites, wrapping
+// geoms (spheres / cylinders between two sites) and pulleys.
+std::string spatialPathError(const Document& doc, const Tendon& t);
 Id addTexture(Document& doc, const Texture& t);
 Id addMaterial(Document& doc, const Material& m);
 
