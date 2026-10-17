@@ -8,7 +8,7 @@ MJCF. While you edit, MuJoCo compiles the model in the background and an analysi
 
 | Panel | What it is for |
 |---|---|
-| **Outliner** (left) | The body tree. Drag a body onto another to re-parent it, right-click for actions, double-click to frame, F2 or the context menu to rename. The eye icon hides a subtree in the viewport. |
+| **Outliner** (left) | The body tree. Drag a body onto another to re-parent it, right-click for actions, double-click to frame, F2 or the context menu to rename. The eye icon hides a subtree in the viewport. Below the tree: actuators, sensors, tendons, equality constraints, contact pairs and exclusions. |
 | **Viewport** (center) | Your scene, drawn by MJForge's own renderer. Gizmos move, rotate and resize the selection. Quick toggles at the top left: joints, centers of mass, x-ray, sites, names, frames. |
 | **Inspector** (right) | Every property of the selection, grouped in sections. Orange labels are values that differ from MuJoCo's default; the arrow button resets them. Tooltips quote the MuJoCo documentation. With several elements of the same type selected, edits apply to all of them. |
 | **Scene** (right, tab) | Simulation options (timestep, integrator, solver, friction cone, gravity, flags), compiler settings, visual settings for MuJoCo's viewers, presets, and keyframes. |
@@ -18,8 +18,9 @@ MJCF. While you edit, MuJoCo compiles the model in the background and an analysi
 | **Simulation** | Controls and readouts while simulating (see below). |
 
 The toolbar holds the gizmo modes, snapping, the pick mode (bodies or geoms), buttons to add things,
-the add-limb tool, mirror, the simulation controls, and the validation status on the right (click it
-to open the Issues panel). The status bar shows counts, the model mass and compile time.
+the add-limb tool, pose mode, mirror, the simulation controls, and the validation status on the
+right (click it to open the Issues panel). The status bar shows counts, the model mass and compile
+time.
 
 ## Building a creature
 
