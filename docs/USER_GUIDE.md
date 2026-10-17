@@ -61,6 +61,25 @@ change): simulations, the analysis and exported models start from it, and positi
 matching control values so they hold it after `mj_resetDataKeyframe`. Esc or P leaves pose mode;
 bodies can only be moved outside it.
 
+**Constraints and tendons.** *Tools > Constraints & tendons* creates them from the selection:
+
+- *Connect* two bodies at a point (a ball joint that closes a kinematic loop, e.g. a four-bar knee
+  or a parallel leg); one body alone is pinned to the world. *Weld* holds two bodies at their
+  current relative pose; one body alone is fixed in the world, handy for hanging a creature while
+  testing its legs. *Couple* two joints so the first follows the second (polynomial in the
+  Inspector). The connect anchor and weld links are drawn in the viewport.
+- A *fixed tendon* combines joint positions (coefficient 1 each, editable): one motor on it drives
+  all of them, like a cable through a finger. A *spatial tendon* is a path through sites in the order
+  you selected them; in the Inspector add wrapping geoms (spheres, cylinders) and pulleys. Tendons
+  can have limits, springs, damping and friction, and the Inspector adds a motor or a length sensor
+  on them. While simulating, spatial tendons are drawn along MuJoCo's own path, wrapping included.
+- A *contact pair* between two geoms makes them collide with the pair's own friction and solver
+  parameters, whatever their contype/conaffinity say (start values combine the two geoms the way
+  MuJoCo does).
+
+Deleting a joint or site trims the tendons that use it; a tendon with nothing usable left is
+removed with its actuators. All of these are supported by MuJoCo Warp.
+
 **Collisions.** *Tools > Collisions* has presets for a selected model: everything collides, no
 self-collisions, or only the feet touch the world (the cheapest setup for locomotion training).
 *Tools > Exclude contacts between selected bodies* adds `<exclude>` pairs.
@@ -162,8 +181,8 @@ Clashing names are made unique. *File > Open* also opens MJCF files directly as 
 
 MJCF is read with MuJoCo's own parser and compiler, so defaults classes, `<include>`, Euler angles,
 `fromto`, degree units and meshes are resolved exactly. Not yet supported: SDF geoms are replaced by
-boxes of the same extent (the bodies keep MuJoCo's exact mass and inertia); tendons, equality
-constraints, explicit contact pairs and flex objects are reported and skipped.
+boxes of the same extent (the bodies keep MuJoCo's exact mass and inertia); flex objects, skins and
+plugins are reported and skipped.
 
 ## Exporting
 

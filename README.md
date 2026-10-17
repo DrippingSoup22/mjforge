@@ -20,6 +20,9 @@ ready-to-run MuJoCo Warp loader.
 - All actuator types: motor (torque), position servo (target angle), velocity, integrated velocity,
   damper, cylinder, muscle, adhesion and general, plus friction, armature, damping, mass and
   inertia per element.
+- **Tendons** (fixed joint combinations and spatial cables with wrapping and pulleys, with actuators
+  and sensors on them), **equality constraints** (connect for closed loops, weld, joint and tendon
+  couplings) and explicit **contact pairs**, all supported by MuJoCo Warp.
 - **Add-limb tool** (G): click a body to grow a jointed limb with actuators and a foot; it is
   mirrored to the other side automatically (`leg1_left_hip`, `leg1_right_hip`, ...).
 - Mirror, duplicate, linear and radial **arrays** (six hexapod legs from one).
@@ -59,7 +62,9 @@ ready-to-run MuJoCo Warp loader.
   (replace the environment, place models side by side, names kept unique).
 - MJCF import goes through MuJoCo's own parser and compiler, so defaults, includes, orientations
   and meshes behave exactly as in MuJoCo. Tested on MuJoCo Menagerie robots (Unitree Go2 and H1,
-  ANYmal C, Franka Panda): the re-exported files compile to the same masses, inertias and poses.
+  ANYmal C, Franka Panda, Agility Cassie, Robotiq 2F-85, Shadow and Allegro hands, ALOHA): the
+  re-exported files compile to the same masses, inertias, tendons and constraints, and simulate the
+  same trajectories.
 - Keyframes: the first one is the start pose of simulations and exported models; pose it in the
   viewport or capture one from the simulation.
 - Export one file, or a model file plus a scene file that includes it (the Menagerie layout), and
@@ -85,8 +90,9 @@ CMake. On Linux, GLFW needs the X11 development packages
 To use a MuJoCo release folder instead of the Python package, pass `-DMUJOCO_DIR=/path/to/mujoco`;
 `-DPython3_EXECUTABLE=...` selects a specific Python. Tests: `./build/bin/mjforge_tests`.
 
-Linux is built and tested in CI. The code uses only portable libraries, but Windows and macOS have
-not been tried yet.
+CI builds and runs the tests on Linux, Windows (MSVC) and macOS (Apple clang). On Windows, CMake
+downloads the MuJoCo release (the Python package has no import library); on macOS it uses the
+library inside the Python package.
 
 ## Using it
 
@@ -166,7 +172,7 @@ The design and milestones are in [PLAN.md](PLAN.md).
 ## Limitations
 
 - SDF geoms from imported files are approximated by boxes (bodies keep exact masses and inertias).
-- Tendons, equality constraints and explicit contact pairs are not edited yet (import reports them).
+- Flex objects, skins and plugins in imported files are reported and skipped.
 
 ## Third-party software
 

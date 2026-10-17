@@ -91,6 +91,8 @@ bool sensorTypeFrom(int t, SensorType* out) {
     case mjSENS_MAGNETOMETER: *out = SensorType::Magnetometer; return true;
     case mjSENS_RANGEFINDER: *out = SensorType::RangeFinder; return true;
     case mjSENS_JOINTPOS: *out = SensorType::JointPos; return true;
+    case mjSENS_TENDONPOS: *out = SensorType::TendonPos; return true;
+    case mjSENS_TENDONVEL: *out = SensorType::TendonVel; return true;
     case mjSENS_JOINTVEL: *out = SensorType::JointVel; return true;
     case mjSENS_ACTUATORPOS: *out = SensorType::ActuatorPos; return true;
     case mjSENS_ACTUATORVEL: *out = SensorType::ActuatorVel; return true;
@@ -146,9 +148,12 @@ class Builder {
     joints();
     geoms();
     sitesCamerasLights();
+    tendons();
     actuators();
     sensors();
     excludes();
+    pairs();
+    equalities();
     keyframes();
     roles();
     unsupported();
@@ -540,7 +545,11 @@ class Builder {
           if (id1 >= 0) x.slidersite = siteIds_[id1];
           x.cranklength = m_->actuator_cranklength[i];
           break;
-        default: ok = false; break;  // tendons are not supported yet
+        case mjTRN_TENDON:
+          x.trn = TrnType::Tendon;
+          x.target = id0 >= 0 && id0 < int(tendonIds_.size()) ? tendonIds_[id0] : kNoId;
+          break;
+        default: ok = false; break;
       }
       if (!ok || !x.target || !s) {
         ++skipped;
@@ -562,7 +571,7 @@ class Builder {
       auto servoDamping = [&](Actuator& a) {
         // A positive biasprm[2] is a damping ratio (MuJoCo converts it at compile time).
         if (b[2] > 0) a.dampratio = b[2];
-        else a.kv = -b[2];
+        else a.kv = 0.0 - b[2];  // 0 - x: no negative zero
       };
       switch (s->type) {
         case mjACTUATOR_MOTOR:
@@ -586,7 +595,7 @@ class Builder {
           break;
         case mjACTUATOR_DAMPER:
           x.type = ActuatorType::Damper;
-          x.kv = -g[2];
+          x.kv = 0.0 - g[2];
           break;
         case mjACTUATOR_CYLINDER:
           x.type = ActuatorType::Cylinder;
@@ -647,6 +656,7 @@ class Builder {
       case mjOBJ_JOINT: return id < int(jointIds_.size()) ? jointIds_[id] : kNoId;
       case mjOBJ_GEOM: return id < int(geomIds_.size()) ? geomIds_[id] : kNoId;
       case mjOBJ_SITE: return id < int(siteIds_.size()) ? siteIds_[id] : kNoId;
+      case mjOBJ_TENDON: return id < int(tendonIds_.size()) ? tendonIds_[id] : kNoId;
       case mjOBJ_CAMERA: return id < int(camIds_.size()) ? camIds_[id] : kNoId;
       case mjOBJ_ACTUATOR: return id < int(actIds_.size()) ? actIds_[id] : kNoId;
       default: return kNoId;
@@ -684,6 +694,149 @@ class Builder {
       doc_.sensors.push_back(x);
     }
     if (skipped) note(std::to_string(skipped) + " sensor(s) of unsupported types were not imported");
+  }
+
+  void tendons() {
+    std::vector<const mjsTendon*> specs(m_->ntendon, nullptr);
+    forEachSpec(spec_, mjOBJ_TENDON, [&](mjsElement* el, int id) {
+      if (id < m_->ntendon) specs[id] = mjs_asTendon(el);
+    });
+    tendonIds_.assign(m_->ntendon, kNoId);
+    int nonlinear = 0;
+    for (int i = 0; i < m_->ntendon; ++i) {
+      Tendon x;
+      x.id = doc_.newId();
+      x.name = objName(m_, mjOBJ_TENDON, i);
+      int adr = m_->tendon_adr[i], num = m_->tendon_num[i];
+      x.type = num > 0 && m_->wrap_type[adr] == mjWRAP_JOINT ? TendonType::Fixed : TendonType::Spatial;
+      for (int w = adr; w < adr + num; ++w) {
+        int o = m_->wrap_objid[w];
+        double prm = m_->wrap_prm[w];
+        TendonPoint p;
+        switch (m_->wrap_type[w]) {
+          case mjWRAP_JOINT: x.joints.push_back({o >= 0 ? jointIds_[o] : kNoId, prm}); break;
+          case mjWRAP_SITE:
+            p.obj = o >= 0 ? siteIds_[o] : kNoId;
+            x.path.push_back(p);
+            break;
+          case mjWRAP_SPHERE:
+          case mjWRAP_CYLINDER:
+            p.type = TendonPoint::Type::Geom;
+            p.obj = o >= 0 ? geomIds_[o] : kNoId;
+            if (prm >= 0 && int(prm) < m_->nsite) p.sidesite = siteIds_[int(prm)];
+            x.path.push_back(p);
+            break;
+          case mjWRAP_PULLEY:
+            p.type = TendonPoint::Type::Pulley;
+            p.divisor = prm;
+            x.path.push_back(p);
+            break;
+          default: break;
+        }
+      }
+      x.limited = m_->tendon_limited[i];
+      x.range = v2(m_->tendon_range + 2 * i);
+      x.actfrclimited = m_->tendon_actfrclimited[i];
+      x.actuatorfrcrange = v2(m_->tendon_actfrcrange + 2 * i);
+      x.stiffness = m_->tendon_stiffness[i];
+      x.damping = m_->tendon_damping[i];
+      for (int k = 0; k < mjNPOLY; ++k)
+        if (m_->tendon_stiffnesspoly[mjNPOLY * i + k] != 0 || m_->tendon_dampingpoly[mjNPOLY * i + k] != 0) ++nonlinear;
+      x.frictionloss = m_->tendon_frictionloss[i];
+      x.armature = m_->tendon_armature[i];
+      // The authored spring length (-1: measured at the reference pose), not the compiled one.
+      x.springlength = specs[i] ? Vec2{specs[i]->springlength[0], specs[i]->springlength[1]} : v2(m_->tendon_lengthspring + 2 * i);
+      x.margin = m_->tendon_margin[i];
+      x.solreflimit = v2(m_->tendon_solref_lim + mjNREF * i);
+      x.solimplimit = v5(m_->tendon_solimp_lim + mjNIMP * i);
+      x.solreffriction = v2(m_->tendon_solref_fri + mjNREF * i);
+      x.solimpfriction = v5(m_->tendon_solimp_fri + mjNIMP * i);
+      x.width = m_->tendon_width[i];
+      x.rgba = c4(m_->tendon_rgba + 4 * i);
+      int mat = m_->tendon_matid[i];
+      if (mat >= 0 && mat < m_->nmat) x.material = matIds_[mat];
+      x.group = m_->tendon_group[i];
+      tendonIds_[i] = x.id;
+      doc_.tendons.push_back(x);
+    }
+    if (nonlinear) note(std::to_string(nonlinear) + " nonlinear tendon stiffness/damping term(s) were dropped (linear terms kept)");
+  }
+
+  void pairs() {
+    for (int i = 0; i < m_->npair; ++i) {
+      int g1 = m_->pair_geom1[i], g2 = m_->pair_geom2[i];
+      if (g1 < 0 || g2 < 0 || g1 >= m_->ngeom || g2 >= m_->ngeom) continue;
+      ContactPair x;
+      x.id = doc_.newId();
+      x.name = objName(m_, mjOBJ_PAIR, i);
+      x.geom1 = geomIds_[g1];
+      x.geom2 = geomIds_[g2];
+      x.condim = m_->pair_dim[i];
+      for (int k = 0; k < 5; ++k) x.friction[k] = m_->pair_friction[5 * i + k];
+      x.solref = v2(m_->pair_solref + mjNREF * i);
+      x.solreffriction = v2(m_->pair_solreffriction + mjNREF * i);
+      x.solimp = v5(m_->pair_solimp + mjNIMP * i);
+      x.margin = m_->pair_margin[i];
+      x.gap = m_->pair_gap[i];
+      doc_.pairs.push_back(x);
+    }
+  }
+
+  void equalities() {
+    std::vector<const mjsEquality*> specs(m_->neq, nullptr);
+    forEachSpec(spec_, mjOBJ_EQUALITY, [&](mjsElement* el, int id) {
+      if (id < m_->neq) specs[id] = mjs_asEquality(el);
+    });
+    int skipped = 0;
+    for (int i = 0; i < m_->neq; ++i) {
+      const mjsEquality* s = specs[i];
+      int type = m_->eq_type[i];
+      if (!s || type > mjEQ_TENDON) {  // flex constraints are not supported
+        ++skipped;
+        continue;
+      }
+      Equality x;
+      x.id = doc_.newId();
+      x.name = objName(m_, mjOBJ_EQUALITY, i);
+      x.type = EqualityType(type);
+      int o1 = m_->eq_obj1id[i], o2 = m_->eq_obj2id[i];
+      int ot = m_->eq_objtype[i];
+      auto obj = [&](int id) -> Id {
+        if (id < 0) return kNoId;
+        switch (x.type) {
+          case EqualityType::Connect:
+          case EqualityType::Weld: return ot == mjOBJ_SITE ? objectId(mjOBJ_SITE, id) : (id == 0 ? kNoId : objectId(mjOBJ_BODY, id));
+          case EqualityType::Joint: return objectId(mjOBJ_JOINT, id);
+          case EqualityType::Tendon: return objectId(mjOBJ_TENDON, id);
+        }
+        return kNoId;
+      };
+      x.obj1 = obj(o1);
+      x.obj2 = obj(o2);
+      // Authored values (the compiled data holds derived ones, e.g. the weld pose from qpos0).
+      const double* d = s->data;
+      switch (x.type) {
+        case EqualityType::Connect: x.anchor = {d[0], d[1], d[2]}; break;
+        case EqualityType::Weld:
+          x.anchor = {d[0], d[1], d[2]};
+          x.relpose = d[6] != 0 || d[7] != 0 || d[8] != 0 || d[9] != 0;
+          x.relpos = {d[3], d[4], d[5]};
+          x.relquat = x.relpose ? normalize(Quat{d[6], d[7], d[8], d[9]}) : Quat{};
+          x.torquescale = d[10];
+          break;
+        case EqualityType::Joint:
+        case EqualityType::Tendon: x.polycoef = Vec5{{d[0], d[1], d[2], d[3], d[4]}}; break;
+      }
+      x.active = m_->eq_active0[i];
+      x.solref = v2(m_->eq_solref + mjNREF * i);
+      x.solimp = v5(m_->eq_solimp + mjNIMP * i);
+      if (!x.obj1) {
+        ++skipped;
+        continue;
+      }
+      doc_.equalities.push_back(x);
+    }
+    if (skipped) note(std::to_string(skipped) + " equality constraint(s) of unsupported types (flex) were not imported");
   }
 
   void excludes() {
@@ -743,9 +896,6 @@ class Builder {
     auto count = [&](int n, const char* what) {
       if (n > 0) note(std::to_string(n) + " " + what + " not imported (not supported by the editor yet)");
     };
-    count(m_->ntendon, "tendon(s)");
-    count(m_->neq, "equality constraint(s)");
-    count(m_->npair, "explicit contact pair(s)");
     count(m_->nflex, "flex object(s)");
     count(m_->nskin, "skin(s)");
     count(m_->nplugin, "plugin instance(s)");
@@ -756,7 +906,7 @@ class Builder {
   std::string baseDir_;
   Document& doc_;
   ImportReport& rep_;
-  std::vector<Id> texIds_, matIds_, hfIds_, bodyIds_, jointIds_, geomIds_, siteIds_, camIds_, actIds_;
+  std::vector<Id> texIds_, matIds_, hfIds_, bodyIds_, jointIds_, geomIds_, siteIds_, camIds_, actIds_, tendonIds_;
   std::unordered_map<int, Id> meshIds_;
 };
 

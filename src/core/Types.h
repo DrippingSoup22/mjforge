@@ -61,6 +61,16 @@ enum class BiasType : uint8_t { None = 0, Affine = 1, Muscle = 2 };
 inline constexpr EnumEntry<BiasType> kBiasTypes[] = {
     {BiasType::None, "none", "None"}, {BiasType::Affine, "affine", "Affine"}, {BiasType::Muscle, "muscle", "Muscle"}};
 
+// Equality constraint types (MJCF <equality> children).
+enum class EqualityType : uint8_t { Connect = 0, Weld = 1, Joint = 2, Tendon = 3 };
+inline constexpr EnumEntry<EqualityType> kEqualityTypes[] = {
+    {EqualityType::Connect, "connect", "Connect (ball joint)"}, {EqualityType::Weld, "weld", "Weld (fixed)"},
+    {EqualityType::Joint, "joint", "Joint coupling"}, {EqualityType::Tendon, "tendon", "Tendon coupling"}};
+
+enum class TendonType : uint8_t { Fixed = 0, Spatial = 1 };
+inline constexpr EnumEntry<TendonType> kTendonTypes[] = {
+    {TendonType::Fixed, "fixed", "Fixed (joint combination)"}, {TendonType::Spatial, "spatial", "Spatial (path)"}};
+
 // What kind of object a sensor is attached to.
 enum class SensorObj : uint8_t { None, Joint, Actuator, Site, Body, Tendon, Frame };
 

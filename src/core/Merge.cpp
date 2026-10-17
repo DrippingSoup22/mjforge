@@ -254,6 +254,23 @@ class Merger {
       if (!m) *ok = false;
       return m;
     };
+    // Tendons first: actuators, sensors and equality constraints can refer to them.
+    for (const Tendon& st : src_.tendons) {
+      bool ok = true;
+      Tendon t = st;
+      for (TendonJoint& j : t.joints) j.joint = mapOpt(j.joint, &ok);
+      for (TendonPoint& p : t.path) {
+        p.obj = mapOpt(p.obj, &ok);
+        p.sidesite = mapOpt(p.sidesite, &ok);
+      }
+      if (!ok || (t.joints.empty() && t.path.empty())) continue;
+      t.id = dst_.newId();
+      t.name = name(Kind::Tendon, t.name);
+      t.material = material(st.material);
+      remap_[st.id] = t.id;
+      dst_.tendons.push_back(t);
+      ++res_.elements;
+    }
     for (const Actuator& sa : src_.actuators) {
       bool ok = true;
       Actuator a = sa;
@@ -288,6 +305,28 @@ class Merger {
       e.body1 = b1;
       e.body2 = b2;
       dst_.excludes.push_back(e);
+      ++res_.elements;
+    }
+    for (const ContactPair& sc : src_.pairs) {
+      bool ok = true;
+      ContactPair c = sc;
+      c.geom1 = mapOpt(sc.geom1, &ok);
+      c.geom2 = mapOpt(sc.geom2, &ok);
+      if (!ok || !c.geom1 || !c.geom2) continue;
+      c.id = dst_.newId();
+      c.name = name(Kind::Pair, c.name);
+      dst_.pairs.push_back(c);
+      ++res_.elements;
+    }
+    for (const Equality& se : src_.equalities) {
+      bool ok = true;
+      Equality e = se;
+      e.obj1 = mapOpt(se.obj1, &ok);
+      e.obj2 = mapOpt(se.obj2, &ok);
+      if (!ok || !e.obj1) continue;
+      e.id = dst_.newId();
+      e.name = name(Kind::Equality, e.name);
+      dst_.equalities.push_back(e);
       ++res_.elements;
     }
     dst_.touch();

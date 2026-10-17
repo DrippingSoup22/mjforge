@@ -40,7 +40,7 @@ struct ExportFile {
 
 // Maps compiled MuJoCo indices to document IDs. Only exact for single-file exports.
 struct ExportMap {
-  std::vector<Id> bodies, geoms, joints, sites, cameras, lights, actuators, sensors;
+  std::vector<Id> bodies, geoms, joints, sites, cameras, lights, actuators, sensors, tendons;
 };
 
 std::string writeMjcf(const Document& doc, const ExportOptions& opt = {}, ExportMap* map = nullptr,

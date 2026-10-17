@@ -19,6 +19,13 @@ Id addLight(Document& doc, Id body, const Vec3& pos, const Vec3& dir, const std:
 Id addActuator(Document& doc, ActuatorType type, Id joint, const std::string& name = "");
 Id addSensor(Document& doc, SensorType type, Id obj, const std::string& name = "");
 Id addExclude(Document& doc, Id body1, Id body2);
+// Explicit contact pair; its parameters start as MuJoCo would combine the two geoms' own.
+Id addContactPair(Document& doc, Id geom1, Id geom2);
+// Sets a pair's contact parameters the way MuJoCo combines its two geoms' parameters.
+void pairParamsFromGeoms(const Document& doc, ContactPair& pair);
+// obj1/obj2: bodies or sites (connect, weld; obj2 may be kNoId for the world), joints, tendons.
+Id addEquality(Document& doc, EqualityType type, Id obj1, Id obj2);
+Id addTendon(Document& doc, TendonType type, const std::string& name = "tendon");
 Id addTexture(Document& doc, const Texture& t);
 Id addMaterial(Document& doc, const Material& m);
 
@@ -30,8 +37,10 @@ void geomEndpoints(const Geom& g, Vec3* a, Vec3* b);
 void setGeomFromTo(Geom& g, const Vec3& a, const Vec3& b);
 
 // ----- deletion -----
-// Deletes the given elements. Bodies take their subtree with them; actuators, sensors and
-// exclusions referencing deleted elements are removed too. The world cannot be deleted.
+// Deletes the given elements. Bodies take their subtree with them; actuators, sensors, exclusions,
+// contact pairs and equality constraints referencing deleted elements are removed too, and
+// tendons lose the deleted joints / path points (or go away when nothing usable remains). The
+// world cannot be deleted.
 void deleteElements(Document& doc, const std::vector<Id>& ids);
 
 // ----- hierarchy -----

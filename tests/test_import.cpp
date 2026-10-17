@@ -14,6 +14,7 @@
 #include "core/Templates.h"
 #include "sim/MjcfImport.h"
 #include "sim/MujocoBridge.h"
+#include "sim/Simulator.h"
 
 using namespace mjf;
 
@@ -170,7 +171,7 @@ TEST_CASE("import: MuJoCo features are resolved (defaults, degrees, fromto, mesh
   CHECK(doc.modelName == "probe");
   CHECK(doc.option.timestep == 0.004);
   CHECK(rep.approximatedGeoms == 0);
-  CHECK(rep.notes.size() == 3);  // tendon, actuator, sensor
+  CHECK(rep.notes.empty());
   REQUIRE(doc.meshes.size() == 1);
   CHECK(doc.meshes[0].name == "tetra");
   CHECK(doc.meshes[0].vertexCount() == 4);
@@ -194,7 +195,12 @@ TEST_CASE("import: MuJoCo features are resolved (defaults, degrees, fromto, mesh
       CHECK(g.density == 400);
       CHECK(g.size.y == doctest::Approx(0.15));  // half-length from fromto
     }
-  REQUIRE(doc.actuators.size() == 5);  // the tendon actuator is skipped
+  REQUIRE(doc.actuators.size() == 6);
+  REQUIRE(doc.tendons.size() == 1);
+  CHECK(doc.tendons[0].type == TendonType::Fixed);
+  CHECK(doc.tendons[0].joints.size() == 1);
+  CHECK(doc.actuators[5].trn == TrnType::Tendon);
+  CHECK(doc.actuators[5].target == doc.tendons[0].id);
   CHECK(doc.actuators[0].type == ActuatorType::Position);
   CHECK(doc.actuators[0].kp == 60);
   CHECK(doc.actuators[0].dampratio == doctest::Approx(0.8));
@@ -214,17 +220,20 @@ TEST_CASE("import: MuJoCo features are resolved (defaults, degrees, fromto, mesh
   CHECK(doc.actuators[3].type == ActuatorType::Motor);
   CHECK(doc.actuators[3].gear[0] == 25);
   CHECK(doc.actuators[4].type == ActuatorType::General);
-  CHECK(doc.sensors.size() == 3);  // tendonpos skipped
+  CHECK(doc.sensors.size() == 4);
 
-  // Same physics (except the skipped tendon pieces and the approximated mesh's shape).
+  // Same physics.
   ModelPtr a = compileXml(xml);
   ModelPtr b = compileDoc(doc);
   CHECK(a->nbody == b->nbody);
   checkClose(a->body_mass, b->body_mass, a->nbody, 1e-9, "body_mass");
   checkClose(a->body_pos, b->body_pos, 3 * a->nbody, 1e-12, "body_pos");
   checkClose(a->body_quat, b->body_quat, 4 * a->nbody, 1e-12, "body_quat");
-  checkClose(a->actuator_gainprm, b->actuator_gainprm, mjNGAIN * 5, 1e-8, "gainprm");
-  checkClose(a->actuator_biasprm, b->actuator_biasprm, mjNBIAS * 5, 1e-8, "biasprm");
+  CHECK(a->ntendon == b->ntendon);
+  CHECK(a->nu == b->nu);
+  CHECK(a->nsensor == b->nsensor);
+  checkClose(a->actuator_gainprm, b->actuator_gainprm, mjNGAIN * a->nu, 1e-8, "gainprm");
+  checkClose(a->actuator_biasprm, b->actuator_biasprm, mjNBIAS * a->nu, 1e-8, "biasprm");
   REQUIRE(a->nhfielddata == b->nhfielddata);
   for (int i = 0; i < a->nhfielddata; ++i) CHECK(a->hfield_data[i] == doctest::Approx(b->hfield_data[i]));
 }
@@ -613,4 +622,150 @@ TEST_CASE("meshes: loading STL and OBJ files") {
   CHECK_FALSE(loadMeshFile(doc, (dir / "missing.stl").string(), 1.0, nullptr, &err));
   CHECK(err.find("not found") != std::string::npos);
   fs::remove_all(dir);
+}
+
+TEST_CASE("tendons, equality constraints and contact pairs: export, import, edit, simulate") {
+  Document doc;
+  REQUIRE(makeTemplate("quadruped", doc));
+  auto byName = [&](const auto& vec, const char* n) -> Id {
+    for (const auto& e : vec) if (e.name == n) return e.id;
+    FAIL("missing " << n);
+    return kNoId;
+  };
+  Id flKnee = byName(doc.joints, "FL_knee"), frKnee = byName(doc.joints, "FR_knee");
+  Id flHip = byName(doc.joints, "FL_hip_pitch"), frHip = byName(doc.joints, "FR_hip_pitch");
+  Id torso = byName(doc.bodies, "quadruped"), flCalf = byName(doc.bodies, "FL_calf"), frCalf = byName(doc.bodies, "FR_calf");
+  Id floor = byName(doc.geoms, "floor");
+  Id flFoot = kNoId;
+  for (const Geom& g : doc.geoms) if (g.body == flCalf && g.type == GeomType::Sphere) flFoot = g.id;
+  REQUIRE(flFoot);
+
+  // A fixed tendon driving both front knees with one motor, a spatial cable from the torso to a calf.
+  Id fixed = addTendon(doc, TendonType::Fixed, "front_knees");
+  doc.tendon(fixed)->joints = {{flKnee, 1.0}, {frKnee, 1.0}};
+  doc.tendon(fixed)->limited = true;
+  doc.tendon(fixed)->range = {-2, 1};
+  Id motor = addActuator(doc, ActuatorType::Motor, kNoId, "knees_motor");
+  doc.actuator(motor)->trn = TrnType::Tendon;
+  doc.actuator(motor)->target = fixed;
+  doc.actuator(motor)->gear[0] = 5;
+  Id s1 = addSite(doc, torso, {{0.15, 0.1, 0.05}, {}}, "cable_top");
+  Id s2 = addSite(doc, flCalf, {{0, 0, -0.1}, {}}, "cable_bottom");
+  Id spatial = addTendon(doc, TendonType::Spatial, "cable");
+  doc.tendon(spatial)->path = {{TendonPoint::Type::Site, s1}, {TendonPoint::Type::Site, s2}};
+  doc.tendon(spatial)->stiffness = 50;
+  doc.tendon(spatial)->width = 0.004;
+  addSensor(doc, SensorType::TendonPos, spatial);
+  // The two calves share a point; the hips are coupled; the left foot touches the floor through a pair.
+  Id conn = addEquality(doc, EqualityType::Connect, flCalf, frCalf);
+  Id coupling = addEquality(doc, EqualityType::Joint, frHip, flHip);
+  Id weld = addEquality(doc, EqualityType::Weld, torso, kNoId);
+  doc.equality(weld)->active = false;
+  Id pair = addContactPair(doc, flFoot, floor);
+  CHECK(doc.pair(pair)->friction[0] == doctest::Approx(std::max(doc.geom(flFoot)->friction.x, doc.geom(floor)->friction.x)));
+  AnalysisReport ar = analyzeModel(doc, nullptr, false);
+  for (const Issue& i : ar.issues) CHECK_MESSAGE(i.severity != Severity::Error, i.title);
+
+  ExportMap map;
+  std::string xml = writeMjcf(doc, {}, &map);
+  CompileResult cr = compileMjcf(xml);
+  INFO(cr.error);
+  REQUIRE(cr.ok);
+  const mjModel* m = cr.model.get();
+  CHECK(m->ntendon == 2);
+  CHECK(m->neq == 3);
+  CHECK(m->npair == 1);
+  CHECK(map.tendons.size() == 2);
+  CHECK(m->wrap_type[m->tendon_adr[0]] == mjWRAP_JOINT);
+  CHECK(m->tendon_num[0] == 2);
+  CHECK(m->tendon_limited[0] == 1);
+  CHECK(m->tendon_stiffness[1] == 50);
+  int u = -1;
+  for (int i = 0; i < m->nu; ++i) if (map.actuators[i] == motor) u = i;
+  REQUIRE(u >= 0);
+  CHECK(m->actuator_trntype[u] == mjTRN_TENDON);
+  CHECK(m->eq_type[0] == mjEQ_CONNECT);
+  CHECK(m->eq_type[1] == mjEQ_JOINT);
+  CHECK(m->eq_type[2] == mjEQ_WELD);
+  CHECK(m->eq_active0[2] == 0);
+  CHECK(m->eq_obj2id[2] == 0);  // welded to the world
+  // The connect anchor sits at the right calf's origin, as seen from the left calf.
+  Pose fl = bodyWorldPose(doc, flCalf), fr = bodyWorldPose(doc, frCalf);
+  Vec3 anchor = inverse(fl).apply(fr.pos);
+  for (int k = 0; k < 3; ++k) CHECK(m->eq_data[k] == doctest::Approx(anchor[k]));
+
+  // MJCF round trip through the importer.
+  Document back;
+  std::string err;
+  ImportReport rep;
+  REQUIRE(importMjcfString(xml, back, &err, &rep));
+  CHECK(rep.notes.empty());
+  CHECK(back.tendons.size() == 2);
+  CHECK(back.equalities.size() == 3);
+  CHECK(back.pairs.size() == 1);
+  CompileResult cr2 = compileMjcf(writeMjcf(back));
+  REQUIRE(cr2.ok);
+  const mjModel* m2 = cr2.model.get();
+  REQUIRE(m2->nwrap == m->nwrap);
+  for (int i = 0; i < m->nwrap; ++i) {
+    CHECK(m2->wrap_type[i] == m->wrap_type[i]);
+    CHECK(m2->wrap_objid[i] == m->wrap_objid[i]);
+    CHECK(m2->wrap_prm[i] == doctest::Approx(m->wrap_prm[i]));
+  }
+  checkClose(m->eq_data, m2->eq_data, mjNEQDATA * m->neq, 1e-8, "eq_data");
+  checkClose(m->pair_friction, m2->pair_friction, 5 * m->npair, 1e-12, "pair_friction");
+  checkClose(m->pair_solref, m2->pair_solref, mjNREF * m->npair, 1e-12, "pair_solref");
+  checkClose(m->tendon_lengthspring, m2->tendon_lengthspring, 2 * m->ntendon, 1e-8, "tendon_lengthspring");
+  CHECK(m2->actuator_trntype[u] == mjTRN_TENDON);
+
+  // Project round trip.
+  Document loaded;
+  REQUIRE(projectFromJson(loaded, projectToJson(doc, ""), &err, nullptr));
+  CHECK(writeMjcf(loaded) == writeMjcf(doc));
+
+  // Duplicating the creature copies its tendons and constraints; the floor pair follows the copy's foot.
+  std::vector<Id> copies = duplicate(doc, {torso}, {1, 0, 0});
+  REQUIRE(copies.size() == 1);
+  CHECK(doc.tendons.size() == 4);
+  CHECK(doc.equalities.size() == 6);
+  CHECK(doc.pairs.size() == 2);
+  CompileResult cr3 = compileMjcf(writeMjcf(doc));
+  INFO(cr3.error);
+  REQUIRE(cr3.ok);
+  CHECK(cr3.model->ntendon == 4);
+
+  // Merging into an empty scene carries everything along.
+  Document scene;
+  REQUIRE(makeTemplate("empty", scene));
+  MergeOptions mo;
+  mo.environment = false;
+  mergeDocument(scene, loaded, mo);
+  CHECK(scene.tendons.size() == 2);
+  CHECK(scene.equalities.size() == 3);
+  CHECK(scene.pairs.size() == 0);  // the floor was not imported, so the pair has no partner
+  CompileResult cr4 = compileMjcf(writeMjcf(scene));
+  INFO(cr4.error);
+  REQUIRE(cr4.ok);
+
+  // Deleting joints and sites trims the tendons; with nothing left they go, with their actuator.
+  deleteElements(loaded, {loaded.joint(flKnee)->id});
+  REQUIRE(loaded.tendon(fixed));
+  CHECK(loaded.tendon(fixed)->joints.size() == 1);
+  deleteElements(loaded, {frKnee});
+  CHECK(loaded.tendon(fixed) == nullptr);
+  CHECK(loaded.actuator(motor) == nullptr);
+  deleteElements(loaded, {s2});
+  CHECK(loaded.tendon(spatial) == nullptr);
+  CHECK(loaded.equality(coupling) != nullptr);
+  deleteElements(loaded, {flHip});
+  CHECK(loaded.equality(coupling) == nullptr);
+  CHECK(compileMjcf(writeMjcf(loaded)).ok);
+
+  // The simulation holds the creature with the tendon motor among the actuators.
+  Simulator sim;
+  cr.map = map;
+  REQUIRE(sim.start(cr.model, cr.map));
+  for (int i = 0; i < 500 && !sim.diverged(); ++i) sim.stepOnce();
+  CHECK_FALSE(sim.diverged());
+  CHECK(sim.drive(u).kind == ActuatorDrive::Motor);
 }

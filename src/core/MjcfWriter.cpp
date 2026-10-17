@@ -95,6 +95,8 @@ class Writer {
     writeAssets(root);
     writeWorldbody(root);
     writeContact(root);
+    writeEquality(root);
+    writeTendons(root);
     writeActuators(root);
     writeSensors(root);
     writeKeyframes(root);
@@ -191,9 +193,26 @@ class Writer {
         case Kind::Geom: return attachedIncluded(doc_.geom(id)->body);
         case Kind::Site: return attachedIncluded(doc_.site(id)->body);
         case Kind::Camera: return attachedIncluded(doc_.camera(id)->body);
+        case Kind::Tendon: return tendons_.count(id) > 0;
         default: return false;
       }
     };
+    // Tendons whose joints / path elements are all exported (before the actuators using them).
+    for (const Tendon& t : doc_.tendons) {
+      bool ok = t.type == TendonType::Fixed ? !t.joints.empty() : t.path.size() >= 2;
+      for (const TendonJoint& j : t.joints) ok &= j.joint != kNoId && elementIncluded(j.joint);
+      for (const TendonPoint& p : t.path) {
+        if (p.type != TendonPoint::Type::Pulley) ok &= p.obj != kNoId && elementIncluded(p.obj);
+        if (p.sidesite) ok &= elementIncluded(p.sidesite);
+      }
+      if (ok) tendons_.insert(t.id);
+    }
+    for (const Equality& e : doc_.equalities) {
+      bool ok = e.obj1 != kNoId && elementIncluded(e.obj1) && (e.obj2 == kNoId || elementIncluded(e.obj2));
+      if (ok) equalities_.insert(e.id);
+    }
+    for (const ContactPair& c : doc_.pairs)
+      if (c.geom1 && c.geom2 && elementIncluded(c.geom1) && elementIncluded(c.geom2)) pairs_.insert(c.id);
     for (const Actuator& a : doc_.actuators) {
       bool ok = a.target != kNoId && elementIncluded(a.target);
       if (ok && a.refsite != kNoId) ok = elementIncluded(a.refsite);
@@ -218,6 +237,8 @@ class Writer {
     }
     for (const Site& s : doc_.sites)
       if (attachedIncluded(s.body) && s.material != kNoId) materials_.insert(s.material);
+    for (const Tendon& t : doc_.tendons)
+      if (tendons_.count(t.id) && t.material != kNoId) materials_.insert(t.material);
     for (Id m : materials_) {
       const Material* mat = doc_.material(m);
       if (mat && mat->texture != kNoId) textures_.insert(mat->texture);
@@ -242,6 +263,21 @@ class Writer {
       referenced.insert(e.body1);
       referenced.insert(e.body2);
     }
+    for (const ContactPair& c : doc_.pairs) {
+      referenced.insert(c.geom1);
+      referenced.insert(c.geom2);
+    }
+    for (const Equality& e : doc_.equalities) {
+      referenced.insert(e.obj1);
+      referenced.insert(e.obj2);
+    }
+    for (const Tendon& t : doc_.tendons) {
+      for (const TendonJoint& j : t.joints) referenced.insert(j.joint);
+      for (const TendonPoint& p : t.path) {
+        referenced.insert(p.obj);
+        referenced.insert(p.sidesite);
+      }
+    }
     for (const Camera& c : doc_.cameras) referenced.insert(c.target);
     for (const Light& l : doc_.lights) referenced.insert(l.target);
 
@@ -261,6 +297,9 @@ class Writer {
     assign(doc_.actuators, Kind::Actuator, false);
     assign(doc_.sensors, Kind::Sensor, false);
     assign(doc_.excludes, Kind::Exclude, false);
+    assign(doc_.pairs, Kind::Pair, false);
+    assign(doc_.equalities, Kind::Equality, false);
+    assign(doc_.tendons, Kind::Tendon, false);
     assign(doc_.materials, Kind::Material, true);
     assign(doc_.textures, Kind::Texture, true);
     assign(doc_.hfields, Kind::Hfield, true);
@@ -634,6 +673,102 @@ class Writer {
       x.set("body1", nameOf(e.body1));
       x.set("body2", nameOf(e.body2));
     }
+    // Explicit pairs: MuJoCo infers omitted values from the geoms, so everything is written.
+    for (const ContactPair& c : doc_.pairs) {
+      if (!pairs_.count(c.id)) continue;
+      XmlNode& x = n.add("pair");
+      setName(x, c.id);
+      x.set("geom1", nameOf(c.geom1));
+      x.set("geom2", nameOf(c.geom2));
+      x.set("condim", std::to_string(c.condim));
+      x.set("friction", vec(c.friction));
+      x.set("solref", vec(c.solref));
+      if (!nearly(c.solreffriction, Vec2{})) x.set("solreffriction", vec(c.solreffriction));
+      x.set("solimp", vec(c.solimp));
+      x.set("margin", num(c.margin));
+      x.set("gap", num(c.gap));
+    }
+    if (!n.children.empty()) root.children.push_back(n);
+  }
+
+  void writeEquality(XmlNode& root) {
+    XmlNode n("equality");
+    for (const Equality& e : doc_.equalities) {
+      if (!equalities_.count(e.id)) continue;
+      XmlNode& x = n.add(enumXml(kEqualityTypes, e.type));
+      setName(x, e.id);
+      bool sites = doc_.kindOf(e.obj1) == Kind::Site;
+      switch (e.type) {
+        case EqualityType::Connect:
+        case EqualityType::Weld:
+          x.set(sites ? "site1" : "body1", nameOf(e.obj1));
+          if (e.obj2 != kNoId) x.set(sites ? "site2" : "body2", nameOf(e.obj2));
+          if (!sites && (e.type == EqualityType::Connect || !nearly(e.anchor, Vec3{}))) x.set("anchor", vec(e.anchor));
+          if (!sites && e.type == EqualityType::Weld && e.relpose) x.set("relpose", vec(e.relpos) + " " + quat(e.relquat));
+          if (e.type == EqualityType::Weld && !nearly(e.torquescale, 1.0)) x.set("torquescale", num(e.torquescale));
+          break;
+        case EqualityType::Joint:
+        case EqualityType::Tendon: {
+          bool joint = e.type == EqualityType::Joint;
+          x.set(joint ? "joint1" : "tendon1", nameOf(e.obj1));
+          if (e.obj2 != kNoId) x.set(joint ? "joint2" : "tendon2", nameOf(e.obj2));
+          if (!nearly(e.polycoef, Vec5{{0, 1, 0, 0, 0}})) x.set("polycoef", vec(e.polycoef));
+          break;
+        }
+      }
+      if (!e.active) x.set("active", "false");
+      if (!nearly(e.solref, kDefaultSolref)) x.set("solref", vec(e.solref));
+      if (!nearly(e.solimp, kDefaultSolimp)) x.set("solimp", vec(e.solimp));
+    }
+    if (!n.children.empty()) root.children.push_back(n);
+  }
+
+  void writeTendons(XmlNode& root) {
+    XmlNode n("tendon");
+    const Tendon d;
+    for (const Tendon& t : doc_.tendons) {
+      if (!tendons_.count(t.id)) continue;
+      if (map_) map_->tendons.push_back(t.id);
+      bool spatial = t.type == TendonType::Spatial;
+      XmlNode& x = n.add(spatial ? "spatial" : "fixed");
+      setName(x, t.id);
+      writeLimited(x, "limited", "range", t.limited, t.range);
+      writeLimited(x, "actuatorfrclimited", "actuatorfrcrange", t.actfrclimited, t.actuatorfrcrange);
+      if (!nearly(t.stiffness, 0.0)) x.set("stiffness", num(t.stiffness));
+      if (!nearly(t.damping, 0.0)) x.set("damping", num(t.damping));
+      if (!nearly(t.frictionloss, 0.0)) x.set("frictionloss", num(t.frictionloss));
+      if (!nearly(t.armature, 0.0)) x.set("armature", num(t.armature));
+      if (!nearly(t.springlength, d.springlength)) x.set("springlength", vec(t.springlength));
+      if (!nearly(t.margin, 0.0)) x.set("margin", num(t.margin));
+      if (!nearly(t.solreflimit, kDefaultSolref)) x.set("solreflimit", vec(t.solreflimit));
+      if (!nearly(t.solimplimit, kDefaultSolimp)) x.set("solimplimit", vec(t.solimplimit));
+      if (!nearly(t.solreffriction, kDefaultSolref)) x.set("solreffriction", vec(t.solreffriction));
+      if (!nearly(t.solimpfriction, kDefaultSolimp)) x.set("solimpfriction", vec(t.solimpfriction));
+      if (spatial && !nearly(t.width, d.width)) x.set("width", num(t.width));
+      if (t.rgba != d.rgba) x.set("rgba", color(t.rgba));
+      if (t.material != kNoId && materials_.count(t.material)) x.set("material", nameOf(t.material));
+      if (t.group != 0) x.set("group", std::to_string(t.group));
+      if (!spatial) {
+        for (const TendonJoint& j : t.joints) {
+          XmlNode& c = x.add("joint");
+          c.set("joint", nameOf(j.joint));
+          c.set("coef", num(j.coef));
+        }
+      } else {
+        for (const TendonPoint& p : t.path) {
+          switch (p.type) {
+            case TendonPoint::Type::Site: x.add("site").set("site", nameOf(p.obj)); break;
+            case TendonPoint::Type::Geom: {
+              XmlNode& c = x.add("geom");
+              c.set("geom", nameOf(p.obj));
+              if (p.sidesite) c.set("sidesite", nameOf(p.sidesite));
+              break;
+            }
+            case TendonPoint::Type::Pulley: x.add("pulley").set("divisor", num(p.divisor)); break;
+          }
+        }
+      }
+    }
     if (!n.children.empty()) root.children.push_back(n);
   }
 
@@ -834,15 +969,16 @@ class Writer {
     return file;
   }
 
-  std::vector<ExportFile>* files_ = nullptr;
-  std::unordered_set<std::string> assetFiles_;
   std::vector<const Joint*> writtenJoints_;
   std::vector<Id> writtenActuators_;
   const Document& doc_;
   const ExportOptions& opt_;
   ExportMap* map_;
+  std::vector<ExportFile>* files_ = nullptr;
+  std::unordered_set<std::string> assetFiles_;
   std::unordered_map<Id, std::string> names_;
-  std::unordered_set<Id> bodies_, actuators_, sensors_, materials_, textures_, hfields_, meshes_;
+  std::unordered_set<Id> bodies_, actuators_, sensors_, materials_, textures_, hfields_, meshes_, tendons_, equalities_,
+      pairs_;
 };
 
 }  // namespace

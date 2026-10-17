@@ -86,6 +86,9 @@ void Editor::applyCli(const CliOptions& cli) {
     if (!id) id = findName(doc_.sensors);
     if (!id) id = findName(doc_.lights);
     if (!id) id = findName(doc_.cameras);
+    if (!id) id = findName(doc_.tendons);
+    if (!id) id = findName(doc_.equalities);
+    if (!id) id = findName(doc_.pairs);
     if (id) sel_.add(id);
   }
   for (const std::string& a : cli.actions) {
@@ -1031,6 +1034,10 @@ void Editor::drawToolsMenu() {
     for (size_t i = 0; i < bodies.size(); ++i)
       for (size_t k = i + 1; k < bodies.size(); ++k, ++n) addExclude(doc_, bodies[i], bodies[k]);
     notify("Added " + std::to_string(n) + " contact exclusion(s)", pal::kOk, 2);
+  }
+  if (ImGui::BeginMenu("Constraints & tendons")) {
+    drawConstraintMenu();
+    ImGui::EndMenu();
   }
   if (ImGui::MenuItem("Place models on the floor", nullptr, false, !roots.empty())) {
     checkpoint("Place on floor");

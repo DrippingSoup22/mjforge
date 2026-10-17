@@ -185,6 +185,9 @@ class Editor {
   void inspectMaterial(Material& m);
   void inspectTexture(Texture& t);
   void inspectExclude(Exclude& e);
+  void inspectPair(ContactPair& c);
+  void inspectEquality(Equality& e);
+  void inspectTendon(Tendon& t);
   void inspectWorld();
   template <class T, class F> void applyToSelected(F&& f);
 
@@ -218,6 +221,8 @@ class Editor {
   void buildLimbPreview();
   void drawLimbToolPanel();
   void drawArrayModal();
+  void drawConstraintMenu();
+  void buildConstraintOverlays();
 
   // outliner internals
   void outlinerBody(uint32_t bodyIndex, const std::string& filter);

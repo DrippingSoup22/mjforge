@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "core/Geometry.h"
 #include "core/Kinematics.h"
@@ -286,7 +287,7 @@ class Analyzer {
         case TrnType::JointInParent: ok = doc_.joint(a.target) != nullptr; break;
         case TrnType::Site: ok = doc_.site(a.target) != nullptr; break;
         case TrnType::Body: ok = doc_.body(a.target) != nullptr && a.target != kWorldId; break;
-        case TrnType::Tendon: ok = false; break;
+        case TrnType::Tendon: ok = doc_.tendon(a.target) != nullptr; break;
         case TrnType::SliderCrank: ok = doc_.site(a.target) && doc_.site(a.slidersite); break;
       }
       if (!ok) {
@@ -365,7 +366,7 @@ class Analyzer {
         case SensorObj::Site: ok = doc_.site(s.obj) != nullptr; break;
         case SensorObj::Body: ok = doc_.body(s.obj) != nullptr; break;
         case SensorObj::Frame: ok = doc_.exists(s.obj); break;
-        case SensorObj::Tendon: ok = false; break;
+        case SensorObj::Tendon: ok = doc_.tendon(s.obj) != nullptr; break;
         case SensorObj::None: break;
       }
       if (!ok) add(Severity::Error, IssueArea::Model, "sensor-target", fmt("Sensor %s has no valid target", quote(s.name).c_str()),
@@ -374,6 +375,7 @@ class Analyzer {
     for (const Exclude& e : doc_.excludes)
       if (!doc_.body(e.body1) || !doc_.body(e.body2))
         add(Severity::Error, IssueArea::Model, "exclude-target", "Contact exclusion refers to a missing body", "", {e.id});
+    checkPairsEqualitiesTendons();
 
     for (const Joint& j : doc_.joints) {
       const Body* b = doc_.body(j.body);
@@ -426,6 +428,123 @@ class Analyzer {
         };
       }
     }
+  }
+
+  void checkPairsEqualitiesTendons() {
+    for (const ContactPair& c : doc_.pairs) {
+      std::string n = quote(doc_.displayName(c.id));
+      if (!doc_.geom(c.geom1) || !doc_.geom(c.geom2))
+        add(Severity::Error, IssueArea::Model, "pair-target", fmt("Contact pair %s needs two geoms", n.c_str()),
+            "Pick both geoms in the inspector.", {c.id});
+      else if (c.geom1 == c.geom2)
+        add(Severity::Error, IssueArea::Model, "pair-same", fmt("Contact pair %s uses the same geom twice", n.c_str()), "", {c.id});
+      if (c.condim != 1 && c.condim != 3 && c.condim != 4 && c.condim != 6)
+        add(Severity::Error, IssueArea::Model, "pair-condim", fmt("Contact pair %s: contact dimension must be 1, 3, 4 or 6", n.c_str()), "", {c.id});
+    }
+    for (const Equality& e : doc_.equalities) {
+      std::string n = quote(doc_.displayName(e.id));
+      Kind k1 = doc_.kindOf(e.obj1), k2 = doc_.kindOf(e.obj2);
+      bool ok = true;
+      std::string why;
+      switch (e.type) {
+        case EqualityType::Connect:
+        case EqualityType::Weld:
+          if (k1 == Kind::Site) {
+            ok = k2 == Kind::Site;
+            why = "Site constraints need two sites.";
+          } else {
+            ok = k1 == Kind::Body && e.obj1 != kWorldId && (e.obj2 == kNoId || k2 == Kind::Body) && e.obj1 != e.obj2;
+            why = "Pick two different bodies (the second may be left empty for the world), or two sites.";
+          }
+          break;
+        case EqualityType::Joint: {
+          auto scalar = [&](Id j) {
+            const Joint* x = doc_.joint(j);
+            return x && (x->type == JointType::Hinge || x->type == JointType::Slide);
+          };
+          ok = scalar(e.obj1) && (e.obj2 == kNoId || scalar(e.obj2)) && e.obj1 != e.obj2;
+          why = "Joint couplings take hinge or slide joints (the second may be left empty to hold the first in place).";
+          break;
+        }
+        case EqualityType::Tendon:
+          ok = doc_.tendon(e.obj1) && (e.obj2 == kNoId || doc_.tendon(e.obj2)) && e.obj1 != e.obj2;
+          why = "Pick one or two tendons.";
+          break;
+      }
+      if (!ok) add(Severity::Error, IssueArea::Model, "equality-target", fmt("Equality constraint %s is incomplete", n.c_str()), why, {e.id});
+    }
+    for (const Tendon& t : doc_.tendons) {
+      std::string n = quote(doc_.displayName(t.id));
+      if (t.type == TendonType::Fixed) {
+        bool ok = !t.joints.empty();
+        for (const TendonJoint& tj : t.joints) {
+          const Joint* j = doc_.joint(tj.joint);
+          ok &= j && (j->type == JointType::Hinge || j->type == JointType::Slide);
+        }
+        if (!ok)
+          add(Severity::Error, IssueArea::Model, "tendon-joints", fmt("Fixed tendon %s needs hinge or slide joints", n.c_str()),
+              "A fixed tendon's length is a weighted sum of joint positions. Add joints in the inspector.", {t.id});
+      } else {
+        // MuJoCo: the path starts and ends at sites, every wrapping geom and pulley sits between
+        // sites, and geoms must be spheres or cylinders.
+        bool ok = t.path.size() >= 2 && t.path.front().type == TendonPoint::Type::Site &&
+                  t.path.back().type == TendonPoint::Type::Site;
+        for (size_t i = 0; i < t.path.size() && ok; ++i) {
+          const TendonPoint& p = t.path[i];
+          if (p.type == TendonPoint::Type::Site) ok = doc_.site(p.obj) != nullptr;
+          else if (p.type == TendonPoint::Type::Geom) {
+            const Geom* g = doc_.geom(p.obj);
+            ok = g && (g->type == GeomType::Sphere || g->type == GeomType::Cylinder) && (!p.sidesite || doc_.site(p.sidesite)) &&
+                 i + 1 < t.path.size() && t.path[i + 1].type == TendonPoint::Type::Site;
+          } else {
+            ok = p.divisor > 0 && i + 1 < t.path.size() && t.path[i + 1].type == TendonPoint::Type::Site;
+          }
+        }
+        if (!ok)
+          add(Severity::Error, IssueArea::Model, "tendon-path", fmt("Spatial tendon %s has an invalid path", n.c_str()),
+              "The path must start and end at sites. Wrapping geoms (spheres or cylinders) and pulleys must be followed by a "
+              "site.", {t.id});
+      }
+      if (t.limited && t.range.x >= t.range.y)
+        add(Severity::Error, IssueArea::Model, "tendon-range", fmt("Tendon %s: lower limit is not below the upper limit", n.c_str()), "",
+            {t.id});
+    }
+  }
+
+  // Joints moved or held by tendons and equality constraints (not "passive" even without actuator).
+  std::unordered_set<Id> tendonOrEqualityJoints() const {
+    std::unordered_set<Id> out;
+    auto chainJoints = [&](Id a, Id b) {
+      // Joints of the bodies between a and b in the tree (up to their common ancestor).
+      std::unordered_set<Id> up;
+      for (Id x = a; x != kNoId; x = doc_.body(x) ? doc_.body(x)->parent : kNoId) up.insert(x);
+      Id common = b;
+      while (common != kNoId && !up.count(common)) common = doc_.body(common) ? doc_.body(common)->parent : kNoId;
+      for (Id s : {a, b})
+        for (Id x = s; x != kNoId && x != common; x = doc_.body(x) ? doc_.body(x)->parent : kNoId)
+          for (uint32_t ji : doc_.index().bodyJoints[doc_.bodyIndex(x)]) out.insert(doc_.joints[ji].id);
+    };
+    for (const Tendon& t : doc_.tendons) {
+      for (const TendonJoint& tj : t.joints) out.insert(tj.joint);
+      Id prev = kNoId;
+      for (const TendonPoint& p : t.path) {
+        if (p.type != TendonPoint::Type::Site || !doc_.site(p.obj)) continue;
+        Id b = doc_.site(p.obj)->body;
+        if (prev != kNoId) chainJoints(prev, b);
+        prev = b;
+      }
+    }
+    for (const Equality& e : doc_.equalities) {
+      if (e.type == EqualityType::Joint) {
+        out.insert(e.obj1);
+        out.insert(e.obj2);
+      } else if (e.type == EqualityType::Connect || e.type == EqualityType::Weld) {
+        Id b1 = doc_.kindOf(e.obj1) == Kind::Site ? doc_.site(e.obj1)->body : e.obj1;
+        Id b2 = e.obj2 == kNoId ? kWorldId : (doc_.kindOf(e.obj2) == Kind::Site ? doc_.site(e.obj2)->body : e.obj2);
+        if (doc_.body(b1) && doc_.body(b2)) chainJoints(b1, b2);
+      }
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- mass
@@ -700,6 +819,7 @@ class Analyzer {
 
   void checkJointFindings() {
     const double dt = doc_.option.timestep;
+    const std::unordered_set<Id> constrainedJoints = tendonOrEqualityJoints();
     bool explicitDamping = doc_.option.integrator == Integrator::Euler || doc_.option.integrator == Integrator::RK4;
     for (JointReport& r : rep_.joints) {
       const Joint* j = doc_.joint(r.joint);
@@ -810,7 +930,8 @@ class Analyzer {
         i.fixLabel = "Use implicitfast";
         i.fix = [](Document& d) { d.option.integrator = Integrator::ImplicitFast; };
       }
-      if (!r.actuated && j->damping == 0 && j->stiffness == 0 && j->frictionloss == 0 && r.movedMass > 0) {
+      if (!r.actuated && j->damping == 0 && j->stiffness == 0 && j->frictionloss == 0 && r.movedMass > 0 &&
+          !constrainedJoints.count(r.joint)) {
         add(Severity::Info, IssueArea::Physics, "passive-joint", fmt("Joint %s is passive and undamped", jn.c_str()),
             "It has no actuator, damping or friction, so it will swing freely. Add an actuator, or some damping if "
             "it's meant to be passive.",

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <type_traits>
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -21,18 +22,22 @@ namespace mjf {
 
 namespace {
 
-template <class T> T* elemPtr(Document& d, Id id);
-template <> inline Body* elemPtr<Body>(Document& d, Id id) { return d.body(id); }
-template <> inline Geom* elemPtr<Geom>(Document& d, Id id) { return d.geom(id); }
-template <> inline Joint* elemPtr<Joint>(Document& d, Id id) { return d.joint(id); }
-template <> inline Site* elemPtr<Site>(Document& d, Id id) { return d.site(id); }
-template <> inline Camera* elemPtr<Camera>(Document& d, Id id) { return d.camera(id); }
-template <> inline Light* elemPtr<Light>(Document& d, Id id) { return d.light(id); }
-template <> inline Actuator* elemPtr<Actuator>(Document& d, Id id) { return d.actuator(id); }
-template <> inline Sensor* elemPtr<Sensor>(Document& d, Id id) { return d.sensor(id); }
-template <> inline Material* elemPtr<Material>(Document& d, Id id) { return d.material(id); }
-template <> inline Texture* elemPtr<Texture>(Document& d, Id id) { return d.texture(id); }
-template <> inline Exclude* elemPtr<Exclude>(Document& d, Id id) { return d.exclude(id); }
+template <class T> T* elemPtr(Document& d, Id id) {
+  if constexpr (std::is_same_v<T, Body>) return d.body(id);
+  else if constexpr (std::is_same_v<T, Geom>) return d.geom(id);
+  else if constexpr (std::is_same_v<T, Joint>) return d.joint(id);
+  else if constexpr (std::is_same_v<T, Site>) return d.site(id);
+  else if constexpr (std::is_same_v<T, Camera>) return d.camera(id);
+  else if constexpr (std::is_same_v<T, Light>) return d.light(id);
+  else if constexpr (std::is_same_v<T, Actuator>) return d.actuator(id);
+  else if constexpr (std::is_same_v<T, Sensor>) return d.sensor(id);
+  else if constexpr (std::is_same_v<T, Material>) return d.material(id);
+  else if constexpr (std::is_same_v<T, Texture>) return d.texture(id);
+  else if constexpr (std::is_same_v<T, Exclude>) return d.exclude(id);
+  else if constexpr (std::is_same_v<T, ContactPair>) return d.pair(id);
+  else if constexpr (std::is_same_v<T, Equality>) return d.equality(id);
+  else return d.tendon(id);
+}
 
 const char* D(const char* key) { return mjcfDoc(key); }
 
@@ -635,6 +640,7 @@ void Editor::inspectActuator(Actuator& a) {
     }
     const EnumEntry<TrnType> trns[] = {{TrnType::Joint, "joint", "Joint"},
                                        {TrnType::JointInParent, "jointinparent", "Joint (in parent frame)"},
+                                       {TrnType::Tendon, "tendon", "Tendon"},
                                        {TrnType::Site, "site", "Site (Cartesian)"},
                                        {TrnType::Body, "body", "Body (adhesion)"}};
     TrnType tr = a.trn;
@@ -650,6 +656,7 @@ void Editor::inspectActuator(Actuator& a) {
         props::element("Reference site", &a.refsite, listOfAny(doc_.sites), true, D("general.refsite"));
         break;
       case TrnType::Body: props::element("Body", &a.target, listOfAny(doc_.bodies), false, D("general.body")); break;
+      case TrnType::Tendon: props::element("Tendon", &a.target, listOfAny(doc_.tendons), false, D("general.tendon")); break;
       default: break;
     }
     if (a.trn == TrnType::Site) {
@@ -786,6 +793,7 @@ void Editor::inspectSensor(Sensor& s) {
       case SensorObj::Actuator: props::element("Actuator", &s.obj, listOfAny(doc_.actuators), false); break;
       case SensorObj::Site: props::element("Site", &s.obj, listOfAny(doc_.sites), false); break;
       case SensorObj::Body: props::element("Body", &s.obj, listOfAny(doc_.bodies), false); break;
+      case SensorObj::Tendon: props::element("Tendon", &s.obj, listOfAny(doc_.tendons), false); break;
       case SensorObj::Frame: {
         props::combo("Object type", &s.objtype, kFrameObjs, FrameObj::Site);
         std::vector<std::pair<Id, std::string>> items;
@@ -862,6 +870,345 @@ void Editor::inspectExclude(Exclude& e) {
   ImGui::TextWrapped("Geoms of these two bodies never collide with each other.");
 }
 
+// Elements listed by their display names (many geoms and sites are unnamed).
+template <class T> std::vector<std::pair<Id, std::string>> listDisplay(const Document& doc, const std::vector<T>& v) {
+  std::vector<std::pair<Id, std::string>> out;
+  for (const auto& e : v) out.push_back({e.id, doc.displayName(e.id)});
+  return out;
+}
+
+void Editor::inspectPair(ContactPair& c) {
+  nameHeader(*this, c.id, Icon::Exclude, pal::kGeom, "Contact pair", c.name);
+  ImGui::PushTextWrapPos(0);
+  ImGui::TextColored(pal::v4(pal::kTextDim),
+                     "These two geoms always collide, with exactly the parameters below: contype/conaffinity and the geoms' "
+                     "own contact settings are ignored for this pair. Pairs are a cheap way to let specific geoms (feet) touch "
+                     "specific others (the floor) while all other collisions are off.");
+  ImGui::PopTextWrapPos();
+  if (!props::begin("##pair")) return;
+  if (props::section("Geoms")) {
+    props::element("Geom 1", &c.geom1, listDisplay(doc_, doc_.geoms), false, D("pair.geom1"));
+    props::element("Geom 2", &c.geom2, listDisplay(doc_, doc_.geoms), false, D("pair.geom2"));
+  }
+  if (props::section("Contact")) {
+    int idx = c.condim == 1 ? 0 : c.condim == 4 ? 2 : c.condim == 6 ? 3 : 1;
+    if (props::comboIndex("Contact dims", &idx, {"1  frictionless", "3  sliding friction", "4  + torsional", "6  + rolling"}, 1,
+                          D("pair.condim")))
+      c.condim = idx == 0 ? 1 : idx == 1 ? 3 : idx == 2 ? 4 : 6;
+    props::vec5("Friction", &c.friction, Vec5{{1, 1, 0.005, 0.0001, 0.0001}},
+                O("Sliding friction in two tangent directions, torsional friction, rolling friction in two directions.",
+                  nullptr, 0.005, 0, 100));
+    props::real("Margin", &c.margin, 0, O(D("pair.margin"), "m", 0.001, 0, 10));
+    props::real("Gap", &c.gap, 0, O(D("pair.gap"), "m", 0.001, 0, 10));
+  }
+  if (props::section("Solver (advanced)", false)) {
+    props::vec2("Solref", &c.solref, kDefaultSolref, O(D("pair.solref"), nullptr, 0.001));
+    props::vec2("Solref friction", &c.solreffriction, Vec2{0, 0}, O(D("pair.solreffriction"), nullptr, 0.001));
+    props::vec5("Solimp", &c.solimp, kDefaultSolimp, O(D("pair.solimp"), nullptr, 0.001));
+  }
+  props::end();
+  if (ImGui::Button("Take values from the geoms")) {
+    checkpoint("Pair from geoms");
+    pairParamsFromGeoms(doc_, c);
+  }
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Combine the two geoms' friction and solver settings the way MuJoCo would");
+}
+
+void Editor::inspectEquality(Equality& e) {
+  nameHeader(*this, e.id, Icon::Ball, pal::kJoint, "Equality", e.name);
+  const char* what = "";
+  switch (e.type) {
+    case EqualityType::Connect:
+      what = "Connects two bodies at a point, like a ball joint: they can rotate but the point stays shared. Use it to "
+             "close kinematic loops (four-bar linkages, parallel legs). Leave body 2 empty to pin body 1 to the world.";
+      break;
+    case EqualityType::Weld:
+      what = "Holds two bodies at a fixed relative pose (by default the pose in the editor). Leave body 2 empty to fix "
+             "body 1 in the world, e.g. to hang a creature while testing its legs.";
+      break;
+    case EqualityType::Joint:
+      what = "Couples two joints: q1 = c0 + c1*q2 + c2*q2^2 + c3*q2^3 + c4*q2^4 (relative to their reference positions). "
+             "Without a second joint, joint 1 is held at c0.";
+      break;
+    case EqualityType::Tendon:
+      what = "Couples two tendon lengths with the same polynomial as joint couplings.";
+      break;
+  }
+  ImGui::PushTextWrapPos(0);
+  ImGui::TextColored(pal::v4(pal::kTextDim), "%s", what);
+  ImGui::PopTextWrapPos();
+  if (!props::begin("##eq")) return;
+  if (props::section("Constraint")) {
+    EqualityType t = e.type;
+    if (props::combo("Type", &t, kEqualityTypes, EqualityType::Connect, "The MJCF equality element.")) {
+      bool bodiesBefore = e.type == EqualityType::Connect || e.type == EqualityType::Weld;
+      bool bodiesAfter = t == EqualityType::Connect || t == EqualityType::Weld;
+      if (bodiesBefore != bodiesAfter || t == EqualityType::Joint || t == EqualityType::Tendon) e.obj1 = e.obj2 = kNoId;
+      e.type = t;
+    }
+    switch (e.type) {
+      case EqualityType::Connect:
+      case EqualityType::Weld: {
+        const char* key = e.type == EqualityType::Connect ? "connect." : "weld.";
+        bool sites = doc_.kindOf(e.obj1) == Kind::Site || (e.obj1 == kNoId && doc_.kindOf(e.obj2) == Kind::Site);
+        bool s = sites;
+        if (props::checkbox("Between sites", &s, false, "Constrain two sites instead of two bodies (MuJoCo site1 / site2).")) {
+          e.obj1 = e.obj2 = kNoId;
+          sites = s;
+        }
+        std::string k1 = std::string(key) + (sites ? "site1" : "body1"), k2 = std::string(key) + (sites ? "site2" : "body2");
+        if (sites) {
+          props::element("Site 1", &e.obj1, listDisplay(doc_, doc_.sites), false, D(k1.c_str()));
+          props::element("Site 2", &e.obj2, listDisplay(doc_, doc_.sites), false, D(k2.c_str()));
+        } else {
+          std::vector<std::pair<Id, std::string>> bodies;
+          for (const Body& b : doc_.bodies) if (b.id != kWorldId) bodies.push_back({b.id, doc_.displayName(b.id)});
+          props::element("Body 1", &e.obj1, bodies, false, D(k1.c_str()));
+          props::element("Body 2", &e.obj2, bodies, true, "Leave empty (none) for the world.");
+          std::string ka = std::string(key) + "anchor";
+          props::vec3(e.type == EqualityType::Connect ? "Anchor (body 1)" : "Anchor (body 2)", &e.anchor, {},
+                      O(D(ka.c_str()), "m", 0.002));
+          if (e.type == EqualityType::Weld) {
+            props::checkbox("Explicit relative pose", &e.relpose, false,
+                            "Off: body 2 keeps the pose relative to body 1 that it has in the editor (MuJoCo computes it "
+                            "from the reference configuration). On: give the pose of body 2 in body 1's frame.");
+            if (e.relpose) {
+              props::vec3("Relative position", &e.relpos, {}, O(D("weld.relpose"), "m", 0.002));
+              props::orientation("Relative orientation", &e.relquat, D("weld.relpose"));
+            }
+          }
+        }
+        if (e.type == EqualityType::Weld)
+          props::real("Torque scale", &e.torquescale, 1.0, O(D("weld.torquescale"), nullptr, 0.01, 0, 1e6));
+        break;
+      }
+      case EqualityType::Joint: {
+        std::vector<std::pair<Id, std::string>> joints;
+        for (const Joint& j : doc_.joints)
+          if (j.type == JointType::Hinge || j.type == JointType::Slide) joints.push_back({j.id, doc_.displayName(j.id)});
+        props::element("Joint 1", &e.obj1, joints, false, D("eqjoint.joint1"));
+        props::element("Joint 2", &e.obj2, joints, true, D("eqjoint.joint2"));
+        props::vec5("Polynomial", &e.polycoef, Vec5{{0, 1, 0, 0, 0}}, O(D("eqjoint.polycoef"), nullptr, 0.01));
+        break;
+      }
+      case EqualityType::Tendon:
+        props::element("Tendon 1", &e.obj1, listDisplay(doc_, doc_.tendons), false, D("eqtendon.tendon1"));
+        props::element("Tendon 2", &e.obj2, listDisplay(doc_, doc_.tendons), true, D("eqtendon.tendon2"));
+        props::vec5("Polynomial", &e.polycoef, Vec5{{0, 1, 0, 0, 0}}, O(D("eqtendon.polycoef"), nullptr, 0.01));
+        break;
+    }
+    props::checkbox("Active", &e.active, true, D("connect.active"));
+  }
+  if (props::section("Solver (advanced)", false)) {
+    props::vec2("Solref", &e.solref, kDefaultSolref, O(D("connect.solref"), nullptr, 0.001));
+    props::vec5("Solimp", &e.solimp, kDefaultSolimp, O(D("connect.solimp"), nullptr, 0.001));
+  }
+  props::end();
+  if (e.type == EqualityType::Connect && doc_.body(e.obj1) && ImGui::Button("Anchor at body 2's origin")) {
+    checkpoint("Connect anchor");
+    Pose p1 = bodyWorldPose(doc_, e.obj1);
+    Vec3 at = doc_.body(e.obj2) ? bodyWorldPose(doc_, e.obj2).pos : p1.pos;
+    e.anchor = inverse(p1).apply(at);
+  }
+}
+
+void Editor::inspectTendon(Tendon& t) {
+  nameHeader(*this, t.id, Icon::Slide, pal::kActuator, "Tendon", t.name);
+  ImGui::PushTextWrapPos(0);
+  ImGui::TextColored(pal::v4(pal::kTextDim), "%s",
+                     t.type == TendonType::Fixed
+                         ? "A fixed tendon's length is a weighted sum of joint positions. An actuator on it drives all those "
+                           "joints at once (one motor for a whole finger or a coupled leg); limits, springs and friction act "
+                           "on the combination."
+                         : "A spatial tendon is the length of a path through sites (wrapping around spheres or cylinders). "
+                           "Actuators on it pull like a cable or muscle; it can only pull if the actuator force is limited "
+                           "to negative values.");
+  ImGui::PopTextWrapPos();
+  if (!props::begin("##tendon")) return;
+  const float s = scale_;
+  // A row with a combo for an element, a number and a remove button.
+  auto idCombo = [&](const char* id, Id* v, const std::vector<std::pair<Id, std::string>>& items, float w,
+                     const char* empty = "(choose)") {
+    std::string cur = empty;
+    for (const auto& [i, n] : items) if (i == *v) cur = n;
+    ImGui::SetNextItemWidth(w);
+    bool changed = false;
+    // "Add" pickers (nothing chosen yet) look like buttons.
+    ImGuiComboFlags flags = ImGuiComboFlags_HeightLarge | (*v == kNoId && empty[0] == '+' ? ImGuiComboFlags_NoArrowButton : 0);
+    if (ImGui::BeginCombo(id, cur.c_str(), flags)) {
+      for (const auto& [i, n] : items) {
+        ImGui::PushID(int(i));
+        if (ImGui::Selectable(n.c_str(), i == *v) && i != *v) {
+          props::notifyChange();
+          *v = i;
+          changed = true;
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    return changed;
+  };
+  if (props::section("Tendon")) {
+    TendonType tt = t.type;
+    if (props::combo("Type", &tt, kTendonTypes, TendonType::Fixed, "Fixed: joint combination. Spatial: path through sites."))
+      t.type = tt;
+    float btn = ImGui::GetFrameHeight();
+    if (t.type == TendonType::Fixed) {
+      std::vector<std::pair<Id, std::string>> joints;
+      for (const Joint& j : doc_.joints)
+        if (j.type == JointType::Hinge || j.type == JointType::Slide) joints.push_back({j.id, doc_.displayName(j.id)});
+      int remove = -1;
+      for (size_t i = 0; i < t.joints.size(); ++i) {
+        ImGui::PushID(int(i));
+        bool reset = false;
+        std::string label = "Joint " + std::to_string(i + 1);
+        props::beginRow(label.c_str(), false, D("fixedjoint.coef"), &reset);
+        float w = ImGui::GetContentRegionAvail().x;
+        idCombo("##j", &t.joints[i].joint, joints, w * 0.6f);
+        ImGui::SameLine();
+        double c = t.joints[i].coef;
+        ImGui::SetNextItemWidth(std::max(30.0f, w * 0.4f - btn - 2 * ImGui::GetStyle().ItemSpacing.x));
+        if (ImGui::DragScalar("##c", ImGuiDataType_Double, &c, 0.01f, nullptr, nullptr, "x %.3g")) {
+          props::notifyChange();
+          t.joints[i].coef = c;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("x", ImVec2(btn, 0))) remove = int(i);
+        props::endRow();
+        ImGui::PopID();
+      }
+      if (remove >= 0) {
+        props::notifyChange();
+        t.joints.erase(t.joints.begin() + remove);
+      }
+      bool reset = false;
+      props::beginRow("Add joint", false, "Adds a joint with coefficient 1.", &reset);
+      Id add = kNoId;
+      if (idCombo("##addj", &add, joints, ImGui::GetContentRegionAvail().x, "+ Joint")) t.joints.push_back({add, 1.0});
+      props::endRow();
+    } else {
+      int remove = -1, up = -1;
+      for (size_t i = 0; i < t.path.size(); ++i) {
+        ImGui::PushID(int(i));
+        TendonPoint& p = t.path[i];
+        bool reset = false;
+        const char* kind = p.type == TendonPoint::Type::Site ? "Site" : p.type == TendonPoint::Type::Geom ? "Wrap geom" : "Pulley";
+        std::string label = std::to_string(i + 1) + ". " + kind;
+        props::beginRow(label.c_str(), false,
+                        p.type == TendonPoint::Type::Geom ? D("spatialgeom.geom")
+                        : p.type == TendonPoint::Type::Pulley ? D("pulley.divisor")
+                                                              : "The tendon passes through this site.",
+                        &reset);
+        float w = ImGui::GetContentRegionAvail().x - 2 * (btn + ImGui::GetStyle().ItemSpacing.x);
+        if (p.type == TendonPoint::Type::Site) {
+          idCombo("##o", &p.obj, listDisplay(doc_, doc_.sites), w);
+        } else if (p.type == TendonPoint::Type::Geom) {
+          std::vector<std::pair<Id, std::string>> wraps;
+          for (const Geom& g : doc_.geoms)
+            if (g.type == GeomType::Sphere || g.type == GeomType::Cylinder) wraps.push_back({g.id, doc_.displayName(g.id)});
+          idCombo("##o", &p.obj, wraps, w, "(sphere or cylinder)");
+        } else {
+          double dv = p.divisor;
+          ImGui::SetNextItemWidth(w);
+          if (ImGui::DragScalar("##div", ImGuiDataType_Double, &dv, 0.05f, nullptr, nullptr, "divisor %.3g") && dv > 0) {
+            props::notifyChange();
+            p.divisor = dv;
+          }
+        }
+        ImGui::SameLine();
+        if (ImGui::ArrowButton("##up", ImGuiDir_Up) && i > 0) up = int(i);
+        ImGui::SameLine();
+        if (ImGui::Button("x", ImVec2(btn, 0))) remove = int(i);
+        props::endRow();
+        if (p.type == TendonPoint::Type::Geom) {
+          // The side site gets its own row: which way around the geom the tendon goes.
+          props::beginRow("    side site", false, D("spatialgeom.sidesite"), &reset);
+          std::vector<std::pair<Id, std::string>> sides{{kNoId, "(shortest way)"}};
+          for (const auto& x : listDisplay(doc_, doc_.sites)) sides.push_back(x);
+          idCombo("##side", &p.sidesite, sides, w);
+          props::endRow();
+        }
+        ImGui::PopID();
+      }
+      if (up > 0) {
+        props::notifyChange();
+        std::swap(t.path[size_t(up)], t.path[size_t(up - 1)]);
+      }
+      if (remove >= 0) {
+        props::notifyChange();
+        t.path.erase(t.path.begin() + remove);
+      }
+      bool reset = false;
+      props::beginRow("Add to path", false, "Sites the tendon passes through, geoms it wraps around, pulleys that split it.",
+                      &reset);
+      float third = (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x) / 3;
+      Id add = kNoId;
+      if (idCombo("##adds", &add, listDisplay(doc_, doc_.sites), third, "+ Site")) t.path.push_back({TendonPoint::Type::Site, add});
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add a site");
+      ImGui::SameLine();
+      if (ImGui::Button("+ Wrap", ImVec2(third, 0))) {
+        props::notifyChange();
+        t.path.push_back({TendonPoint::Type::Geom});
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("+ Pulley", ImVec2(third, 0))) {
+        props::notifyChange();
+        t.path.push_back({TendonPoint::Type::Pulley});
+      }
+      props::endRow();
+    }
+  }
+  const char* k = t.type == TendonType::Spatial ? "spatial." : "spatial.";  // fixed tendons share the meaning
+  auto Dk = [&](const char* attr) { return D((std::string(k) + attr).c_str()); };
+  if (props::section("Limits, spring, friction")) {
+    props::checkbox("Limited", &t.limited, false, Dk("limited"));
+    if (t.limited) props::vec2("Length range", &t.range, Vec2{0, 0}, O(Dk("range"), t.type == TendonType::Spatial ? "m" : nullptr, 0.002));
+    props::real("Stiffness", &t.stiffness, 0, O(Dk("stiffness"), nullptr, 1, 0, 1e9));
+    props::vec2("Spring length", &t.springlength, Vec2{-1, -1},
+                O("Rest length of the spring; -1 -1 uses the length at the reference pose. Two different values make a "
+                  "dead band.",
+                  nullptr, 0.002));
+    props::real("Damping", &t.damping, 0, O(Dk("damping"), nullptr, 0.1, 0, 1e9));
+    props::real("Friction loss", &t.frictionloss, 0, O(Dk("frictionloss"), nullptr, 0.01, 0, 1e9));
+    props::real("Armature", &t.armature, 0, O(Dk("armature"), nullptr, 0.001, 0, 1e9));
+    props::checkbox("Limit actuator force", &t.actfrclimited, false, Dk("actuatorfrclimited"));
+    if (t.actfrclimited) props::vec2("Actuator force range", &t.actuatorfrcrange, Vec2{0, 0}, O(Dk("actuatorfrcrange"), "N", 0.5));
+  }
+  if (t.type == TendonType::Spatial && props::section("Appearance")) {
+    props::real("Width", &t.width, 0.003, O(Dk("width"), "m", 0.0005, 0, 1));
+    props::color("Color", &t.rgba, Color{0.5f, 0.5f, 0.5f, 1}, Dk("rgba"));
+    props::element("Material", &t.material, listOfAny(doc_.materials), true, Dk("material"));
+    props::integer("Group", &t.group, 0, O(Dk("group"), nullptr, 0.1, 0, 5));
+  }
+  if (props::section("Solver (advanced)", false)) {
+    props::real("Margin", &t.margin, 0, O(Dk("margin"), nullptr, 0.001, 0, 10));
+    props::vec2("Solref limit", &t.solreflimit, kDefaultSolref, O(Dk("solreflimit"), nullptr, 0.001));
+    props::vec5("Solimp limit", &t.solimplimit, kDefaultSolimp, O(Dk("solimplimit"), nullptr, 0.001));
+    props::vec2("Solref friction", &t.solreffriction, kDefaultSolref, O(Dk("solreffriction"), nullptr, 0.001));
+    props::vec5("Solimp friction", &t.solimpfriction, kDefaultSolimp, O(Dk("solimpfriction"), nullptr, 0.001));
+  }
+  props::end();
+  int users = 0;
+  for (const Actuator& a : doc_.actuators) users += a.trn == TrnType::Tendon && a.target == t.id;
+  ImGui::TextDisabled("%d actuator(s) on this tendon", users);
+  if (ImGui::Button("+ Motor")) {
+    checkpoint("Add tendon motor");
+    Id a = addActuator(doc_, ActuatorType::Motor, kNoId, t.name.empty() ? "tendon_motor" : t.name + "_motor");
+    if (Actuator* x = doc_.actuator(a)) {
+      x->trn = TrnType::Tendon;
+      x->target = t.id;
+    }
+    sel_.set(a);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("+ Length sensor")) {
+    checkpoint("Add tendon sensor");
+    sel_.set(addSensor(doc_, SensorType::TendonPos, t.id));
+  }
+  (void)s;
+}
+
 void Editor::inspectWorld() {
   ImGui::TextDisabled("Nothing selected");
   ImGui::Separator();
@@ -898,6 +1245,9 @@ void Editor::drawInspector() {
     case Kind::Material: inspectMaterial(*doc_.material(id)); break;
     case Kind::Texture: inspectTexture(*doc_.texture(id)); break;
     case Kind::Exclude: inspectExclude(*doc_.exclude(id)); break;
+    case Kind::Pair: inspectPair(*doc_.pair(id)); break;
+    case Kind::Equality: inspectEquality(*doc_.equality(id)); break;
+    case Kind::Tendon: inspectTendon(*doc_.tendon(id)); break;
     default: inspectWorld(); break;
   }
   ImGui::PopID();

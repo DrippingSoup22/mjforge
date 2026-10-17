@@ -323,6 +323,7 @@ void Editor::buildOverlays() {
     }
   }
 
+  buildConstraintOverlays();
   if (sim_.active()) {
     buildSimOverlays();
     return;

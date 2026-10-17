@@ -21,7 +21,8 @@ constexpr Id kNoId = 0;
 constexpr Id kWorldId = 1;  // the world body always exists and has this ID
 
 enum class Kind : uint8_t {
-  None, Body, Geom, Joint, Site, Camera, Light, Actuator, Sensor, Exclude, Material, Texture, Hfield, Mesh
+  None, Body, Geom, Joint, Site, Camera, Light, Actuator, Sensor, Exclude, Material, Texture, Hfield, Mesh,
+  Pair, Equality, Tendon
 };
 const char* kindName(Kind k);  // "body", "geom", ...
 
@@ -239,6 +240,84 @@ struct Exclude {
   Id body2 = kNoId;
 };
 
+// Explicit contact pair (<contact><pair>): the two geoms always collide, with exactly these
+// parameters, whatever their contype/conaffinity say.
+struct ContactPair {
+  Id id = kNoId;
+  std::string name;
+  Id geom1 = kNoId;
+  Id geom2 = kNoId;
+  int condim = 3;
+  Vec5 friction{{1, 1, 0.005, 0.0001, 0.0001}};  // sliding (2 directions), torsional, rolling (2)
+  Vec2 solref = kDefaultSolref;
+  Vec2 solreffriction{0, 0};
+  Vec5 solimp = kDefaultSolimp;
+  double margin = 0;
+  double gap = 0;
+};
+
+// Equality constraint (<equality>): a ball-joint connection or a weld between two bodies (or two
+// sites), or a polynomial coupling between two joints or two tendons.
+struct Equality {
+  Id id = kNoId;
+  std::string name;
+  EqualityType type = EqualityType::Connect;
+  Id obj1 = kNoId;     // body / site (connect, weld), joint, tendon
+  Id obj2 = kNoId;     // optional second object: the world for bodies, nothing for a coupling
+  Vec3 anchor;         // body connect: point in body1's frame; body weld: point in body2's frame
+  bool relpose = false;  // weld: explicit pose of body2 in body1's frame (else the reference pose)
+  Vec3 relpos;
+  Quat relquat;
+  double torquescale = 1;           // weld
+  Vec5 polycoef{{0, 1, 0, 0, 0}};   // joint / tendon: q1 = c0 + c1 q2 + c2 q2^2 + c3 q2^3 + c4 q2^4
+  bool active = true;
+  Vec2 solref = kDefaultSolref;
+  Vec5 solimp = kDefaultSolimp;
+};
+
+// Spatial tendon path element: a site it passes through, a sphere / cylinder geom it wraps around
+// (optionally on the side of `sidesite`), or a pulley that starts a new branch.
+struct TendonPoint {
+  enum class Type : uint8_t { Site, Geom, Pulley };
+  Type type = Type::Site;
+  Id obj = kNoId;
+  Id sidesite = kNoId;
+  double divisor = 1;
+};
+
+struct TendonJoint {
+  Id joint = kNoId;
+  double coef = 1;
+};
+
+// Tendon (<tendon>): a fixed tendon is a linear combination of joint positions, a spatial tendon
+// the length of a path through sites. Actuators and sensors can act on either.
+struct Tendon {
+  Id id = kNoId;
+  std::string name;
+  TendonType type = TendonType::Fixed;
+  std::vector<TendonJoint> joints;  // fixed
+  std::vector<TendonPoint> path;    // spatial
+  bool limited = false;
+  Vec2 range{0, 0};
+  bool actfrclimited = false;
+  Vec2 actuatorfrcrange{0, 0};
+  double stiffness = 0;
+  double damping = 0;
+  double frictionloss = 0;
+  double armature = 0;
+  Vec2 springlength{-1, -1};  // -1: the length at the reference pose
+  double margin = 0;
+  Vec2 solreflimit = kDefaultSolref;
+  Vec5 solimplimit = kDefaultSolimp;
+  Vec2 solreffriction = kDefaultSolref;
+  Vec5 solimpfriction = kDefaultSolimp;
+  double width = 0.003;
+  Color rgba{0.5f, 0.5f, 0.5f, 1};
+  Id material = kNoId;
+  int group = 0;
+};
+
 struct Texture {
   Id id = kNoId;
   std::string name;
@@ -385,6 +464,9 @@ class Document {
   std::vector<Actuator> actuators;
   std::vector<Sensor> sensors;
   std::vector<Exclude> excludes;
+  std::vector<ContactPair> pairs;
+  std::vector<Equality> equalities;
+  std::vector<Tendon> tendons;
   std::vector<Material> materials;
   std::vector<Texture> textures;
   std::vector<Hfield> hfields;
@@ -411,6 +493,9 @@ class Document {
   Actuator* actuator(Id id) { return find(actuators, Kind::Actuator, id); }
   Sensor* sensor(Id id) { return find(sensors, Kind::Sensor, id); }
   Exclude* exclude(Id id) { return find(excludes, Kind::Exclude, id); }
+  ContactPair* pair(Id id) { return find(pairs, Kind::Pair, id); }
+  Equality* equality(Id id) { return find(equalities, Kind::Equality, id); }
+  Tendon* tendon(Id id) { return find(tendons, Kind::Tendon, id); }
   Material* material(Id id) { return find(materials, Kind::Material, id); }
   Texture* texture(Id id) { return find(textures, Kind::Texture, id); }
   Hfield* hfield(Id id) { return find(hfields, Kind::Hfield, id); }
@@ -424,6 +509,9 @@ class Document {
   const Actuator* actuator(Id id) const { return const_cast<Document*>(this)->actuator(id); }
   const Sensor* sensor(Id id) const { return const_cast<Document*>(this)->sensor(id); }
   const Exclude* exclude(Id id) const { return const_cast<Document*>(this)->exclude(id); }
+  const ContactPair* pair(Id id) const { return const_cast<Document*>(this)->pair(id); }
+  const Equality* equality(Id id) const { return const_cast<Document*>(this)->equality(id); }
+  const Tendon* tendon(Id id) const { return const_cast<Document*>(this)->tendon(id); }
   const Material* material(Id id) const { return const_cast<Document*>(this)->material(id); }
   const Texture* texture(Id id) const { return const_cast<Document*>(this)->texture(id); }
   const Hfield* hfield(Id id) const { return const_cast<Document*>(this)->hfield(id); }

@@ -38,6 +38,8 @@ MJF_ENUM_TABLE(TextureBuiltin, kTextureBuiltins)
 MJF_ENUM_TABLE(TextureMark, kTextureMarks)
 MJF_ENUM_TABLE(InertiaFromGeom, kInertiaFromGeom)
 MJF_ENUM_TABLE(Role, kRoles)
+MJF_ENUM_TABLE(EqualityType, kEqualityTypes)
+MJF_ENUM_TABLE(TendonType, kTendonTypes)
 #undef MJF_ENUM_TABLE
 
 // ---------------------------------------------------------------- archives
@@ -215,6 +217,26 @@ template <class V> void visit(V& v, Sensor& s) {
 template <class V> void visit(V& v, Exclude& e) {
   v("id", e.id); v("name", e.name); v("body1", e.body1); v("body2", e.body2);
 }
+template <class V> void visit(V& v, ContactPair& p) {
+  v("id", p.id); v("name", p.name); v("geom1", p.geom1); v("geom2", p.geom2); v("condim", p.condim);
+  v("friction", p.friction); v("solref", p.solref); v("solreffriction", p.solreffriction); v("solimp", p.solimp);
+  v("margin", p.margin); v("gap", p.gap);
+}
+template <class V> void visit(V& v, Equality& e) {
+  v("id", e.id); v("name", e.name); v("type", e.type); v("obj1", e.obj1); v("obj2", e.obj2); v("anchor", e.anchor);
+  v("relpose", e.relpose); v("relpos", e.relpos); v("relquat", e.relquat); v("torquescale", e.torquescale);
+  v("polycoef", e.polycoef); v("active", e.active); v("solref", e.solref); v("solimp", e.solimp);
+}
+// Tendon joints and path are written separately (arrays of records).
+template <class V> void visit(V& v, Tendon& t) {
+  v("id", t.id); v("name", t.name); v("type", t.type); v("limited", t.limited); v("range", t.range);
+  v("actfrclimited", t.actfrclimited); v("actuatorfrcrange", t.actuatorfrcrange); v("stiffness", t.stiffness);
+  v("damping", t.damping); v("frictionloss", t.frictionloss); v("armature", t.armature);
+  v("springlength", t.springlength); v("margin", t.margin); v("solreflimit", t.solreflimit);
+  v("solimplimit", t.solimplimit); v("solreffriction", t.solreffriction); v("solimpfriction", t.solimpfriction);
+  v("width", t.width); v("rgba", t.rgba); v("material", t.material); v("group", t.group);
+}
+const char* const kTendonPointNames[] = {"site", "geom", "pulley"};
 template <class V> void visit(V& v, Texture& t) {
   v("id", t.id); v("name", t.name); v("type", t.type); v("builtin", t.builtin); v("rgb1", t.rgb1);
   v("rgb2", t.rgb2); v("mark", t.mark); v("markrgb", t.markrgb); v("random", t.random);
@@ -298,6 +320,20 @@ std::string projectToJson(const Document& cdoc, const std::string& editorStateJs
   root["actuators"] = saveArray(doc.actuators);
   root["sensors"] = saveArray(doc.sensors);
   root["excludes"] = saveArray(doc.excludes);
+  root["pairs"] = saveArray(doc.pairs);
+  root["equalities"] = saveArray(doc.equalities);
+  json tendons = json::array();
+  for (Tendon& t : doc.tendons) {
+    json o = saveObject(t);
+    json joints = json::array(), path = json::array();
+    for (const TendonJoint& tj : t.joints) joints.push_back({tj.joint, tj.coef});
+    for (const TendonPoint& tp : t.path)
+      path.push_back({{"type", kTendonPointNames[int(tp.type)]}, {"obj", tp.obj}, {"sidesite", tp.sidesite}, {"divisor", tp.divisor}});
+    o["joints"] = joints;
+    o["path"] = path;
+    tendons.push_back(o);
+  }
+  root["tendons"] = tendons;
   root["materials"] = saveArray(doc.materials);
   root["textures"] = saveArray(doc.textures);
   json hf = json::array();
@@ -371,6 +407,30 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     loadArray(root, "actuators", doc.actuators);
     loadArray(root, "sensors", doc.sensors);
     loadArray(root, "excludes", doc.excludes);
+    loadArray(root, "pairs", doc.pairs);
+    loadArray(root, "equalities", doc.equalities);
+    if (root.contains("tendons") && root["tendons"].is_array()) {
+      for (const auto& item : root["tendons"]) {
+        Tendon t;
+        Loader l{item};
+        visit(l, t);
+        if (item.contains("joints") && item["joints"].is_array())
+          for (const auto& e : item["joints"])
+            if (e.is_array() && e.size() == 2) t.joints.push_back({e[0].get<Id>(), e[1].get<double>()});
+        if (item.contains("path") && item["path"].is_array())
+          for (const auto& e : item["path"]) {
+            TendonPoint tp;
+            std::string type = e.value("type", std::string("site"));
+            for (int i = 0; i < 3; ++i)
+              if (type == kTendonPointNames[i]) tp.type = TendonPoint::Type(i);
+            tp.obj = e.value("obj", Id(0));
+            tp.sidesite = e.value("sidesite", Id(0));
+            tp.divisor = e.value("divisor", 1.0);
+            t.path.push_back(tp);
+          }
+        doc.tendons.push_back(std::move(t));
+      }
+    }
     loadArray(root, "materials", doc.materials);
     loadArray(root, "textures", doc.textures);
     if (root.contains("hfields") && root["hfields"].is_array()) {
@@ -428,6 +488,7 @@ bool projectFromJson(Document& out, const std::string& text, std::string* error,
     auto scan = [&](const auto& vec) { for (const auto& e : vec) maxId = std::max(maxId, e.id); };
     scan(doc.bodies); scan(doc.geoms); scan(doc.joints); scan(doc.sites); scan(doc.cameras); scan(doc.lights);
     scan(doc.actuators); scan(doc.sensors); scan(doc.excludes); scan(doc.materials); scan(doc.textures);
+    scan(doc.pairs); scan(doc.equalities); scan(doc.tendons);
     scan(doc.hfields);
     scan(doc.meshes);
     doc.nextId = std::max<Id>(root.value("nextId", 0u), maxId + 1);

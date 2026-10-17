@@ -25,6 +25,18 @@ bool motorLike(const mjModel* m, int i) {
          m->actuator_dyntype[i] != mjDYN_INTEGRATOR && m->actuator_gainprm[i * mjNGAIN] != 0;
 }
 
+// Inertia an actuator sees along its own direction: 1 / (J M^-1 J^T) with J its moment row (which
+// includes the gear). Everything is free to move, so this is the smallest, stability-relevant one.
+double actuatorSpaceInertia(const mjModel* m, mjData* d, int i) {
+  std::vector<mjtNum> J(m->nv, 0.0), x(m->nv, 0.0);
+  int adr = d->moment_rowadr[i], nnz = d->moment_rownnz[i];
+  for (int k = 0; k < nnz; ++k) J[d->moment_colind[adr + k]] = d->actuator_moment[adr + k];
+  mj_solveM(m, d, x.data(), J.data(), 1);
+  double s = 0;
+  for (int k = 0; k < m->nv; ++k) s += J[k] * x[k];
+  return s > 1e-12 ? 1.0 / s : 0.0;
+}
+
 // Smallest inertia a joint's actuator can see about its axis: the moved subtree swinging freely,
 // or the rest of the robot rotating about a planted limb (stance). The armature always adds.
 // Sizing a PD on the swing inertia alone makes it chatter in stance when the limb is heavy.
@@ -208,6 +220,27 @@ void Simulator::prepare() {
         a.targetLo = std::min(l1, l2);
         a.targetHi = std::max(l1, l2);
         a.refLength = clampv(a.refLength, a.targetLo, a.targetHi);
+      }
+    } else if (motorLike(m, i) && trn == mjTRN_TENDON && gear != 0 && ref && m->nv > 0 &&
+               actuatorSpaceInertia(m, ref.get(), i) > 0) {
+      // Torque motor on a tendon: the same PD, in tendon length units.
+      double inertia = actuatorSpaceInertia(m, ref.get(), i);
+      double w = 0.15 / dt;
+      a.kind = ActuatorDrive::Motor;
+      a.gain = m->actuator_gainprm[i * mjNGAIN];
+      a.kp = inertia * w * w;
+      a.kd = 2.0 * 0.8 * inertia * w;
+      int t = m->actuator_trnid[2 * i];
+      if (t >= 0 && m->tendon_limited[t]) {
+        double lo = m->tendon_range[2 * t], hi = m->tendon_range[2 * t + 1];
+        double margin = 0.1 * (hi - lo);
+        double l1 = gear * (lo + margin), l2 = gear * (hi - margin);
+        a.targetLo = std::min(l1, l2);
+        a.targetHi = std::max(l1, l2);
+        a.refLength = clampv(a.refLength, a.targetLo, a.targetHi);
+        half = 0.4 * std::fabs(gear) * (hi - lo);  // sine test amplitude, in length units
+      } else {
+        half = 0.02 * std::fabs(gear);
       }
     } else if (lim) {
       half = 0.5 * (a.hi - a.lo);

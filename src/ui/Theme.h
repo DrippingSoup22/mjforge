@@ -3,6 +3,8 @@
 
 #include <imgui.h>
 
+#include "core/Math.h"
+
 namespace mjf {
 
 void applyTheme(float scale);
@@ -28,6 +30,10 @@ inline constexpr ImU32 kSensor = IM_COL32(110, 200, 140, 255);
 inline constexpr ImU32 kCamera = IM_COL32(170, 140, 230, 255);
 inline constexpr ImU32 kLight = IM_COL32(250, 230, 120, 255);
 inline ImVec4 v4(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
+inline Color color(ImU32 c) {
+  ImVec4 v = v4(c);
+  return {v.x, v.y, v.z, v.w};
+}
 }  // namespace pal
 
 }  // namespace mjf

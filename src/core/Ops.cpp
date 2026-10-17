@@ -205,6 +205,70 @@ Id addExclude(Document& doc, Id body1, Id body2) {
   return e.id;
 }
 
+void pairParamsFromGeoms(const Document& doc, ContactPair& c) {
+  const Geom* a = doc.geom(c.geom1);
+  const Geom* b = doc.geom(c.geom2);
+  if (!a || !b) return;
+  // MuJoCo's rules for geoms in contact: the higher priority wins, otherwise maxima and a
+  // solmix-weighted average of the solver parameters.
+  if (a->priority != b->priority) {
+    const Geom& g = a->priority > b->priority ? *a : *b;
+    c.condim = g.condim;
+    c.friction = Vec5{{g.friction.x, g.friction.x, g.friction.y, g.friction.z, g.friction.z}};
+    c.solref = g.solref;
+    c.solimp = g.solimp;
+  } else {
+    c.condim = std::max(a->condim, b->condim);
+    double s = std::max(a->friction.x, b->friction.x), t = std::max(a->friction.y, b->friction.y),
+           r = std::max(a->friction.z, b->friction.z);
+    c.friction = Vec5{{s, s, t, r, r}};
+    double wa = a->solmix, wb = b->solmix;
+    double mix = wa + wb > 1e-15 ? wa / (wa + wb) : 0.5;
+    for (int i = 0; i < 2; ++i) c.solref[i] = mix * a->solref[i] + (1 - mix) * b->solref[i];
+    for (int i = 0; i < 5; ++i) c.solimp[i] = mix * a->solimp[i] + (1 - mix) * b->solimp[i];
+  }
+  c.margin = std::max(a->margin, b->margin);
+  c.gap = std::max(a->gap, b->gap);
+}
+
+Id addContactPair(Document& doc, Id geom1, Id geom2) {
+  ContactPair c;
+  c.id = doc.newId();
+  c.geom1 = geom1;
+  c.geom2 = geom2;
+  pairParamsFromGeoms(doc, c);
+  doc.pairs.push_back(c);
+  doc.touch();
+  return c.id;
+}
+
+Id addEquality(Document& doc, EqualityType type, Id obj1, Id obj2) {
+  Equality e;
+  e.id = doc.newId();
+  e.type = type;
+  e.obj1 = obj1;
+  e.obj2 = obj2;
+  // Connect at body2's origin (or body1's when connecting to the world), as seen from body1.
+  if (type == EqualityType::Connect && doc.body(obj1)) {
+    Pose p1 = bodyWorldPose(doc, obj1);
+    Vec3 at = doc.body(obj2) ? bodyWorldPose(doc, obj2).pos : p1.pos;
+    e.anchor = inverse(p1).apply(at);
+  }
+  doc.equalities.push_back(e);
+  doc.touch();
+  return e.id;
+}
+
+Id addTendon(Document& doc, TendonType type, const std::string& name) {
+  Tendon t;
+  t.id = doc.newId();
+  t.type = type;
+  t.name = doc.uniqueName(Kind::Tendon, name.empty() ? "tendon" : name);
+  doc.tendons.push_back(t);
+  doc.touch();
+  return t.id;
+}
+
 Id addTexture(Document& doc, const Texture& t_) {
   Texture t = t_;
   t.id = doc.newId();
@@ -260,6 +324,20 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
   for (const Site& s : doc.sites) if (bodyDeleted(s.body)) del.insert(s.id);
   for (const Camera& c : doc.cameras) if (bodyDeleted(c.body)) del.insert(c.id);
   for (const Light& l : doc.lights) if (bodyDeleted(l.body)) del.insert(l.id);
+  // Tendons lose deleted joints / path points; one with nothing usable left goes too.
+  for (Tendon& t : doc.tendons) {
+    if (del.count(t.id)) continue;
+    t.joints.erase(std::remove_if(t.joints.begin(), t.joints.end(), [&](const TendonJoint& j) { return del.count(j.joint) > 0; }),
+                   t.joints.end());
+    t.path.erase(std::remove_if(t.path.begin(), t.path.end(), [&](const TendonPoint& p) { return p.obj && del.count(p.obj) > 0; }),
+                 t.path.end());
+    for (TendonPoint& p : t.path) if (del.count(p.sidesite)) p.sidesite = kNoId;
+    int sites = 0;
+    for (const TendonPoint& p : t.path) sites += p.type == TendonPoint::Type::Site;
+    if ((t.type == TendonType::Fixed && t.joints.empty()) || (t.type == TendonType::Spatial && sites < 2) ||
+        (t.type == TendonType::Spatial && !t.path.empty() && t.path.front().type != TendonPoint::Type::Site))
+      del.insert(t.id);
+  }
   // Dependents.
   for (const Actuator& a : doc.actuators)
     if (del.count(a.target) || del.count(a.refsite) || del.count(a.slidersite)) del.insert(a.id);
@@ -267,6 +345,10 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
     if (del.count(s.obj) || del.count(s.ref)) del.insert(s.id);
   for (const Exclude& e : doc.excludes)
     if (del.count(e.body1) || del.count(e.body2)) del.insert(e.id);
+  for (const ContactPair& c : doc.pairs)
+    if (del.count(c.geom1) || del.count(c.geom2)) del.insert(c.id);
+  for (const Equality& e : doc.equalities)
+    if (del.count(e.obj1) || del.count(e.obj2)) del.insert(e.id);
 
   auto erase = [&](auto& vec) {
     vec.erase(std::remove_if(vec.begin(), vec.end(), [&](const auto& e) { return del.count(e.id) > 0; }), vec.end());
@@ -280,6 +362,9 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
   erase(doc.actuators);
   erase(doc.sensors);
   erase(doc.excludes);
+  erase(doc.pairs);
+  erase(doc.equalities);
+  erase(doc.tendons);
   erase(doc.materials);
   erase(doc.textures);
   erase(doc.hfields);
@@ -291,6 +376,7 @@ void deleteElements(Document& doc, const std::vector<Id>& ids) {
     if (del.count(g.mesh)) g.mesh = kNoId;
   }
   for (Site& s : doc.sites) if (del.count(s.material)) s.material = kNoId;
+  for (Tendon& t : doc.tendons) if (del.count(t.material)) t.material = kNoId;
   for (Material& m : doc.materials) if (del.count(m.texture)) m.texture = kNoId;
   for (Camera& c : doc.cameras) if (del.count(c.target)) c.target = kNoId;
   for (Light& l : doc.lights) if (del.count(l.target)) l.target = kNoId;
@@ -464,6 +550,26 @@ CopyResult copyElements(Document& doc, const std::vector<Id>& ids, const RenameF
     auto it = r.remap.find(id);
     return it == r.remap.end() ? id : it->second;
   };
+  // Tendons entirely inside the copy (before actuators and sensors, which may use them).
+  size_t nt = doc.tendons.size();
+  for (size_t i = 0; i < nt; ++i) {
+    const Tendon& t = doc.tendons[i];
+    bool inside = !t.joints.empty() || !t.path.empty();
+    for (const TendonJoint& j : t.joints) inside &= r.remap.count(j.joint) > 0;
+    for (const TendonPoint& p : t.path) inside &= (p.obj == kNoId || r.remap.count(p.obj) > 0) && (!p.sidesite || r.remap.count(p.sidesite) > 0);
+    if (!inside) continue;
+    Tendon x = t;
+    x.id = doc.newId();
+    x.name = newName(Kind::Tendon, x.name);
+    for (TendonJoint& j : x.joints) j.joint = mapId(j.joint);
+    for (TendonPoint& p : x.path) {
+      p.obj = mapId(p.obj);
+      p.sidesite = mapId(p.sidesite);
+    }
+    r.remap[t.id] = x.id;
+    doc.tendons.push_back(x);
+    doc.touch();
+  }
   // Dependents.
   size_t na = doc.actuators.size();
   for (size_t i = 0; i < na; ++i) {
@@ -501,6 +607,32 @@ CopyResult copyElements(Document& doc, const std::vector<Id>& ids, const RenameF
     x.body1 = mapId(e.body1);
     x.body2 = mapId(e.body2);
     doc.excludes.push_back(x);
+    doc.touch();
+  }
+  size_t npair = doc.pairs.size();
+  for (size_t i = 0; i < npair; ++i) {
+    const ContactPair& c = doc.pairs[i];
+    if (!r.remap.count(c.geom1) && !r.remap.count(c.geom2)) continue;
+    ContactPair x = c;
+    x.id = doc.newId();
+    x.name = newName(Kind::Pair, x.name);
+    x.geom1 = mapId(c.geom1);
+    x.geom2 = mapId(c.geom2);
+    r.remap[c.id] = x.id;
+    doc.pairs.push_back(x);
+    doc.touch();
+  }
+  size_t neq = doc.equalities.size();
+  for (size_t i = 0; i < neq; ++i) {
+    const Equality& e = doc.equalities[i];
+    if (!r.remap.count(e.obj1) && !r.remap.count(e.obj2)) continue;
+    Equality x = e;
+    x.id = doc.newId();
+    x.name = newName(Kind::Equality, x.name);
+    x.obj1 = mapId(e.obj1);
+    x.obj2 = mapId(e.obj2);
+    r.remap[e.id] = x.id;
+    doc.equalities.push_back(x);
     doc.touch();
   }
   for (Camera& c : doc.cameras) if (r.remap.count(c.id) && r.remap.count(c.target)) c.target = mapId(c.target);
@@ -909,6 +1041,13 @@ Id mirrorSubtree(Document& doc, Id body, int axis) {
     j.pos = M(j.pos);
     if (j.type == JointType::Hinge) j.axis = -M(j.axis);  // pseudo-vector: symmetric motion
     else if (j.type == JointType::Slide) j.axis = M(j.axis);
+  }
+  // Anchors and relative poses are expressed in (mirrored) body frames.
+  for (Equality& e : doc.equalities) {
+    if (!newIds.count(e.id)) continue;
+    e.anchor = M(e.anchor);
+    e.relpos = M(e.relpos);
+    e.relquat = Mq(e.relquat);
   }
   doc.touch();
   return r.tops.front();

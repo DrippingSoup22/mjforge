@@ -21,6 +21,9 @@ const char* kindName(Kind k) {
     case Kind::Texture: return "texture";
     case Kind::Hfield: return "hfield";
     case Kind::Mesh: return "mesh";
+    case Kind::Pair: return "contact pair";
+    case Kind::Equality: return "equality";
+    case Kind::Tendon: return "tendon";
     default: return "none";
   }
 }
@@ -92,6 +95,9 @@ const DocIndex& Document::index() const {
   addAll(textures, Kind::Texture);
   addAll(hfields, Kind::Hfield);
   addAll(meshes, Kind::Mesh);
+  addAll(pairs, Kind::Pair);
+  addAll(equalities, Kind::Equality);
+  addAll(tendons, Kind::Tendon);
 
   auto bodyIdx = [&](Id id) -> int {
     auto it = ix.loc.find(id);
@@ -159,6 +165,9 @@ std::string Document::nameOf(Id id) const {
     case Kind::Texture: return texture(id)->name;
     case Kind::Hfield: return hfield(id)->name;
     case Kind::Mesh: return mesh(id)->name;
+    case Kind::Pair: return pair(id)->name;
+    case Kind::Equality: return equality(id)->name;
+    case Kind::Tendon: return tendon(id)->name;
     default: return "";
   }
 }
@@ -191,6 +200,17 @@ std::string Document::displayName(Id id) const {
     case Kind::Texture: return "texture";
     case Kind::Hfield: return "height field";
     case Kind::Mesh: return "mesh";
+    case Kind::Pair: {
+      const ContactPair* c = pair(id);
+      return "pair " + displayName(c->geom1) + " / " + displayName(c->geom2);
+    }
+    case Kind::Equality: {
+      const Equality* e = equality(id);
+      std::string s = std::string(enumXml(kEqualityTypes, e->type)) + " " + displayName(e->obj1);
+      if (e->obj2) s += " / " + displayName(e->obj2);
+      return s;
+    }
+    case Kind::Tendon: return std::string(enumXml(kTendonTypes, tendon(id)->type)) + " tendon";
     default: return "";
   }
 }
@@ -210,6 +230,9 @@ void Document::setName(Id id, const std::string& name) {
     case Kind::Texture: texture(id)->name = name; break;
     case Kind::Hfield: hfield(id)->name = name; break;
     case Kind::Mesh: mesh(id)->name = name; break;
+    case Kind::Pair: pair(id)->name = name; break;
+    case Kind::Equality: equality(id)->name = name; break;
+    case Kind::Tendon: tendon(id)->name = name; break;
     default: break;
   }
 }
@@ -302,6 +325,9 @@ bool Document::nameTaken(Kind kind, const std::string& name, Id except) const {
     case Kind::Texture: return check(textures);
     case Kind::Hfield: return check(hfields);
     case Kind::Mesh: return check(meshes);
+    case Kind::Pair: return check(pairs);
+    case Kind::Equality: return check(equalities);
+    case Kind::Tendon: return check(tendons);
     default: return false;
   }
 }

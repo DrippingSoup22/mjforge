@@ -188,6 +188,10 @@ headless settle).
       volume, mass and inertia, rendering and picking; projects store them as base64, exports write
       big meshes as STL files and copy texture images next to the XML
 - [x] Keyboard & mouse help (F1), README with screenshots, user guide (docs/USER_GUIDE.md)
+- [x] Tendons (fixed, spatial with wrapping and pulleys), equality constraints (connect, weld,
+      joint, tendon) and contact pairs: editing, drawing, import/export, merge, analysis checks,
+      tendon motors in the simulation; Menagerie robots using them round-trip exactly
+- [x] CI on Linux, Windows and macOS
 - [ ] Preferences window
 - [x] Unit/integration tests (export → MuJoCo compile, JSON and MJCF round trips, analysis,
       simulator, generators, merge), `tools/check_mjwarp.py`, example projects verified in MJWarp,

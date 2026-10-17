@@ -345,6 +345,15 @@ void Editor::drawOutliner() {
     group("Sensors", doc_.sensors.size(), [&] {
       for (const Sensor& s : doc_.sensors) outlinerLeaf(s.id, s.name.c_str(), int(Icon::Sensor), pal::kSensor);
     });
+    group("Tendons", doc_.tendons.size(), [&] {
+      for (const Tendon& t : doc_.tendons) outlinerLeaf(t.id, doc_.displayName(t.id).c_str(), int(Icon::Slide), pal::kActuator);
+    });
+    group("Equality constraints", doc_.equalities.size(), [&] {
+      for (const Equality& e : doc_.equalities) outlinerLeaf(e.id, doc_.displayName(e.id).c_str(), int(Icon::Ball), pal::kJoint);
+    });
+    group("Contact pairs", doc_.pairs.size(), [&] {
+      for (const ContactPair& c : doc_.pairs) outlinerLeaf(c.id, doc_.displayName(c.id).c_str(), int(Icon::Exclude), pal::kGeom);
+    });
     group("Contact exclusions", doc_.excludes.size(), [&] {
       for (const Exclude& e : doc_.excludes) {
         std::string n = doc_.nameOf(e.body1) + " / " + doc_.nameOf(e.body2);
