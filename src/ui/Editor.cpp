@@ -1,11 +1,52 @@
 #include "ui/Editor.h"
 
+#include <GLFW/glfw3.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <filesystem>
+
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 
+#include "core/Geometry.h"
+#include "core/Kinematics.h"
+#include "core/Ops.h"
+#include "core/ProjectIO.h"
+#include "core/Templates.h"
+#include "ui/Icons.h"
 #include "ui/Theme.h"
 
+namespace fs = std::filesystem;
+
 namespace mjf {
+
+static double nowSeconds() { return glfwGetTime(); }
+
+// ------------------------------------------------------------------------------------ Selection
+
+bool Selection::contains(Id id) const { return std::find(ids.begin(), ids.end(), id) != ids.end(); }
+void Selection::set(Id id) {
+  ids.clear();
+  if (id != kNoId) ids.push_back(id);
+}
+void Selection::add(Id id) {
+  if (id == kNoId) return;
+  auto it = std::find(ids.begin(), ids.end(), id);
+  if (it != ids.end()) ids.erase(it);
+  ids.push_back(id);
+}
+void Selection::toggle(Id id) {
+  auto it = std::find(ids.begin(), ids.end(), id);
+  if (it != ids.end()) ids.erase(it);
+  else if (id != kNoId) ids.push_back(id);
+}
+void Selection::prune(const Document& doc) {
+  ids.erase(std::remove_if(ids.begin(), ids.end(), [&](Id id) { return !doc.exists(id); }), ids.end());
+}
+
+// ------------------------------------------------------------------------------------ Editor
 
 Editor::Editor() = default;
 Editor::~Editor() = default;
@@ -14,50 +55,964 @@ void Editor::init(GLFWwindow* window, float scale, const std::string& configDir)
   window_ = window;
   scale_ = scale;
   configDir_ = configDir;
+  if (!renderer_.init()) std::fprintf(stderr, "Renderer initialization failed\n");
+  dbg_.init();
+  propCtx_.change = [this] { change(); };
+  props::setContext(&propCtx_);
+  loadPrefs();
+  std::error_code ec;
+  if (lastDir_.empty()) lastDir_ = fs::current_path(ec).string();
+  newDocument("quadruped");
 }
 
-void Editor::applyCli(const CliOptions&) {}
+void Editor::applyCli(const CliOptions& cli) {
+  if (!cli.templateName.empty()) newDocument(cli.templateName);
+  if (!cli.input.empty()) openPath(cli.input);
+  for (const std::string& name : cli.select) {
+    auto findName = [&](const auto& vec) -> Id {
+      for (const auto& e : vec) if (e.name == name) return e.id;
+      return kNoId;
+    };
+    Id id = findName(doc_.bodies);
+    if (!id) id = findName(doc_.geoms);
+    if (!id) id = findName(doc_.joints);
+    if (!id) id = findName(doc_.sites);
+    if (!id) id = findName(doc_.actuators);
+    if (!id) id = findName(doc_.sensors);
+    if (!id) id = findName(doc_.lights);
+    if (!id) id = findName(doc_.cameras);
+    if (id) sel_.add(id);
+  }
+  for (const std::string& a : cli.actions) {
+    if (a == "frame") focusSelection();
+    else if (a == "xray") vp_.xray = true;
+    else if (a == "com") vp_.showCom = true;
+    else if (a == "labels") vp_.showLabels = true;
+    else if (a == "rotate") gizmoOp_ = GizmoOp::Rotate;
+    else if (a == "scale") gizmoOp_ = GizmoOp::Scale;
+    else if (a == "export") showExport_ = true;
+    else if (a == "about") showAbout_ = true;
+    else if (a == "demo") showDemo_ = true;
+    else if (a.rfind("focus:", 0) == 0) pendingFocus_.push_back(a.substr(6));
+  }
+}
+
+bool Editor::wantsContinuousRendering() const {
+  return vp_.gizmoUsing || vp_.dragButton >= 0 || compiler_.busy() || !toasts_.empty() || fileDialog_.isOpen();
+}
+
+bool Editor::confirmQuit() {
+  savePrefs();
+  return true;
+}
+
+void Editor::change() {
+  ImGuiID id = ImGui::GetItemID();
+  if (id == 0 || id != activeEditId_) {
+    history_.push(doc_, "Edit");
+    activeEditId_ = id;
+  }
+  markDirty();
+}
+
+void Editor::checkpoint(const char* label) {
+  history_.push(doc_, label);
+  activeEditId_ = 0;
+  markDirty();
+}
+
+void Editor::markDirty() {
+  modified_ = true;
+  ++editRevision_;
+  compileDueTime_ = nowSeconds() + 0.12;
+  setTitle();
+}
+
+void Editor::undo() {
+  if (history_.undo(doc_)) {
+    sel_.prune(doc_);
+    ++editRevision_;
+    modified_ = true;
+    compileDueTime_ = nowSeconds();
+    notify("Undo", pal::kTextDim, 1.2);
+    setTitle();
+  }
+}
+
+void Editor::redo() {
+  if (history_.redo(doc_)) {
+    sel_.prune(doc_);
+    ++editRevision_;
+    modified_ = true;
+    compileDueTime_ = nowSeconds();
+    notify("Redo", pal::kTextDim, 1.2);
+    setTitle();
+  }
+}
+
+void Editor::select(Id id, bool additive, bool toggle) {
+  if (toggle) sel_.toggle(id);
+  else if (additive) sel_.add(id);
+  else sel_.set(id);
+}
+
+void Editor::notify(const std::string& text, unsigned int color, double seconds) {
+  toasts_.push_back({text, color ? color : IM_COL32(220, 224, 232, 255), nowSeconds() + seconds});
+  if (toasts_.size() > 5) toasts_.erase(toasts_.begin());
+}
+
+void Editor::setTitle() {
+  if (!window_) return;
+  std::string name = path_.empty() ? "untitled" : fs::path(path_).filename().string();
+  std::string title = (modified_ ? "* " : "") + name + " - MJForge";
+  glfwSetWindowTitle(window_, title.c_str());
+}
+
+// ------------------------------------------------------------------------------------ files
+
+void Editor::newDocument(const std::string& templateId) {
+  Document d;
+  if (!makeTemplate(templateId, d)) {
+    notify("Unknown template: " + templateId, pal::kError);
+    return;
+  }
+  doc_ = std::move(d);
+  history_.clear();
+  sel_.clear();
+  path_.clear();
+  modified_ = false;
+  ++editRevision_;
+  compileDueTime_ = 0;
+  frameAll();
+  setTitle();
+}
+
+bool Editor::openPath(const std::string& path) {
+  Document d;
+  std::string err, editorState;
+  if (!loadProject(d, path, &err, &editorState)) {
+    notify("Open failed: " + err, pal::kError, 6);
+    return false;
+  }
+  doc_ = std::move(d);
+  history_.clear();
+  sel_.clear();
+  path_ = path;
+  modified_ = false;
+  ++editRevision_;
+  compileDueTime_ = 0;
+  frameAll();
+  if (!editorState.empty()) applyEditorState(editorState);
+  lastDir_ = fs::path(path).parent_path().string();
+  addRecent(path);
+  setTitle();
+  notify("Opened " + fs::path(path).filename().string(), pal::kOk);
+  return true;
+}
+
+bool Editor::savePath(const std::string& path) {
+  std::string err;
+  if (!saveProject(doc_, path, &err, editorStateJson())) {
+    notify("Save failed: " + err, pal::kError, 6);
+    return false;
+  }
+  path_ = path;
+  modified_ = false;
+  lastDir_ = fs::path(path).parent_path().string();
+  addRecent(path);
+  setTitle();
+  notify("Saved " + fs::path(path).filename().string(), pal::kOk);
+  return true;
+}
+
+void Editor::save() {
+  if (path_.empty()) saveAs();
+  else savePath(path_);
+}
+
+void Editor::saveAs() {
+  std::string def = path_.empty() ? doc_.modelName + ".mjforge" : fs::path(path_).filename().string();
+  fileDialog_.open(FileDialog::Mode::Save, "Save project", {".mjforge"}, lastDir_, def, kPurposeSaveAs);
+}
+
+void Editor::openDialog() {
+  fileDialog_.open(FileDialog::Mode::Open, "Open project", {".mjforge"}, lastDir_, "", kPurposeOpen);
+}
+
+void Editor::exportDialog() { showExport_ = true; }
+
+bool Editor::exportTo(const std::string& path, ExportOptions::Scope scope, bool split) {
+  ExportOptions opt;
+  opt.angle = exportAngle_ == 1 ? AngleUnit::Degree : AngleUnit::Radian;
+  std::string err;
+  fs::path p(path);
+  if (split) {
+    // model file next to the scene file; the scene includes it.
+    std::string stem = p.stem().string();
+    fs::path modelPath = p.parent_path() / (stem + "_model.xml");
+    ExportOptions mo = opt;
+    mo.scope = ExportOptions::Scope::Models;
+    ExportOptions so = opt;
+    so.scope = ExportOptions::Scope::Environment;
+    so.includeFile = modelPath.filename().string();
+    if (!writeTextFile(modelPath.string(), writeMjcf(doc_, mo), &err) || !writeTextFile(path, writeMjcf(doc_, so), &err)) {
+      notify("Export failed: " + err, pal::kError, 6);
+      return false;
+    }
+    notify("Exported " + p.filename().string() + " + " + modelPath.filename().string(), pal::kOk, 5);
+  } else {
+    opt.scope = scope;
+    if (!writeTextFile(path, writeMjcf(doc_, opt), &err)) {
+      notify("Export failed: " + err, pal::kError, 6);
+      return false;
+    }
+    notify("Exported " + p.filename().string(), pal::kOk, 5);
+  }
+  lastDir_ = p.parent_path().string();
+  return true;
+}
+
+// ------------------------------------------------------------------------------------ prefs
+
+std::string Editor::editorStateJson() const {
+  nlohmann::json j;
+  j["camera"] = {{"target", {vp_.cam.target.x, vp_.cam.target.y, vp_.cam.target.z}},
+                 {"distance", vp_.cam.distance},
+                 {"azimuth", vp_.cam.azimuth},
+                 {"elevation", vp_.cam.elevation}};
+  return j.dump();
+}
+
+void Editor::applyEditorState(const std::string& s) {
+  auto j = nlohmann::json::parse(s, nullptr, false);
+  if (j.is_discarded() || !j.contains("camera")) return;
+  const auto& c = j["camera"];
+  if (c.contains("target") && c["target"].size() == 3)
+    vp_.cam.target = {c["target"][0].get<double>(), c["target"][1].get<double>(), c["target"][2].get<double>()};
+  vp_.cam.distance = c.value("distance", vp_.cam.distance);
+  vp_.cam.azimuth = c.value("azimuth", vp_.cam.azimuth);
+  vp_.cam.elevation = c.value("elevation", vp_.cam.elevation);
+}
+
+void Editor::loadPrefs() {
+  if (configDir_.empty()) return;
+  std::string text;
+  if (!readTextFile(configDir_ + "/prefs.json", text)) return;
+  auto j = nlohmann::json::parse(text, nullptr, false);
+  if (j.is_discarded()) return;
+  if (j.contains("recent")) for (const auto& r : j["recent"]) recent_.push_back(r.get<std::string>());
+  lastDir_ = j.value("lastDir", std::string());
+  snap_ = j.value("snap", false);
+  snapMove_ = j.value("snapMove", 0.05f);
+  snapAngle_ = j.value("snapAngle", 15.0f);
+  vp_.showShadows = j.value("shadows", true);
+  vp_.showGrid = j.value("grid", true);
+}
+
+void Editor::savePrefs() {
+  if (configDir_.empty()) return;
+  nlohmann::json j;
+  j["recent"] = recent_;
+  j["lastDir"] = lastDir_;
+  j["snap"] = snap_;
+  j["snapMove"] = snapMove_;
+  j["snapAngle"] = snapAngle_;
+  j["shadows"] = vp_.showShadows;
+  j["grid"] = vp_.showGrid;
+  writeTextFile(configDir_ + "/prefs.json", j.dump(2));
+}
+
+void Editor::addRecent(const std::string& path) {
+  std::error_code ec;
+  std::string abs = fs::absolute(path, ec).string();
+  recent_.erase(std::remove(recent_.begin(), recent_.end(), abs), recent_.end());
+  recent_.insert(recent_.begin(), abs);
+  if (recent_.size() > 10) recent_.resize(10);
+  savePrefs();
+}
+
+// ------------------------------------------------------------------------------------ validation
+
+void Editor::scheduleCompile() {
+  if (requestedRevision_ == editRevision_) return;
+  if (nowSeconds() < compileDueTime_) return;
+  ExportMap map;
+  std::string xml = writeMjcf(doc_, {}, &map);
+  compiler_.request(std::move(xml), std::move(map), editRevision_);
+  requestedRevision_ = editRevision_;
+}
+
+void Editor::pollCompile() {
+  CompileResult r;
+  if (compiler_.poll(r)) {
+    compiledRevision_ = r.revision;
+    compiled_ = std::move(r);
+  }
+}
+
+// ------------------------------------------------------------------------------------ frame
 
 void Editor::buildDefaultLayout(unsigned int dockId) {
   ImGui::DockBuilderRemoveNode(dockId);
   ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
   ImGui::DockBuilderSetNodeSize(dockId, ImGui::GetMainViewport()->WorkSize);
   ImGuiID center = dockId;
-  ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.18f, nullptr, &center);
-  ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.26f, nullptr, &center);
-  ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
+  ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.17f, nullptr, &center);
+  ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.27f, nullptr, &center);
+  ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
   ImGui::DockBuilderDockWindow("Outliner", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
+  ImGui::DockBuilderDockWindow("Scene", right);
+  focusInspector_ = 3;
   ImGui::DockBuilderDockWindow("Viewport", center);
   ImGui::DockBuilderDockWindow("Issues", bottom);
   ImGui::DockBuilderDockWindow("Actuators", bottom);
+  ImGui::DockBuilderDockWindow("Sensors", bottom);
   ImGui::DockBuilderDockWindow("MJCF", bottom);
   ImGui::DockBuilderFinish(dockId);
 }
 
-void Editor::drawMenuBar() {
-  if (ImGui::BeginMainMenuBar()) {
-    if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
-      ImGui::EndMenu();
-    }
-    ImGui::EndMainMenuBar();
-  }
-}
-
 void Editor::frame() {
+  pollCompile();
+  scheduleCompile();
+  handleShortcuts();
   drawMenuBar();
+  drawToolbar();
+  drawStatusBar();
+
   ImGuiID dock = ImGui::GetID("MainDock");
   if (!layoutBuilt_ && ImGui::DockBuilderGetNode(dock) == nullptr) buildDefaultLayout(dock);
   layoutBuilt_ = true;
-  ImGui::DockSpaceOverViewport(dock, ImGui::GetMainViewport());
+  ImGui::DockSpaceOverViewport(dock, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
 
-  const char* panels[] = {"Outliner", "Inspector", "Viewport", "Issues", "Actuators", "MJCF"};
-  for (const char* p : panels) {
-    ImGui::Begin(p);
-    ImGui::TextDisabled("%s", p);
-    ImGui::End();
+  drawOutliner();
+  drawScenePanel();
+  drawInspector();
+  if (focusInspector_ > 0 && --focusInspector_ == 0) ImGui::SetWindowFocus("Inspector");
+  else if (focusInspector_ == 0 && !pendingFocus_.empty()) {
+    // One window per frame: tab selection only follows the last focused window of a frame.
+    ImGui::SetWindowFocus(pendingFocus_.front().c_str());
+    pendingFocus_.erase(pendingFocus_.begin());
   }
+  drawActuatorsPanel();
+  drawSensorsPanel();
+  drawXmlPanel();
+  drawIssuesPanel();
+  drawViewport();
+
+  if (fileDialog_.draw()) {
+    const std::string& p = fileDialog_.result();
+    switch (fileDialog_.purpose()) {
+      case kPurposeOpen: openPath(p); break;
+      case kPurposeSaveAs: savePath(p); break;
+      case kPurposeExport:
+        exportTo(p, exportScope_ == 1 ? ExportOptions::Scope::Models
+                    : exportScope_ == 2 ? ExportOptions::Scope::Environment
+                                        : ExportOptions::Scope::All,
+                 exportSplit_);
+        break;
+      default: break;
+    }
+  }
+  if (showExport_) {
+    ImGui::OpenPopup("Export MJCF");
+    showExport_ = false;
+  }
+  ImGui::SetNextWindowSize(ImVec2(520 * scale_, 0), ImGuiCond_Appearing);
+  if (ImGui::BeginPopupModal("Export MJCF", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextWrapped("Writes MuJoCo XML that loads with mujoco.MjModel.from_xml_path() and MuJoCo Warp "
+                       "(mjw.put_model).");
+    ImGui::Separator();
+    ImGui::TextDisabled("What to export");
+    ImGui::RadioButton("Everything (environment + models) in one file", &exportScope_, 0);
+    ImGui::RadioButton("Models only (creatures / robots)", &exportScope_, 1);
+    ImGui::RadioButton("Environment only (floor, obstacles, lights, options)", &exportScope_, 2);
+    ImGui::Checkbox("Split: scene.xml includes scene_model.xml (MuJoCo Menagerie layout)", &exportSplit_);
+    if (exportSplit_) ImGui::TextDisabled("  The scene file gets the environment and <include>s the model file.");
+    ImGui::TextDisabled("Angle unit in the file");
+    ImGui::RadioButton("Radian", &exportAngle_, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Degree", &exportAngle_, 1);
+    ImGui::Separator();
+    if (!compiled_.ok && compiledRevision_ == editRevision_)
+      ImGui::TextColored(pal::v4(pal::kError), "Warning: the model currently does not compile in MuJoCo.");
+    if (ImGui::Button("Choose file...", ImVec2(160 * scale_, 0))) {
+      std::string def = doc_.modelName.empty() ? "model.xml" : doc_.modelName + ".xml";
+      if (exportSplit_) def = "scene.xml";
+      fileDialog_.open(FileDialog::Mode::Save, "Export MJCF", {".xml"}, lastDir_, def, kPurposeExport);
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(100 * scale_, 0))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+  drawAboutWindow();
+  if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
+  drawToasts();
+
+  if (!ImGui::IsAnyItemActive()) activeEditId_ = 0;
+}
+
+// ------------------------------------------------------------------------------------ menus
+
+void Editor::drawAddMenuItems(Id ctxBody) {
+  Id body = ctxBody;
+  bool inWorld = body == kWorldId;
+  if (ImGui::MenuItem("Model (creature root)", nullptr, false, true)) addModelRoot();
+  if (ImGui::MenuItem(inWorld ? "Body" : "Child body")) addBodyTo(body);
+  if (ImGui::BeginMenu("Geom")) {
+    for (const auto& e : kGeomTypes) {
+      if (e.value == GeomType::Hfield || e.value == GeomType::Mesh) continue;
+      if (ImGui::MenuItem(e.label)) addGeomTo(body, e.value);
+    }
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Joint", !inWorld)) {
+    for (const auto& e : kJointTypes)
+      if (ImGui::MenuItem(e.label)) addJointTo(body, e.value);
+    ImGui::EndMenu();
+  }
+  if (ImGui::MenuItem("Site")) addSiteTo(body);
+  if (ImGui::MenuItem("Camera")) addCameraTo(body);
+  if (ImGui::MenuItem("Light")) addLightTo(body);
+  ImGui::Separator();
+  if (ImGui::BeginMenu("Environment prop")) {
+    if (ImGui::MenuItem("Static box")) addEnvironmentProp(GeomType::Box, false);
+    if (ImGui::MenuItem("Static cylinder")) addEnvironmentProp(GeomType::Cylinder, false);
+    if (ImGui::MenuItem("Static sphere")) addEnvironmentProp(GeomType::Sphere, false);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Dynamic crate (free body)")) addEnvironmentProp(GeomType::Box, true);
+    if (ImGui::MenuItem("Dynamic ball (free body)")) addEnvironmentProp(GeomType::Sphere, true);
+    ImGui::EndMenu();
+  }
+}
+
+void Editor::drawMenuBar() {
+  if (!ImGui::BeginMainMenuBar()) return;
+  if (ImGui::BeginMenu("File")) {
+    if (ImGui::BeginMenu("New")) {
+      for (const auto& t : templateList()) {
+        if (ImGui::MenuItem(t.name)) newDocument(t.id);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", t.description);
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Open...", "Ctrl+O")) openDialog();
+    if (ImGui::BeginMenu("Open recent", !recent_.empty())) {
+      for (const auto& r : recent_)
+        if (ImGui::MenuItem(r.c_str())) {
+          openPath(r);
+          break;
+        }
+      ImGui::EndMenu();
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Save", "Ctrl+S")) save();
+    if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveAs();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Export MJCF...", "Ctrl+E")) exportDialog();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Quit", "Ctrl+Q")) quit_ = true;
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Edit")) {
+    std::string u = history_.canUndo() ? "Undo " + history_.undoLabel() : "Undo";
+    if (ImGui::MenuItem(u.c_str(), "Ctrl+Z", false, history_.canUndo())) undo();
+    if (ImGui::MenuItem("Redo", "Ctrl+Y", false, history_.canRedo())) redo();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, !sel_.empty())) duplicateSelection();
+    if (ImGui::MenuItem("Delete", "Del", false, !sel_.empty())) deleteSelection();
+    if (ImGui::BeginMenu("Mirror", !sel_.empty())) {
+      if (ImGui::MenuItem("Across XZ plane (left/right)")) mirrorSelection(1);
+      if (ImGui::MenuItem("Across YZ plane (front/back)")) mirrorSelection(0);
+      if (ImGui::MenuItem("Across XY plane (up/down)")) mirrorSelection(2);
+      ImGui::EndMenu();
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Select none", "Esc")) sel_.clear();
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Add")) {
+    drawAddMenuItems(targetBody());
+    ImGui::Separator();
+    std::vector<Id> joints;
+    for (Id id : sel_.ids) if (doc_.kindOf(id) == Kind::Joint) joints.push_back(id);
+    if (ImGui::BeginMenu("Actuator for selected joints", !joints.empty())) {
+      for (const auto& e : kActuatorTypes)
+        if (ImGui::MenuItem(e.label)) addActuatorsFor(joints, e.value);
+      ImGui::EndMenu();
+    }
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("View")) {
+    ImGui::MenuItem("Grid", nullptr, &vp_.showGrid);
+    ImGui::MenuItem("Shadows", nullptr, &vp_.showShadows);
+    ImGui::MenuItem("X-ray (see through bodies)", "X", &vp_.xray);
+    ImGui::Separator();
+    ImGui::MenuItem("Joints", "J", &vp_.showJoints);
+    ImGui::MenuItem("Centers of mass", "C", &vp_.showCom);
+    ImGui::MenuItem("Inertia boxes", nullptr, &vp_.showInertia);
+    ImGui::MenuItem("Body frames", nullptr, &vp_.showFrames);
+    ImGui::MenuItem("Sites", nullptr, &vp_.showSites);
+    ImGui::MenuItem("Lights", nullptr, &vp_.showLights);
+    ImGui::MenuItem("Cameras", nullptr, &vp_.showCameras);
+    ImGui::MenuItem("Names", "L", &vp_.showLabels);
+    ImGui::MenuItem("Initial contacts", nullptr, &vp_.showContacts);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Frame selection", "F")) focusSelection();
+    if (ImGui::MenuItem("Frame all", "Home")) frameAll();
+    if (ImGui::MenuItem("Orthographic", "Numpad 5", vp_.cam.ortho)) vp_.cam.ortho = !vp_.cam.ortho;
+    ImGui::Separator();
+    if (ImGui::MenuItem("Reset panel layout")) layoutBuilt_ = false, ImGui::DockBuilderRemoveNode(ImGui::GetID("MainDock"));
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Help")) {
+    if (ImGui::MenuItem("About MJForge")) showAbout_ = true;
+    ImGui::MenuItem("ImGui demo (developer)", nullptr, &showDemo_);
+    ImGui::EndMenu();
+  }
+  ImGui::EndMainMenuBar();
+}
+
+void Editor::drawToolbar() {
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  float h = ImGui::GetFrameHeight() + 10 * scale_;
+  ImGuiWindowFlags fl = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+  if (ImGui::BeginViewportSideBar("##toolbar", vp, ImGuiDir_Up, h, fl)) {
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 1);
+    auto sep = [&] {
+      ImGui::SameLine(0, 10 * scale_);
+      ImVec2 p = ImGui::GetCursorScreenPos();
+      ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + 3), ImVec2(p.x, p.y + ImGui::GetFrameHeight() - 3),
+                                          IM_COL32(70, 75, 88, 255));
+      ImGui::Dummy(ImVec2(1, 1));
+      ImGui::SameLine(0, 10 * scale_);
+    };
+    if (iconButton("##sel", Icon::Select, gizmoOp_ == GizmoOp::Select, "Select (Q)")) gizmoOp_ = GizmoOp::Select;
+    ImGui::SameLine();
+    if (iconButton("##mov", Icon::Move, gizmoOp_ == GizmoOp::Translate, "Move (W)")) gizmoOp_ = GizmoOp::Translate;
+    ImGui::SameLine();
+    if (iconButton("##rot", Icon::Rotate, gizmoOp_ == GizmoOp::Rotate, "Rotate (E)")) gizmoOp_ = GizmoOp::Rotate;
+    ImGui::SameLine();
+    if (iconButton("##scl", Icon::Scale, gizmoOp_ == GizmoOp::Scale, "Resize geom (R)")) gizmoOp_ = GizmoOp::Scale;
+    sep();
+    ImGui::SetNextItemWidth(78 * scale_);
+    int space = gizmoLocal_ ? 1 : 0;
+    const char* spaces[] = {"World", "Local"};
+    if (ImGui::Combo("##space", &space, spaces, 2)) gizmoLocal_ = space == 1;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Gizmo orientation (Tab toggles)");
+    ImGui::SameLine();
+    if (iconButton("##snap", Icon::Magnet, snap_, "Snap to grid / angle increments (hold Ctrl to invert)")) snap_ = !snap_;
+    if (snap_) {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(70 * scale_);
+      ImGui::DragFloat("##snapm", &snapMove_, 0.005f, 0.001f, 10.0f, "%.3g m");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(60 * scale_);
+      ImGui::DragFloat("##snapa", &snapAngle_, 0.5f, 1.0f, 90.0f, "%.0f\xC2\xB0");
+    }
+    sep();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Pick");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(84 * scale_);
+    int pm = pickMode_ == PickMode::Body ? 0 : 1;
+    const char* picks[] = {"Bodies", "Geoms"};
+    if (ImGui::Combo("##pick", &pm, picks, 2)) pickMode_ = pm == 0 ? PickMode::Body : PickMode::Geom;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("What a click in the viewport selects (Alt+click picks the other)");
+    sep();
+    if (iconButton("##addmodel", Icon::Body, false, "Add a model root (free-floating creature body)")) addModelRoot();
+    ImGui::SameLine();
+    if (iconButton("##addbody", Icon::Plus, false, "Add a child body to the selection")) addBodyTo(targetBody());
+    ImGui::SameLine();
+    if (iconButton("##addbox", Icon::Box, false, "Add a box geom")) addGeomTo(targetBody(), GeomType::Box);
+    ImGui::SameLine();
+    if (iconButton("##addsph", Icon::Sphere, false, "Add a sphere geom")) addGeomTo(targetBody(), GeomType::Sphere);
+    ImGui::SameLine();
+    if (iconButton("##addcap", Icon::Capsule, false, "Add a capsule geom")) addGeomTo(targetBody(), GeomType::Capsule);
+    ImGui::SameLine();
+    if (iconButton("##addcyl", Icon::Cylinder, false, "Add a cylinder geom")) addGeomTo(targetBody(), GeomType::Cylinder);
+    ImGui::SameLine();
+    if (iconButton("##addhinge", Icon::Hinge, false, "Add a hinge joint to the selected body")) {
+      Id b = targetBody();
+      if (b != kWorldId) addJointTo(b, JointType::Hinge);
+      else notify("Select a body first: joints connect a body to its parent", pal::kWarning);
+    }
+    ImGui::SameLine();
+    if (iconButton("##addslide", Icon::Slide, false, "Add a slide joint to the selected body")) {
+      Id b = targetBody();
+      if (b != kWorldId) addJointTo(b, JointType::Slide);
+      else notify("Select a body first: joints connect a body to its parent", pal::kWarning);
+    }
+    ImGui::SameLine();
+    if (iconButton("##addsite", Icon::Site, false, "Add a site (sensor / attachment point)")) addSiteTo(targetBody());
+    sep();
+    if (iconButton("##mirror", Icon::Mirror, false, "Mirror selected body left/right (Ctrl+M)")) mirrorSelection(1);
+
+    // Validation status on the right.
+    bool upToDate = compiledRevision_ == editRevision_;
+    const char* status;
+    ImU32 col;
+    Icon icon;
+    if (!upToDate) { status = "Checking..."; col = pal::kTextDim; icon = Icon::Info; }
+    else if (compiled_.ok) { status = "Compiles in MuJoCo"; col = pal::kOk; icon = Icon::Ok; }
+    else { status = "MuJoCo error"; col = pal::kError; icon = Icon::Error; }
+    float w = ImGui::CalcTextSize(status).x + ImGui::GetFrameHeight() + 20 * scale_;
+    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - w);
+    iconInline(icon, col);
+    ImGui::SameLine();
+    ImGui::TextColored(pal::v4(col), "%s", status);
+    if (ImGui::IsItemHovered() && !compiled_.ok && upToDate) ImGui::SetTooltip("%s", compiled_.error.c_str());
+  }
+  ImGui::End();
+}
+
+void Editor::drawStatusBar() {
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  float h = ImGui::GetFrameHeight();
+  if (ImGui::BeginViewportSideBar("##status", vp, ImGuiDir_Down, h, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_MenuBar)) {
+    if (ImGui::BeginMenuBar()) {
+      int dofs = 0, nbody = int(doc_.bodies.size()) - 1;
+      for (const Body& b : doc_.bodies) dofs += doc_.bodyDofs(b.id);
+      double mass = 0;
+      if (compiled_.ok && compiled_.model) mass = compiled_.model->body_subtreemass[0];
+      ImGui::TextDisabled("%s", path_.empty() ? "unsaved project" : path_.c_str());
+      ImGui::SameLine(0, 24);
+      ImGui::Text("%d bodies  %zu geoms  %d DoF  %zu actuators  %zu sensors", nbody, doc_.geoms.size(), dofs,
+                  doc_.actuators.size(), doc_.sensors.size());
+      if (mass > 0) {
+        ImGui::SameLine(0, 24);
+        ImGui::Text("mass %.3g kg", mass);
+      }
+      if (compiled_.ok && compiledRevision_ == editRevision_) {
+        ImGui::SameLine(0, 24);
+        ImGui::TextDisabled("compiled in %.1f ms", compiled_.compileMs);
+      }
+      ImGui::EndMenuBar();
+    }
+  }
+  ImGui::End();
+}
+
+void Editor::drawToasts() {
+  double t = nowSeconds();
+  toasts_.erase(std::remove_if(toasts_.begin(), toasts_.end(), [t](const Toast& x) { return x.until < t; }), toasts_.end());
+  if (toasts_.empty()) return;
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  float y = vp->WorkPos.y + vp->WorkSize.y - 16 * scale_;
+  for (int i = int(toasts_.size()) - 1; i >= 0; --i) {
+    const Toast& to = toasts_[i];
+    ImVec2 ts = ImGui::CalcTextSize(to.text.c_str());
+    ImVec2 pad(14 * scale_, 9 * scale_);
+    ImVec2 size(ts.x + pad.x * 2, ts.y + pad.y * 2);
+    ImVec2 pos(vp->WorkPos.x + vp->WorkSize.x * 0.5f - size.x * 0.5f, y - size.y);
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    float alpha = float(std::min(1.0, (to.until - t) * 3.0));
+    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(32, 35, 43, int(235 * alpha)), 6 * scale_);
+    dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(70, 76, 90, int(255 * alpha)), 6 * scale_);
+    ImU32 c = (to.color & 0x00FFFFFF) | (ImU32(255 * alpha) << 24);
+    dl->AddText(ImVec2(pos.x + pad.x, pos.y + pad.y), c, to.text.c_str());
+    y -= size.y + 6 * scale_;
+  }
+}
+
+void Editor::drawAboutWindow() {
+  if (!showAbout_) return;
+  ImGui::SetNextWindowSize(ImVec2(520 * scale_, 0), ImGuiCond_Appearing);
+  if (ImGui::Begin("About MJForge", &showAbout_, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("MJForge %s", MJFORGE_VERSION);
+    ImGui::TextDisabled("Visual model & environment editor for MuJoCo / MuJoCo Warp");
+    ImGui::Separator();
+    ImGui::Text("MuJoCo library: %s (built against %s)", mj_versionString(), MJFORGE_MUJOCO_VERSION);
+    ImGui::TextWrapped("Exports MJCF that is validated live with the MuJoCo compiler. MuJoCo Warp loads the same "
+                       "XML through mujoco.MjModel.from_xml_path() + mujoco_warp.put_model().");
+    ImGui::Separator();
+    ImGui::TextDisabled("Mouse: right-drag orbit, middle-drag or Shift+right-drag pan, wheel zoom, left-click select.");
+    ImGui::TextDisabled("Keys: W/E/R move/rotate/resize, F frame, Ctrl+D duplicate, Del delete, Ctrl+Z undo.");
+  }
+  ImGui::End();
+}
+
+void Editor::handleShortcuts() {
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.WantTextInput) return;
+  bool ctrl = io.KeyCtrl, shift = io.KeyShift;
+  auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
+  if (ctrl && pressed(ImGuiKey_Z)) { shift ? redo() : undo(); return; }
+  if (ctrl && pressed(ImGuiKey_Y)) { redo(); return; }
+  if (ctrl && pressed(ImGuiKey_S)) { shift ? saveAs() : save(); return; }
+  if (ctrl && pressed(ImGuiKey_O)) { openDialog(); return; }
+  if (ctrl && pressed(ImGuiKey_E)) { exportDialog(); return; }
+  if (ctrl && pressed(ImGuiKey_Q)) { quit_ = true; return; }
+  if (ctrl && pressed(ImGuiKey_D)) { duplicateSelection(); return; }
+  if (ctrl && pressed(ImGuiKey_M)) { mirrorSelection(1); return; }
+  if (ctrl) return;
+  // Single-key shortcuts only when the mouse is not over a text field.
+  if (pressed(ImGuiKey_Delete) || (pressed(ImGuiKey_Backspace) && !io.WantCaptureKeyboard)) deleteSelection();
+  if (pressed(ImGuiKey_Escape)) sel_.clear();
+  if (io.WantCaptureKeyboard && !vp_.hovered) return;
+  if (pressed(ImGuiKey_Q)) gizmoOp_ = GizmoOp::Select;
+  if (pressed(ImGuiKey_W)) gizmoOp_ = GizmoOp::Translate;
+  if (pressed(ImGuiKey_E)) gizmoOp_ = GizmoOp::Rotate;
+  if (pressed(ImGuiKey_R)) gizmoOp_ = GizmoOp::Scale;
+  if (pressed(ImGuiKey_Tab)) gizmoLocal_ = !gizmoLocal_;
+  if (pressed(ImGuiKey_F)) focusSelection();
+  if (pressed(ImGuiKey_Home)) frameAll();
+  if (pressed(ImGuiKey_X)) vp_.xray = !vp_.xray;
+  if (pressed(ImGuiKey_J)) vp_.showJoints = !vp_.showJoints;
+  if (pressed(ImGuiKey_C)) vp_.showCom = !vp_.showCom;
+  if (pressed(ImGuiKey_L)) vp_.showLabels = !vp_.showLabels;
+  if (pressed(ImGuiKey_Keypad1)) { vp_.cam.azimuth = 0; vp_.cam.elevation = 0; }
+  if (pressed(ImGuiKey_Keypad3)) { vp_.cam.azimuth = 90; vp_.cam.elevation = 0; }
+  if (pressed(ImGuiKey_Keypad7)) { vp_.cam.elevation = 89; }
+  if (pressed(ImGuiKey_Keypad5)) vp_.cam.ortho = !vp_.cam.ortho;
+}
+
+// ------------------------------------------------------------------------------------ actions
+
+Id Editor::targetBody() const {
+  Id p = sel_.primary();
+  switch (doc_.kindOf(p)) {
+    case Kind::Body: return p;
+    case Kind::Geom:
+    case Kind::Joint:
+    case Kind::Site:
+    case Kind::Camera:
+    case Kind::Light: return doc_.ownerBody(p);
+    default: return kWorldId;
+  }
+}
+
+void Editor::deleteSelection() {
+  std::vector<Id> ids;
+  for (Id id : sel_.ids) if (id != kWorldId && doc_.exists(id)) ids.push_back(id);
+  if (ids.empty()) return;
+  checkpoint("Delete");
+  deleteElements(doc_, ids);
+  sel_.clear();
+  notify("Deleted " + std::to_string(ids.size()) + " element(s)", pal::kTextDim, 1.5);
+}
+
+void Editor::duplicateSelection() {
+  std::vector<Id> ids;
+  for (Id id : sel_.ids) {
+    Kind k = doc_.kindOf(id);
+    if (k == Kind::Body || k == Kind::Geom || k == Kind::Joint || k == Kind::Site || k == Kind::Camera || k == Kind::Light)
+      if (id != kWorldId) ids.push_back(id);
+  }
+  if (ids.empty()) return;
+  checkpoint("Duplicate");
+  double off = std::max(0.05, vp_.cam.distance * 0.06);
+  auto tops = duplicate(doc_, ids, {off, off, 0});
+  sel_.ids = tops;
+}
+
+void Editor::mirrorSelection(int axis) {
+  std::vector<Id> bodies;
+  for (Id id : sel_.ids) if (doc_.kindOf(id) == Kind::Body && id != kWorldId) bodies.push_back(id);
+  if (bodies.empty()) {
+    notify("Select a body to mirror (its whole subtree is copied)", pal::kWarning);
+    return;
+  }
+  checkpoint("Mirror");
+  std::vector<Id> out;
+  for (Id b : bodies) {
+    Id m = mirrorSubtree(doc_, b, axis);
+    if (m) out.push_back(m);
+  }
+  sel_.ids = out;
+  notify("Mirrored " + std::to_string(out.size()) + " subtree(s)", pal::kOk, 2);
+}
+
+void Editor::focusSelection() {
+  if (sel_.empty()) {
+    frameAll();
+    return;
+  }
+  auto poses = computeBodyPoses(doc_);
+  Aabb box;
+  for (Id id : sel_.ids) {
+    Kind k = doc_.kindOf(id);
+    if (k == Kind::Body && id != kWorldId) box.add(subtreeAabb(doc_, poses, id));
+    if (k == Kind::Geom) {
+      const Geom* g = doc_.geom(id);
+      if (g->type == GeomType::Plane) box.add(elementWorldPose(doc_, poses, id).pos);
+      else box.add(primitiveWorldAabb(g->type, g->size, elementWorldPose(doc_, poses, id)));
+    }
+    if (k == Kind::Joint || k == Kind::Site || k == Kind::Camera || k == Kind::Light) {
+      // Frame the element together with the body it belongs to.
+      Id owner = doc_.ownerBody(id);
+      if (owner != kWorldId && owner != kNoId) box.add(subtreeAabb(doc_, poses, owner));
+      Vec3 p = elementWorldPose(doc_, poses, id).pos;
+      box.add(p - Vec3{0.15, 0.15, 0.15});
+      box.add(p + Vec3{0.15, 0.15, 0.15});
+    }
+  }
+  if (!box.valid()) return;
+  vp_.cam.frame(box.center(), std::max(0.1, length(box.extent()) * 0.5));
+}
+
+void Editor::frameAll() {
+  auto poses = computeBodyPoses(doc_);
+  Aabb box;
+  for (const Body& b : doc_.bodies)
+    if (b.parent == kWorldId) box.add(subtreeAabb(doc_, poses, b.id));
+  for (const Geom& g : doc_.geoms)
+    if (g.body == kWorldId && g.type != GeomType::Plane) box.add(primitiveWorldAabb(g.type, g.size, {g.pos, g.quat}));
+  if (!box.valid()) {
+    vp_.cam.target = {0, 0, 0.3};
+    vp_.cam.distance = 3;
+    return;
+  }
+  vp_.cam.frame(box.center(), std::max(0.4, length(box.extent()) * 0.5));
+}
+
+static Vec3 groundPointUnderCamera(const OrbitCamera& cam) { return {cam.target.x, cam.target.y, 0}; }
+
+Id Editor::addModelRoot() {
+  checkpoint("Add model");
+  Vec3 p = groundPointUnderCamera(vp_.cam);
+  Id b = addBody(doc_, kWorldId, {{p.x, p.y, 0.5}, {}}, "creature", Role::Model);
+  addJoint(doc_, b, JointType::Free, {}, {0, 0, 1}, doc_.body(b)->name + "_root");
+  Id g = addGeom(doc_, b, GeomType::Sphere, {0.1, 0, 0}, {}, doc_.body(b)->name + "_torso");
+  doc_.geom(g)->rgba = {0.92f, 0.55f, 0.20f, 1};
+  sel_.set(b);
+  notify("Added a free-floating model root. Add child bodies and joints to build limbs.", pal::kTextDim, 4);
+  return b;
+}
+
+Id Editor::addBodyTo(Id parent) {
+  checkpoint("Add body");
+  Vec3 offset{};
+  if (parent == kWorldId) {
+    Vec3 p = groundPointUnderCamera(vp_.cam);
+    offset = {p.x, p.y, 0.5};
+  } else {
+    auto poses = computeBodyPoses(doc_);
+    Aabb box = subtreeAabb(doc_, poses, parent);
+    double s = box.valid() ? std::max(0.05, length(box.extent()) * 0.25) : 0.1;
+    offset = {s, 0, 0};
+  }
+  Id b = addBody(doc_, parent, {offset, {}}, parent == kWorldId ? "body" : doc_.body(parent)->name + "_child",
+                 parent == kWorldId ? Role::Model : Role::Model);
+  if (parent != kWorldId) {
+    Id g = addGeom(doc_, b, GeomType::Capsule, {0.03, 0.1, 0}, {}, doc_.body(b)->name + "_geom");
+    setGeomFromTo(*doc_.geom(g), {0, 0, 0}, {0.2, 0, 0});
+    addJoint(doc_, b, JointType::Hinge, {}, {0, 1, 0});
+  } else {
+    addGeom(doc_, b, GeomType::Box, {0.1, 0.1, 0.1}, {});
+  }
+  sel_.set(b);
+  return b;
+}
+
+Id Editor::addGeomTo(Id body, GeomType type) {
+  checkpoint("Add geom");
+  Vec3 size{0.1, 0.1, 0.1};
+  switch (type) {
+    case GeomType::Sphere: size = {0.08, 0, 0}; break;
+    case GeomType::Capsule: size = {0.04, 0.12, 0}; break;
+    case GeomType::Cylinder: size = {0.06, 0.08, 0}; break;
+    case GeomType::Ellipsoid: size = {0.12, 0.08, 0.06}; break;
+    case GeomType::Plane: size = {1, 1, 0.05}; break;
+    default: break;
+  }
+  Pose local;
+  if (body == kWorldId) {
+    Vec3 p = groundPointUnderCamera(vp_.cam);
+    double half = type == GeomType::Sphere ? size.x : (type == GeomType::Plane ? 0 : (type == GeomType::Box ? size.z : size.y + (type == GeomType::Capsule ? size.x : 0)));
+    local.pos = {p.x, p.y, half};
+  }
+  Id g = addGeom(doc_, body, type, size, local);
+  if (body == kWorldId) doc_.geom(g)->rgba = {0.62f, 0.64f, 0.68f, 1};
+  sel_.set(g);
+  return g;
+}
+
+Id Editor::addJointTo(Id body, JointType type) {
+  if (body == kWorldId || !doc_.body(body)) return kNoId;
+  if (type == JointType::Free && doc_.body(body)->parent != kWorldId) {
+    notify("Free joints are only allowed on bodies attached directly to the world", pal::kWarning, 4);
+    return kNoId;
+  }
+  checkpoint("Add joint");
+  Id j = addJoint(doc_, body, type, {}, type == JointType::Slide ? Vec3{1, 0, 0} : Vec3{0, 1, 0});
+  sel_.set(j);
+  return j;
+}
+
+Id Editor::addSiteTo(Id body) {
+  checkpoint("Add site");
+  Pose local;
+  if (body == kWorldId) local.pos = groundPointUnderCamera(vp_.cam) + Vec3{0, 0, 0.1};
+  Id s = addSite(doc_, body, local);
+  sel_.set(s);
+  return s;
+}
+
+Id Editor::addCameraTo(Id body) {
+  checkpoint("Add camera");
+  Pose local;
+  if (body == kWorldId) {
+    // Camera looking at the current view target from the current viewpoint.
+    Vec3 eye = vp_.cam.eye();
+    Vec3 f = normalize(vp_.cam.target - eye);
+    Vec3 r = normalize(cross(f, {0, 0, 1}), {1, 0, 0});
+    Vec3 u = cross(r, f);
+    Mat3 m;
+    for (int i = 0; i < 3; ++i) {
+      m(i, 0) = r[i];
+      m(i, 1) = u[i];
+      m(i, 2) = -f[i];
+    }
+    local = {eye, fromMat3(m)};
+  }
+  Id c = addCamera(doc_, body, local);
+  sel_.set(c);
+  return c;
+}
+
+Id Editor::addLightTo(Id body) {
+  checkpoint("Add light");
+  Vec3 pos = body == kWorldId ? groundPointUnderCamera(vp_.cam) + Vec3{0, 0, 3} : Vec3{0, 0, 0.3};
+  Id l = addLight(doc_, body, pos, {0, 0, -1});
+  sel_.set(l);
+  return l;
+}
+
+void Editor::addActuatorsFor(const std::vector<Id>& joints, ActuatorType type) {
+  if (joints.empty()) return;
+  checkpoint("Add actuators");
+  std::vector<Id> made;
+  for (Id j : joints) {
+    const Joint* jj = doc_.joint(j);
+    if (!jj || jj->type == JointType::Free) continue;
+    made.push_back(addActuator(doc_, type, j));
+  }
+  if (!made.empty()) sel_.ids = made;
+  notify("Added " + std::to_string(made.size()) + " " + toXml(type) + " actuator(s)", pal::kOk, 2);
+}
+
+Id Editor::addEnvironmentProp(GeomType type, bool dynamic) {
+  checkpoint("Add prop");
+  Vec3 p = groundPointUnderCamera(vp_.cam);
+  Vec3 size = type == GeomType::Box ? Vec3{0.25, 0.25, 0.25}
+            : type == GeomType::Sphere ? Vec3{0.15, 0, 0}
+                                        : Vec3{0.2, 0.3, 0};
+  double half = type == GeomType::Box ? size.z : (type == GeomType::Sphere ? size.x : size.y);
+  if (!dynamic) {
+    Id g = addGeom(doc_, kWorldId, type, size, {{p.x, p.y, half}, {}}, "obstacle");
+    doc_.geom(g)->rgba = {0.55f, 0.58f, 0.62f, 1};
+    sel_.set(g);
+    return g;
+  }
+  Id b = addBody(doc_, kWorldId, {{p.x, p.y, half + 0.01}, {}}, type == GeomType::Box ? "crate" : "ball", Role::Environment);
+  addJoint(doc_, b, JointType::Free, {}, {0, 0, 1}, doc_.body(b)->name + "_free");
+  Id g = addGeom(doc_, b, type, size, {});
+  doc_.geom(g)->rgba = type == GeomType::Box ? Color{0.62f, 0.45f, 0.28f, 1} : Color{0.3f, 0.55f, 0.85f, 1};
+  doc_.geom(g)->density = 300;
+  sel_.set(b);
+  return b;
 }
 
 }  // namespace mjf

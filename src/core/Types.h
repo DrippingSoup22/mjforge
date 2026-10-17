@@ -131,7 +131,7 @@ inline constexpr EnumEntry<FrameObj> kFrameObjs[] = {
 enum class Integrator : uint8_t { Euler = 0, RK4 = 1, Implicit = 2, ImplicitFast = 3 };
 inline constexpr EnumEntry<Integrator> kIntegrators[] = {
     {Integrator::Euler, "Euler", "Euler (semi-implicit)"}, {Integrator::RK4, "RK4", "Runge-Kutta 4"},
-    {Integrator::Implicit, "implicit", "Implicit"}, {Integrator::ImplicitFast, "implicitfast", "Implicit fast (recommended)"}};
+    {Integrator::Implicit, "implicit", "Implicit"}, {Integrator::ImplicitFast, "implicitfast", "Implicit fast"}};
 
 enum class Cone : uint8_t { Pyramidal = 0, Elliptic = 1 };
 inline constexpr EnumEntry<Cone> kCones[] = {{Cone::Pyramidal, "pyramidal", "Pyramidal"}, {Cone::Elliptic, "elliptic", "Elliptic"}};

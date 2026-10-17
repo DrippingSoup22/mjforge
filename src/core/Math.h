@@ -216,11 +216,57 @@ inline Vec3 toEulerXYZ(const Quat& q) {
   if (std::fabs(sb) < 0.999999) {
     e.x = std::atan2(-r(1, 2), r(2, 2));
     e.z = std::atan2(-r(0, 1), r(0, 0));
+    // Every rotation has two XYZ solutions; prefer the one with the smallest angles.
+    auto wrap = [](double a) { return a > kPi ? a - 2 * kPi : (a < -kPi ? a + 2 * kPi : a); };
+    Vec3 alt{wrap(e.x + kPi), wrap(kPi - e.y), wrap(e.z + kPi)};
+    if (std::fabs(alt.x) + std::fabs(alt.y) + std::fabs(alt.z) < std::fabs(e.x) + std::fabs(e.y) + std::fabs(e.z) - 1e-9)
+      e = alt;
   } else {  // gimbal lock: put everything into x
     e.x = std::atan2(r(2, 1), r(1, 1));
     e.z = 0;
   }
   return e;
+}
+
+// Eigen-decomposition of a symmetric 3x3 matrix by Jacobi rotations. The columns of `vecs` are
+// the eigenvectors (a proper rotation), `vals` the corresponding eigenvalues.
+inline void eigSym3(const Mat3& A, Vec3* vals, Mat3* vecs) {
+  Mat3 a = A, v;
+  for (int sweep = 0; sweep < 50; ++sweep) {
+    double off = a(0, 1) * a(0, 1) + a(0, 2) * a(0, 2) + a(1, 2) * a(1, 2);
+    if (off < 1e-30) break;
+    for (int p = 0; p < 2; ++p) {
+      for (int q = p + 1; q < 3; ++q) {
+        double apq = a(p, q);
+        if (std::fabs(apq) < 1e-300) continue;
+        double theta = (a(q, q) - a(p, p)) / (2.0 * apq);
+        double t = (theta >= 0 ? 1.0 : -1.0) / (std::fabs(theta) + std::sqrt(theta * theta + 1.0));
+        double c = 1.0 / std::sqrt(t * t + 1.0), s = t * c;
+        // A <- J^T A J with J(p,p)=J(q,q)=c, J(p,q)=s, J(q,p)=-s.
+        for (int k = 0; k < 3; ++k) {
+          double akp = a(k, p), akq = a(k, q);
+          a(k, p) = c * akp - s * akq;
+          a(k, q) = s * akp + c * akq;
+        }
+        for (int k = 0; k < 3; ++k) {
+          double apk = a(p, k), aqk = a(q, k);
+          a(p, k) = c * apk - s * aqk;
+          a(q, k) = s * apk + c * aqk;
+        }
+        for (int k = 0; k < 3; ++k) {
+          double vkp = v(k, p), vkq = v(k, q);
+          v(k, p) = c * vkp - s * vkq;
+          v(k, q) = s * vkp + c * vkq;
+        }
+      }
+    }
+  }
+  // Make the eigenvector frame right-handed.
+  Vec3 c0 = v.col(0), c1 = v.col(1), c2 = v.col(2);
+  if (dot(cross(c0, c1), c2) < 0)
+    for (int k = 0; k < 3; ++k) v(k, 2) = -v(k, 2);
+  if (vals) *vals = {a(0, 0), a(1, 1), a(2, 2)};
+  if (vecs) *vecs = v;
 }
 
 // Rigid transform (position + orientation).
