@@ -340,6 +340,7 @@ class Builder {
 
   void joints() {
     jointIds_.assign(m_->njnt, kNoId);
+    int nonlinear = 0;
     for (int j = 0; j < m_->njnt; ++j) {
       Joint x;
       x.id = doc_.newId();
@@ -368,12 +369,16 @@ class Builder {
       x.actuatorfrcrange = v2(m_->jnt_actfrcrange + 2 * j);
       x.actuatorgravcomp = m_->jnt_actgravcomp[j];
       x.group = m_->jnt_group[j];
+      for (int k = 0; k < mjNPOLY; ++k)
+        nonlinear += m_->jnt_stiffnesspoly[mjNPOLY * j + k] != 0 || m_->dof_dampingpoly[mjNPOLY * da + k] != 0;
       jointIds_[j] = x.id;
       doc_.joints.push_back(x);
     }
+    if (nonlinear) note(std::to_string(nonlinear) + " nonlinear joint stiffness/damping term(s) were dropped (linear terms kept)");
   }
 
   void geoms() {
+    int adhesive = 0;
     std::vector<double> density(m_->ngeom, 1000.0), mass(m_->ngeom, -1.0);
     std::vector<uint8_t> shell(m_->ngeom, 0);
     forEachSpec(spec_, mjOBJ_GEOM, [&](mjsElement* el, int id) {
@@ -417,6 +422,7 @@ class Builder {
       x.solimp = v5(m_->geom_solimp + mjNIMP * g);
       x.margin = m_->geom_margin[g];
       x.gap = m_->geom_gap[g];
+      adhesive += m_->geom_adhesion[g] != 0;
       x.density = density[g];
       x.mass = mass[g];
       x.shellinertia = shell[g];
@@ -431,6 +437,7 @@ class Builder {
     if (rep_.approximatedGeoms > 0)
       note(std::to_string(rep_.approximatedGeoms) +
            " SDF geom(s) were replaced by their bounding boxes (bodies keep their exact mass and inertia)");
+    if (adhesive) note(std::to_string(adhesive) + " geom(s) with contact adhesion: adhesion was not imported");
   }
 
   Id meshAsset(int mesh) {
