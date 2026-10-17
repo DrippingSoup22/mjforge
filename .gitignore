@@ -1,0 +1,8 @@
+/build*/
+/out/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+imgui.ini
+__pycache__/

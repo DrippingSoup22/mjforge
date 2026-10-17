@@ -1,0 +1,57 @@
+// Editing operations on a Document. All functions keep references consistent and call touch().
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "core/Document.h"
+
+namespace mjf {
+
+// ----- creation -----
+Id addBody(Document& doc, Id parent, const Pose& local, const std::string& name = "body", Role role = Role::Model);
+Id addGeom(Document& doc, Id body, GeomType type, const Vec3& size, const Pose& local, const std::string& name = "");
+Id addJoint(Document& doc, Id body, JointType type, const Vec3& pos = {}, const Vec3& axis = {0, 0, 1},
+            const std::string& name = "");
+Id addSite(Document& doc, Id body, const Pose& local, const std::string& name = "");
+Id addCamera(Document& doc, Id body, const Pose& local, const std::string& name = "");
+Id addLight(Document& doc, Id body, const Vec3& pos, const Vec3& dir, const std::string& name = "");
+Id addActuator(Document& doc, ActuatorType type, Id joint, const std::string& name = "");
+Id addSensor(Document& doc, SensorType type, Id obj, const std::string& name = "");
+Id addExclude(Document& doc, Id body1, Id body2);
+Id addTexture(Document& doc, const Texture& t);
+Id addMaterial(Document& doc, const Material& m);
+
+// Sets type-specific defaults when an actuator changes type (kp/kv/ranges).
+void setActuatorType(Document& doc, Actuator& a, ActuatorType type);
+
+// Capsule / cylinder / box helpers: describe the geom by its two axis endpoints (body frame).
+void geomEndpoints(const Geom& g, Vec3* a, Vec3* b);
+void setGeomFromTo(Geom& g, const Vec3& a, const Vec3& b);
+
+// ----- deletion -----
+// Deletes the given elements. Bodies take their subtree with them; actuators, sensors and
+// exclusions referencing deleted elements are removed too. The world cannot be deleted.
+void deleteElements(Document& doc, const std::vector<Id>& ids);
+
+// ----- hierarchy -----
+bool canReparent(const Document& doc, Id body, Id newParent);
+bool reparentBody(Document& doc, Id body, Id newParent, bool keepWorldPose = true);
+// Moves a geom/joint/site/camera/light to another body.
+bool moveToBody(Document& doc, Id element, Id newBody, bool keepWorldPose = true);
+// Moves an element one step up (-1) or down (+1) among its siblings of the same kind.
+bool moveSibling(Document& doc, Id element, int direction);
+
+// ----- copy -----
+// Duplicates elements (bodies with their subtree). Actuators, sensors and exclusions that only
+// reference copied elements are duplicated as well. Returns the new top-level IDs.
+std::vector<Id> duplicate(Document& doc, const std::vector<Id>& ids, const Vec3& worldOffset);
+
+// Names: "left_leg" <-> "right_leg", "l_hip" <-> "r_hip", "hip_L" <-> "hip_R", ...
+std::string mirrorName(const std::string& name, bool* changed = nullptr);
+// Mirrors a body subtree across the plane through the parent's origin with the given normal
+// axis (0 = x, 1 = y, 2 = z) in the parent's frame. Hinge axes are mirrored as pseudo-vectors so
+// equal joint angles produce mirror-symmetric motion. Returns the new body ID.
+Id mirrorSubtree(Document& doc, Id body, int axis);
+
+}  // namespace mjf
