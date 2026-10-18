@@ -479,9 +479,13 @@ void Editor::viewportInput() {
     if (ImGui::IsMouseDown(b)) {
       if (b == 0 && simDrag_.active) simMouseDrag(ray);
       ImVec2 d = io.MouseDelta;
-      bool pan = b == 2 || (b == 1 && io.KeyShift);
-      if (b == 1 && !pan) vp_.cam.orbit(-d.x * 0.35, d.y * 0.35);
-      if (pan) vp_.cam.pan(d.x, d.y, vp_.h);
+      // Left or right drag orbits, Shift+drag or the middle button pans (trackpads have only the
+      // left button). A left press only becomes a drag once it moves, so clicks still select;
+      // it never moves the camera while it drags a gizmo or pushes a body in the simulation.
+      bool camera = b != 0 || (vp_.dragMoved && !simDrag_.active && !vp_.gizmoUsing && !ImGuizmo::IsUsingAny());
+      bool pan = b == 2 || io.KeyShift;
+      if (camera && pan) vp_.cam.pan(d.x, d.y, vp_.h);
+      else if (camera) vp_.cam.orbit(-d.x * 0.35, d.y * 0.35);
     } else {
       // Released.
       if (simDrag_.active) {
@@ -742,7 +746,7 @@ void Editor::drawViewportOverlayUI() {
   } else if (sim_.active()) {
     hint = "Left-drag a body: push it   Space: pause / resume   Shift+Space: stop   Ctrl+R: reset";
   } else {
-    hint = "Right-drag: orbit   Middle/Shift+right-drag: pan   Wheel: zoom   Click: select   F: frame";
+    hint = "Drag: orbit   Shift+drag or middle-drag: pan   Wheel: zoom   Click: select   F: frame";
   }
   ImVec2 ts = ImGui::CalcTextSize(hint.c_str());
   ImVec2 hp(vp_.x + 10, vp_.y + vp_.h - ts.y - 10);

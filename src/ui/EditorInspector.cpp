@@ -1490,7 +1490,7 @@ void Editor::inspectWorld() {
                      "(timestep, integrator, solver, gravity...) are in the Scene panel.");
   ImGui::Spacing();
   ImGui::TextDisabled("Tips");
-  ImGui::BulletText("Right-drag to orbit, middle-drag to pan, wheel to zoom.");
+  ImGui::BulletText("Drag to orbit, Shift+drag or middle-drag to pan, wheel to zoom.");
   ImGui::BulletText("W / E / R: move, rotate, resize. Hold Ctrl to toggle snapping.");
   ImGui::BulletText("Ctrl+D duplicates, Ctrl+M mirrors a limb to the other side.");
   ImGui::BulletText("Alt+click picks geoms instead of bodies (or vice versa).");

@@ -12,8 +12,10 @@ STARTING IT
            (any recent Ubuntu, Fedora, Debian...).
 
 FIRST STEPS
-  The editor opens with a quadruped. File > New starts from another template; File > Open loads a
-  project (.mjforge) or an MJCF model (.xml). The examples folder has five ready-made scenes.
+  The editor opens with a quadruped. In the 3D view, drag to orbit, Shift+drag (or middle-drag)
+  to pan, scroll to zoom, click to select; F frames the selection. File > New starts from
+  another template; File > Open loads a project (.mjforge) or an MJCF model (.xml). The
+  examples folder has five ready-made scenes.
   Press Space to simulate. The Issues panel explains problems and offers one-click fixes.
   More: README.md and docs/USER_GUIDE.md.
 

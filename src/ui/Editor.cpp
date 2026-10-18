@@ -990,7 +990,7 @@ void Editor::drawAboutWindow() {
     ImGui::TextWrapped("Exports MJCF that is validated live with the MuJoCo compiler. MuJoCo Warp loads the same "
                        "XML through mujoco.MjModel.from_xml_path() + mujoco_warp.put_model().");
     ImGui::Separator();
-    ImGui::TextDisabled("Mouse: right-drag orbit, middle-drag or Shift+right-drag pan, wheel zoom, left-click select.");
+    ImGui::TextDisabled("Mouse: drag to orbit, Shift+drag or middle-drag to pan, wheel to zoom, click to select.");
     ImGui::TextDisabled("Keys: W/E/R move/rotate/resize, F frame, Ctrl+D duplicate, Del delete, Ctrl+Z undo.");
     ImGui::TextDisabled("Simulation: Space play/pause, Shift+Space stop, Ctrl+R reset, drag a body to push it.");
   }
@@ -1016,10 +1016,11 @@ void Editor::drawShortcutsWindow() {
     ImGui::SeparatorText("Mouse");
     table("##mouse", {{"Left click", "select (Shift: add, Ctrl: toggle, Alt: geoms instead of bodies)"},
                       {"Double click", "frame the clicked element"},
-                      {"Right drag / click", "orbit / context menu"},
-                      {"Middle drag, Shift+right drag", "pan"},
-                      {"Wheel", "zoom toward the cursor"},
-                      {"Left drag (simulating)", "push the body under the cursor"}});
+                      {"Left or right drag", "orbit"},
+                      {"Shift+drag, middle drag", "pan"},
+                      {"Right click", "context menu"},
+                      {"Wheel, two-finger scroll", "zoom toward the cursor"},
+                      {"Left drag on a body (simulating)", "push it"}});
     ImGui::SeparatorText("Editing");
     table("##edit", {{"Q  W  E  R", "select, move, rotate, resize"},
                      {"Tab", "gizmo in world / local frame (hold Ctrl to invert snapping)"},

@@ -131,10 +131,10 @@ walks through every panel.
 | Mouse | |
 |---|---|
 | Left click / Shift / Ctrl | select / add / toggle (Alt picks geoms instead of bodies) |
-| Right drag | orbit; right click: context menu |
-| Middle drag, Shift + right drag | pan |
-| Wheel | zoom toward the cursor |
-| Left drag while simulating | push the body under the cursor |
+| Left or right drag | orbit (right click: context menu) |
+| Shift + drag, middle drag | pan |
+| Wheel, two-finger scroll | zoom toward the cursor |
+| Left drag on a body while simulating | push it |
 
 | Keys | |
 |---|---|

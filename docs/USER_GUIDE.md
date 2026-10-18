@@ -251,10 +251,10 @@ Windows, `~/Library/Application Support/mjforge` on macOS).
 |---|---|
 | Left click / Shift / Ctrl | select / add / toggle (Alt picks geoms instead of bodies) |
 | Double click | frame the clicked element |
-| Right drag / right click | orbit / context menu |
-| Middle drag, Shift + right drag | pan |
-| Wheel | zoom toward the cursor |
-| Left drag while simulating | push a body |
+| Left or right drag | orbit (right click: context menu) |
+| Shift + drag, middle drag | pan |
+| Wheel, two-finger scroll | zoom toward the cursor |
+| Left drag on a body while simulating | push it |
 
 | Keys | |
 |---|---|
